@@ -1,15 +1,16 @@
 name: ironcrown_fw01
 description: |
   REAL capture — Challenge Lab 3 "Iron Crown", perimeter host FW01
-  (192.168.239.10), captured via `yhwach snapshot`. nginx PHP portal on 80/443
-  and Jenkins 2.555.1 (Jetty) on 8080. Both are traditional targets; NO AI
-  surface is reachable externally.
+  (192.168.239.10), captured via `yhwach snapshot`. nginx PHP portal on 80/443,
+  Jenkins 2.555.1 (Jetty) on 8080, and an Aldinervaide Careers site on 8081 with
+  a resume-upload form.
 
-  Regression value: an earlier chatbot probe misclassified the Jenkins CSRF 403
-  as a bearer chatbot. This fixture asserts the planner emits NO AI hypotheses
-  for a surfaceless perimeter host — the false positive must never come back at
-  the planning layer. (Traditional-host coverage — flagging Jenkins as a foothold
-  — is Phase 2, tracked separately.)
+  Self-learning capture: the careers/upload site is a candidate INDIRECT
+  prompt-injection vector (a poisoned resume reaches an AI screener — the lab's
+  "AI-powered internal tooling"). Yhwach classifies a document-intake form as an
+  AI-tier surface (web_upload -> doc_intake_indirect_injection), so it now ranks
+  ABOVE the Jenkins foothold by the AI-first doctrine. The earlier Jenkins-as-
+  chatbot false positive must still never return.
 world_model:
   engagement:
     lab: ironcrown_fw01
@@ -21,20 +22,22 @@ world_model:
         - {port: 80, proto: tcp, product: nginx, version: 1.28.3}
         - {port: 443, proto: tcp, product: nginx, version: 1.28.3}
         - {port: 8080, proto: tcp, product: Jetty, version: 12.1.6}
+        - {port: 8081, proto: tcp, product: nginx, version: 1.28.3}
       surfaces:
         - {kind: web, auth: unknown, service_port: 80, meta: {title: Aldinervaide Corp Portal}}
         - {kind: web, auth: unknown, service_port: 443, meta: {}}
         - {kind: jenkins, auth: unknown, service_port: 8080, meta: {version: 2.555.1}}
+        - {kind: web_upload, auth: unknown, service_port: 8081, meta: {title: Aldinervaide Careers}}
 expected:
-  # Phase 2: the perimeter foothold is now reasoned about. Jenkins script-console
-  # RCE is the top move; the portal is a secondary recon lead. No AI hypotheses —
-  # the Jenkins-as-chatbot false positive must never return.
-  top_hypothesis: {playbook_rule_id: jenkins_script_console_rce}
+  # AI-first doctrine: the careers document-intake (possible AI screening) is the
+  # top move, above the Jenkins RCE foothold. No Jenkins-as-chatbot false positive.
+  autonomy: propose
+  top_hypothesis: {playbook_rule_id: doc_intake_indirect_injection}
   must_include_hypotheses:
+    - doc_intake_indirect_injection
     - jenkins_script_console_rce
     - web_portal_recon
   must_not_include:
     - chatbot_direct_injection_probe
     - chatbot_session_enumeration
-    - rag_upload_discovery
     - ollama_unauth_api

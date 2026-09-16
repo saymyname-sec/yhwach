@@ -122,6 +122,17 @@ ACTION_REGISTRY: dict[str, Action] = {
         ["bash $OSAI/09*/Scripts/aws_ml_enum.sh"], runnable=False,
         note="Run after AWS creds are obtained."),
 
+    # --- AI: document-intake indirect injection (careers/resume screening) ---
+    "craft_indirect_injection_doc": _a("craft_indirect_injection_doc",
+        ["# Craft a resume/CV embedding an indirect prompt injection, then submit it at $URL",
+         "python3 $OSAI/05*/Scripts/zero_width_obfuscator.py  # hide the injection in the document"],
+        risk="propose", runnable=False,
+        note="If submissions are AI-screened, the injected doc executes when the agent reads it (LLM01/LLM04)."),
+    "probe_upload_processing": _a("probe_upload_processing",
+        ["# Submit a canary document with a unique marker / OOB callback and watch $URL for AI processing"],
+        risk="propose", runnable=False,
+        note="Confirms whether uploads are read by an AI agent before crafting the real injection."),
+
     # --- Traditional: jenkins ---
     "jenkins_auth_check": _a("jenkins_auth_check",
         ["curl -sk $URL/api/json?pretty=true", "curl -sk -o /dev/null -w '%{http_code}\\n' $URL/script"],

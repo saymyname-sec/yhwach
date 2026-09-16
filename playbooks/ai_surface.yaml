@@ -137,6 +137,21 @@
   source: 'osai/06 . Attacking Embeddings'
   authorized_only: true
 
+- id: doc_intake_indirect_injection
+  when: { surface: web_upload }
+  class: ai                       # doc-screening is often AI -> hit the AI angle first
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: craft_indirect_injection_doc
+    - action: probe_upload_processing
+  maps: [LLM01, LLM04]
+  points: 15
+  risk: propose
+  routes: /osai-rag-attack
+  source: 'osai/05 . indirect injection via document upload (careers/resume screening)'
+  authorized_only: true
+
 # --- Forward-compatible rule: uses a `when` key the Phase 1.3 matcher does not
 # --- yet support (findings_include). It stays here as valid config and starts
 # --- matching once finding-based conditions land. The matcher reports it as

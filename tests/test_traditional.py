@@ -95,3 +95,23 @@ def test_detect_traditional_web_fingerprint_jenkins() -> None:
 
 def test_detect_traditional_none_for_unknown_nonweb_port() -> None:
     assert detect_traditional(FakeSession({}), "10.0.0.1", 24601, "weird") is None
+
+
+# --- document-intake detection (self-learning from Iron Crown 8081 careers site) ---
+
+def test_web_app_detects_careers_upload_as_web_upload() -> None:
+    body = ("<html><head><title>Open Roles · Aldinervaide Careers</title></head>"
+            "<body><h1>Careers</h1><form enctype='multipart/form-data'>"
+            "<input type='file' name='cv'></form></body></html>")
+    session = FakeSession({("GET", "/"): FakeResponse(
+        200, headers={"Content-Type": "text/html; charset=utf-8"}, text=body)})
+    res = probe_web_app(session, "10.0.0.1", 8081)
+    assert res is not None
+    assert res.kind == "web_upload"
+
+
+def test_web_app_plain_html_stays_web() -> None:
+    session = FakeSession({("GET", "/"): FakeResponse(
+        200, headers={"Content-Type": "text/html"}, text="<html><title>Home</title></html>")})
+    res = probe_web_app(session, "10.0.0.1", 80)
+    assert res is not None and res.kind == "web"

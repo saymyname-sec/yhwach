@@ -90,8 +90,17 @@ def probe_gitlab(session, host, port, *, timeout=DEFAULT_TIMEOUT) -> TradResult 
     return None
 
 
+# Signals that a page is a document-intake form (resume/CV/application upload).
+# In an OSAI context with AI-powered internal tooling, such a form is a candidate
+# indirect prompt-injection vector: a poisoned document reaches an AI screener.
+_DOC_INTAKE_SIGNALS = (
+    'type="file"', "multipart/form-data", "careers", "apply now", "open roles",
+    "upload your", "resume", "cv upload", "application form", "job application",
+)
+
+
 def probe_web_app(session, host, port, *, timeout=DEFAULT_TIMEOUT) -> TradResult | None:
-    """Generic web-portal fallback: an HTML app that isn't a known product."""
+    """Generic web app, with document-intake detection promoted to its own kind."""
     for scheme in ("http", "https"):
         try:
             r = session.get(f"{scheme}://{host}:{port}/", timeout=timeout)
@@ -99,11 +108,19 @@ def probe_web_app(session, host, port, *, timeout=DEFAULT_TIMEOUT) -> TradResult
             continue
         if r.status_code == 404 or r.status_code >= 500:
             continue
-        if "html" in _headers_lower(r).get("content-type", ""):
+        if "html" not in _headers_lower(r).get("content-type", ""):
+            continue
+        body = getattr(r, "text", "") or ""
+        title = _extract_title(body)
+        low = body.lower()
+        if any(sig in low for sig in _DOC_INTAKE_SIGNALS):
             return TradResult(
-                kind="web",
-                meta={"scheme": scheme, "title": _extract_title(getattr(r, "text", ""))},
+                kind="web_upload",
+                meta={"scheme": scheme, "title": title,
+                      "hint": "document-intake form — candidate indirect-injection "
+                              "vector if submissions are AI-screened"},
             )
+        return TradResult(kind="web", meta={"scheme": scheme, "title": title})
     return None
 
 

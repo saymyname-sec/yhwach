@@ -1,40 +1,48 @@
 # Actions
 
-Actions are the executable primitives that playbook rules reference by id. Each action is one of:
+Actions are the executable primitives that playbook rules reference by id (a rule's `emits:`
+list). There are two kinds:
 
-- **A shell/Python subprocess** — Yhwach spawns it, captures stdout, feeds it to the appropriate parser.
-- **An MCP tool call** — Yhwach dispatches via HexStrike MCP, msf MCP, Obsidian MCP.
-- **An LLM call** — CRAFT or INTERPRET, per `persona/contract.md`.
+1. **Inline registry actions** — the common case. Defined in
+   [`yhwach/actions.py`](../yhwach/actions.py) as entries in `ACTION_REGISTRY` (95 today).
+   Each maps an id to one or more command templates.
+2. **Standalone exploit scripts** — heavier, self-contained programs kept in this directory
+   (e.g. [`activemq_openwire_rce.py`](activemq_openwire_rce.py) for CVE-2023-46604). These carry
+   a header block and are run by the operator, not auto-executed.
 
-## Existing OSAI scripts we adopt
+List the registry from the CLI:
 
-The following scripts (kept in Kapi's OSAI repo, referenced here as first-class actions in Phase 1) become Yhwach actions when the AI-surface slice lands:
+```bash
+yhwach actions                    # all
+yhwach actions --risk read_only   # filter by tier
+```
 
-- `session_enum_osai.py` -> `enumerate_chatbot_sessions`  (LLM01/02)
-- `MITM_spoofer_stealthy` / `MITM_Spoofer_credential_stealer.py` -> `a2a_mitm`  (LLM01, A2A)
-- `poison_injector.py` -> `forge_a2a_message`  (LLM01)
-- `spoof_server.py` -> `agent_card_dns_spoof`  (A2A)
-- `create_collision_document.py` -> `rag_collision_upload`  (LLM04)
-- `zero_width_obfuscator.py` -> `rag_hide_injection`  (LLM01)
-- `inspect_embeddings.py` -> `vectordb_inspect`  (LLM08)
-- `inversion_attack.py` -> `embedding_inversion`  (LLM08)
-- `weaviate_export.py` -> `vectordb_export`  (LLM08/02)
-- `poison_template.py` -> `mcp_template_poison`  (LLM06)
-- `sympify_payload.py` -> `mcp_sympify_rce`  (LLM06)
-- `zwc_encode.py` -> `zero_width_encode`  (LLM01)
-- `tokenizer_swap.py` -> `tokenizer_backdoor`  (LLM03)
-- `train_poison.py` -> `training_data_poison`  (LLM04)
-- `aws_ml_enum.sh` -> `enumerate_aws_ml`  (infra)
-- `k8s_ml_enum.sh` -> `enumerate_k8s_ml`  (infra)
-- `agent_port_discovery.sh` / `model_fingerprint.sh` -> `ai_surface_recon`  (LLM02)
+## Inline registry actions
 
-Payload builders (not actions themselves, invoked by other actions):
+Each entry is an `Action(id, commands, risk, runnable, outputs, note)`:
 
-- `loader_windows.py`, `loader_linux.py`, `xor_encrypt.py`, `revgen.sh`, `gen_cs_shell.sh`, `injectRemote.ps1`
+- **`commands`** use `string.Template` `$VARS` (not `str.format`, so JSON payload braces need no
+  escaping). Context vars: `$IP $PORT $SCHEME $URL $ENDPOINT $MODEL`, plus `$OSAI` for the
+  operator's OSAI script dir.
+- **`risk`** — `read_only` | `propose` | `destructive`.
+- **`runnable`** — `False` means render-only even if read-only (needs external files/wordlists/
+  setup).
+- **`outputs`** — parser hint (`nmap` | `http` | `winpeas` | `linpeas` | `raw`) for finding
+  extraction.
 
-## Adding an action
+### Execution policy — Yhwach proposes, the operator executes
 
-Actions live in `actions/`. Each file has a header block Yhwach parses on startup:
+- `read_only` **and** `runnable` → Yhwach may run it under `yhwach run --task N --go`; output is
+  captured to `loot/` and passed to deterministic finding extraction.
+- `propose` / `destructive`, or anything render-only → **printed only**. The operator runs it
+  with judgment.
+
+Adding an inline action = adding an entry to `ACTION_REGISTRY`, keyed by the id the playbook rule
+emits. Every action id referenced by `playbooks/*.yaml` must have an entry.
+
+## Standalone exploit scripts
+
+Scripts in this directory carry a header block so their provenance and contract are explicit:
 
 ```python
 # yhwach-action: <id>
@@ -43,8 +51,12 @@ Actions live in `actions/`. Each file has a header block Yhwach parses on startu
 # authorized_only: true
 ```
 
-Yhwach:
+These are exploitation-tier and self-contained; the operator invokes them directly (they are not
+run by `yhwach run`). `activemq_openwire_rce.py` is the reference example — self-learned from the
+Iron Crown challenge lab, with its OPSEC/routing caveats documented in the module docstring.
 
-- Refuses to run an action file that lacks these headers.
-- Sandboxes the subprocess (per-lab CWD, timeout, stdout/stderr captured to `~/osai/current/loot/`).
-- Never runs an action whose enclosing rule has `authorized_only: false` — such rules cannot exist in this repo (CI check).
+## Authorization
+
+Every action serves rules that are `authorized_only: true`. Do not add actions, payloads, or
+example targets that reference production systems or unauthorized engagements. See
+[../AUTHORIZATION.md](../AUTHORIZATION.md).

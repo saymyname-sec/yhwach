@@ -48,10 +48,12 @@ expected:
 ## The async lab loop — this is the primary test source
 
 1. Run a lab on Kali with Yhwach driving.
-2. Every `yhwach next` call is logged to `event` (input hash + output).
-3. When you disagree with the pick, run `yhwach override --reason <text>`. The override is recorded.
-4. Post-lab: dump events + DB snapshot to `tests/fixtures/labs/<labname>-<host>.yaml`. Overrides become the `expected.top_hypothesis`.
-5. Design pass on Windows: fix rules until the fixture passes without the override.
+2. Engine actions are logged to the `event` table.
+3. Post-lab: `yhwach snapshot --lab <name> --out tests/fixtures/labs/<labname>/<host>.yaml`
+   dumps the world model as a fixture with a blank `expected:` block.
+4. Fill in `expected.top_hypothesis` with the pick you judge correct (your correction, if the
+   engine's live pick was wrong).
+5. Design pass on Windows: fix rules until the fixture passes (`yhwach selftest` / `pytest`).
 
 Every wrong call becomes a permanent regression test. The corpus grows monotonically.
 

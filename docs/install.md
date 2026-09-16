@@ -10,7 +10,9 @@ Yhwach targets Kali Linux with the standard OSAI-exam tooling stack.
 - `jq`
 - **HexStrike** MCP server: [hexstrike-ai/hexstrike-ai](https://github.com/hexstrike-ai/hexstrike-ai) — bound to `127.0.0.1:8888`
 - **Metasploit** + `msfmcpd` MCP server
-- **Obsidian Local REST API** plugin reachable from Kali (VMware host or LAN)
+- **Obsidian** + the **Local REST API** plugin, reachable from Kali (VMware host or LAN), plus an
+  **Obsidian MCP** registered in your host CLI — the engagement notebook is the vault, written by
+  the operator via that MCP (see [../persona/notebook.md](../persona/notebook.md))
 - **Local knowledge base** (see below)
 - Optional: **BloodHound MCP** for AD reasoning
 
@@ -22,14 +24,18 @@ No API key required. Yhwach's operator persona ships with the engine; the host C
 git clone https://github.com/saymyname-sec/yhwach ~/yhwach
 cd ~/yhwach
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
+pip install -e ".[dev]"      # add ,mcp -> ".[dev,mcp]" to run `yhwach mcp`
 ```
+
+Optional extras: `dev` (pytest / ruff / black), `mcp` (the `mcp` SDK for `yhwach mcp`).
 
 Verify:
 
 ```bash
 yhwach --version
-yhwach --check-env       # prints tool discovery report + persona hash
+yhwach persona           # prints the operator persona in effect + its hash
+pytest -q                # 170 tests
+yhwach selftest          # golden fixtures
 ```
 
 ## Local knowledge base
@@ -64,9 +70,14 @@ Yhwach reads and writes here:
   state/
     yhwach.db                         # the world model — SQLite; one per lab
     scope.txt                         # source of truth for scope
-  loot/                               # ingested tool output
+  recon/                              # raw scan output (e.g. HexStrike nmap XML)
+  loot/                               # captured action output (yhwach run --go)
   screenshots/                        # bound to `proof` rows
 ~/yhwach/                             # this repo, checked out
 ```
+
+The `recon/` and `loot/` directories are derived relative to the DB path, so a non-canonical
+`--db` location still keeps its artifacts beside it. The engagement notebook is **not** on Kali
+disk — it lives in the Obsidian vault, written via the Obsidian MCP.
 
 State survives `/clear`; context does not.

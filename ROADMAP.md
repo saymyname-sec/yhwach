@@ -2,23 +2,33 @@
 
 ## Status
 
-**Done and validated on a live challenge lab (127 tests):**
-- ✅ World model (SQLite) + nmap ingestion + host FSM (`undiscovered → scanned`)
+**Done and validated on a live challenge lab — Iron Crown (170 tests):**
+- ✅ World model (SQLite, 11 tables) + nmap ingestion + host FSM
 - ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
-- ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web)
-- ✅ Deterministic planner: YAML playbooks → EV-ranked tasks, AI-first tiering
-- ✅ Cross-cutting primitives: technique exhaustion + lore denylist
-- ✅ Actions layer: emits → concrete commands; read-only runs, exploitation render-only
-- ✅ Deterministic finding extraction from action output
+- ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
+  message brokers)
+- ✅ Deterministic planner: 58 YAML playbook rules → EV-ranked tasks, AI-first tiering
+      (AI, traditional, cloud/k8s, broker, supply-chain, post-exploit)
+- ✅ Cross-cutting primitives: technique exhaustion + credential reuse + lore denylist
+- ✅ Actions layer: 95 registered actions (emits → concrete commands); read-only runs,
+      exploitation render-only
+- ✅ Deterministic finding extraction from action output (incl. error-based SQLi)
 - ✅ Operator handoff: `next --contract` (persona + state + candidates + commands)
+- ✅ Post-foothold FSM: credential vault, `spray`, linPEAS/winPEAS parsers,
+      `foothold → looted → pivoted → done`
+- ✅ HexStrike as the delegated enumeration backend (`yhwach enum`, loopback-guarded)
+- ✅ Engagement notebook: the operator writes detailed notes to an Obsidian vault (single source
+      of truth) via the Obsidian MCP at every objective; notes never live in the DB
 - ✅ Markdown report generation
 - ✅ Calibration harness: fixtures + golden runner + `snapshot`
+- ✅ Yhwach-as-MCP server for Claude Code (`yhwach mcp`; Path A in docs/deploy.md)
 
 **Remaining (bigger lifts / need design input):**
-- ⬜ Post-foothold FSM: credential vault, spray, PEAS parsers, `foothold → looted → pivoted`
-- ⬜ HexStrike MCP as the enumeration backend (richer ingestion than raw nmap)
-- ⬜ Yhwach-as-MCP server for Claude Code (Path A in docs/deploy.md)
-- ⬜ Report v2: event log + verbatim reproduction commands
+- ⬜ MCP LLM-delegation tools (`craft` / `interpret`): persona-wrapped model calls handed back
+      to the host CLI, not just the read-only context tools shipped today
+- ⬜ Report v2: full event-log timeline + inline screenshots + verbatim reproduction commands
+- ⬜ Ligolo tunnel state: subnet reachability graph feeding the `pivoted` predicate
+- ⬜ BloodHound MCP adapter for AD reasoning
 
 The original phased plan below is kept for reference; the numbering predates the
 build order above.

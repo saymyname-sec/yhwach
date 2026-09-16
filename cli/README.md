@@ -1,55 +1,122 @@
-# CLI (planned)
+# CLI
 
-Subcommands the engine will expose. Not implemented yet; this is a scoping doc so the shape is agreed before the Python lands.
+The commands the engine exposes today, via the `yhwach` entry point (Click group).
 
-## `yhwach engage --lab <name> --scope <cidr,...> [--domain <d>] [--dc <ip>]`
+DB location resolution (every command):
 
-Initialize a lab. Creates the SQLite DB (default: `~/osai/current/state/yhwach.db`), seeds an `engagement` row, imports scope.
+1. `--db` flag on the subcommand
+2. `$YHWACH_DB`
+3. `~/osai/current/state/yhwach.db` (matches `/osai-engage`'s lab directory)
 
-Sits *alongside* `/osai-engage` — /osai-engage owns lab bootstrap directories; Yhwach owns the world model inside them.
+Engagement artifacts (`recon/`, `loot/`) are derived relative to the DB: for the canonical
+`<lab>/state/yhwach.db` layout they sit at `<lab>/<name>`; for a flat DB path they sit beside the
+DB. Notes are **not** an artifact dir — the notebook is the Obsidian vault, written by the
+operator via the Obsidian MCP (see [../persona/notebook.md](../persona/notebook.md)).
 
-## `yhwach ingest <file> [--kind nmap|winpeas|linpeas|nuclei|http|hexstrike]`
+Almost every command takes `--lab <name>` to select the engagement.
 
-Parse a tool output file. Auto-detects `--kind` when omitted. Advances host FSMs where predicates now pass. Idempotent — running twice on the same file is a no-op except for the timestamp on `event`.
+## Engagement setup
 
-## `yhwach next [--host <ip>] [--focus <topic>]`
+### `yhwach engage --lab <name> --scope <cidr,...> [--domain <d>] [--dc <ip>]`
 
-Query the planner: rank open tasks by EV, print the Autonomy Contract for the top pick. Optionally scoped to a host or a topic ("AD", "AI targets", "what next").
+Create the SQLite DB if needed and upsert the engagement row (scope, optional AD domain/DC).
 
-Calls the LLM operator for RANK; the persona is loaded from `persona/operator.md`; input is the SQL-selected state slice. Output is a validated Contract JSON, pretty-printed as human form.
+### `yhwach ingest <file> --lab <name> [--kind nmap|linpeas|winpeas] [--host <ip>]`
 
-## `yhwach status`
+Parse a tool output file into the world model. `nmap` XML → hosts + services (idempotent).
+`linpeas`/`winpeas` → host-scoped privesc findings (requires `--host`) and advances that host
+to `enumerated`.
 
-Read-only scoreboard: hosts x stage, points scored, points open, open tasks, blocked tasks. No LLM call.
+### `yhwach enum --lab <name> --target <ip/cidr> [--ports <spec>] [--hexstrike-url <url>]`
 
-## `yhwach record-proof --host <ip> --file <flag_path> --screenshot <path>`
+Run nmap through HexStrike (delegated enumeration), save the raw XML to `recon/`, and ingest
+it. Warns if the HexStrike URL is not loopback (unauthenticated RCE over a network).
 
-Bind a proof file + screenshot to a `proof` row and advance the host to `looted`. Refuses if the screenshot does not exist. Optional `--vault <path>` mirrors to Obsidian via MCP.
+### `yhwach probe --lab <name> [--host <ip>] [--timeout <s>]`
 
-## `yhwach craft <technique_id> --target <surface_id>`
+Send short-timeout HTTP requests to scanned hosts and upsert detected **surfaces** — AI
+(Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB) and traditional
+(Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web / brokers).
 
-CRAFT call: LLM produces a payload for the given technique against the given surface. Persona-driven, structured output only. Payload goes into `recommended.autonomous[0]`.
+## Planning and handoff
 
-## `yhwach interpret <file> --expect <signal> [--surface <id>]`
+### `yhwach plan --lab <name>`
 
-INTERPRET call: LLM extracts a `finding` (or null) from a raw output slice. Writes the finding to the DB. `--expect` is a hint to the operator (e.g. "look for tool exposure", "look for SSRF").
+Deterministic — no LLM. Match every playbook rule's `when` clause against current surfaces and
+upsert an EV-scored task per match. Reports rules loaded/matched, tasks created/updated, and any
+rules skipped (technique consumed, denylisted host, or unsupported `when` keys).
 
-## `yhwach render [--target obsidian|report|both]`
+### `yhwach next --lab <name> [--limit N] [--host <ip>] [--contract]`
 
-Sync the world model to Obsidian (via MCP) and/or write a Markdown engagement report. Idempotent.
+Default: a compact EV-ranked list of pending tasks. With `--contract`: the full operator context
+block (persona + state + ranked candidates + commands) for Claude Code to reason over into an
+Autonomy Contract. Yhwach never calls a model itself.
 
-## `yhwach heartbeat`
+### `yhwach run --lab <name> --task <id> [--go]`
 
-Cheap append-only tick to `event` + a state snapshot. Meant to be driven by the OSAI heartbeat hook.
+Render the actions for a task. Read-only, self-contained actions run with `--go` (output captured
+to `loot/`, findings extracted deterministically, lore-denylist artifacts flagged); proposal/
+destructive/render-only actions are always printed for the operator to run.
 
-## `yhwach persona --print`
+### `yhwach actions [--risk read_only|propose|destructive]`
 
-Print the exact operator persona currently in use, plus its content hash. Useful for verifying that Yhwach's frame — not the host CLI's — is what shaped the last judgment call.
+List the registered actions (id, risk tier, run vs. render-only) from `yhwach/actions.py`.
 
-## `yhwach replay <event_id>`
+## Post-foothold
 
-Re-run a past judgment call with the same inputs. Output must be byte-identical (temperature = 0, same persona hash). Drift = test failure.
+### `yhwach advance --lab <name> --host <ip> --to <stage> [--force]`
 
-## `yhwach mcp`
+Advance a host's FSM stage (`undiscovered → scanned → enumerated → foothold → looted → pivoted →
+done`, or `blocked`). Monotonic by default (`--force` allows moving backwards). Reaching an
+objective prints a reminder to write the host note in the Obsidian vault (via the Obsidian MCP).
 
-Run Yhwach as an MCP server. See `docs/deploy.md`.
+### `yhwach cred --lab <name> --user <id> [--secret <s>] [--kind ...] [--source ...] [--host <ip>]`
+
+Add a credential to the vault (`password`/`ntlm`/`kerberos`/`ssh_key`/`api_key`/`token`/`dpapi`).
+Credentials are never exhausted. Loot is an objective — the command reminds you to add it to the
+Credentials note in the Obsidian vault.
+
+### `yhwach creds --lab <name>`
+
+List the credential vault (secrets masked).
+
+### `yhwach spray --lab <name> [--proto smb|winrm|ssh|ldap|mssql|rdp]`
+
+Render credential-spray commands (vault creds × sprayable surfaces). Proposal-tier: Yhwach
+renders, the operator runs.
+
+### `yhwach consume <technique> --lab <name> [--host <ip>]`
+
+Mark a technique (rule id or `technique:` key) consumed for the engagement. Re-run `plan` to drop
+it from the queue. OSAI labs don't reuse infra flaws.
+
+## Findings and reporting
+
+### `yhwach findings --lab <name>`
+
+List recorded findings, most severe first, with evidence.
+
+### `yhwach report --lab <name> [--out <file>]`
+
+Render a Markdown engagement report (scoreboard, findings, hosts, proofs) to stdout or a file.
+
+## Calibration and introspection
+
+### `yhwach snapshot --lab <name> [--out <file>]`
+
+Dump the current world model as a fixture YAML (with a blank `expected:` block to fill in) so a
+real run becomes a permanent golden test.
+
+### `yhwach selftest [--fixtures <dir>]`
+
+Run every `*.yaml` golden fixture (recursively) and report pass/fail. Non-zero exit on failure.
+
+### `yhwach persona`
+
+Print the operator persona currently in effect plus its content hash — proof of which reasoning
+frame Yhwach injects.
+
+### `yhwach mcp`
+
+Run Yhwach as an MCP (stdio) server for Claude Code. Needs `pip install yhwach[mcp]`. See
+[../docs/deploy.md](../docs/deploy.md).

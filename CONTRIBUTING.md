@@ -3,6 +3,7 @@
 Yhwach is early. The most valuable contributions right now:
 
 - **Playbook rules** — YAML under `playbooks/`, each traceable to a technique or class (OWASP-LLM, ATLAS, CVE, CWE). One rule per document; multiple documents per file OK.
+- **Actions** — an `emits` id needs a command. Add an entry to `ACTION_REGISTRY` in `yhwach/actions.py` (or a standalone exploit script under `actions/`); see [actions/README.md](actions/README.md) for the run-vs-render policy.
 - **Fixtures** — engagement snapshots under `tests/fixtures/` with an expected top-ranked hypothesis. These become permanent regression tests.
 - **Lore denylist entries** — known OffSec dev artifacts (like `cloudbase-init`) that should be filtered from ranker output.
 - **Parsers** — deterministic ingestion for a tool the engine doesn't yet understand.

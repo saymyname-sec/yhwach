@@ -170,5 +170,14 @@ def build_context(
         "cites its playbook_rule_id. Never re-suggest a consumed technique. AI "
         "hosts before traditional. No prose outside the Contract."
     )
+    lines.append("")
+    lines.append(
+        "NOTEBOOK: the engagement notebook is the Obsidian vault, and it is the "
+        "single source of truth for write-ups. Whenever this turn reaches an "
+        "objective — a confirmed finding, foothold, loot, a working PoC, or a "
+        "pivot — write it into the vault via the Obsidian MCP, in full detail "
+        "(exact commands, payloads, captured output, evidence paths), following "
+        "the notebook protocol in the FRAME. Notes are never stored in Yhwach's DB."
+    )
 
     return "\n".join(lines)

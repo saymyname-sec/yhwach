@@ -8,7 +8,7 @@ Prose can't be queried. Yhwach makes the engagement queryable: a SQLite world mo
 
 ```
 +-------------------------------------------------------------+
-| Presentation    report render . Obsidian sync . TUI status  |
+| Presentation    report . MCP server . status  (notebook -> Obsidian, operator) |
 +-------------------------------------------------------------+
 | Orchestration   the loop . autonomy gates (proceed/propose/ask) |
 +-------------------------------------------------------------+
@@ -96,6 +96,7 @@ Knowledge is declarative YAML, not prose. Adding a technique = adding a rule.
 - **`credential_reuse`** — the one thing that is *never* exhausted; every recovered credential stays in play against every host in scope.
 - **`high_ev_leads`** — Chrome DPAPI, KeePass, unattend.xml, PS history: seen -> auto-P0.
 - **`lore_denylist`** — known OffSec dev artifacts (cloudbase-init and friends) tagged and filtered from ranker output.
+- **`engagement_notebook`** — reaching an objective always takes a note (Kapi's rule). The notebook is an **Obsidian vault**, written by the operator through the Obsidian MCP in full detail (commands, payloads, evidence), and it is the single source of truth for write-ups. Yhwach's DB is the queryable world model and never stores notes; `advance`/`cred` print a reminder, the persona (`persona/notebook.md`) carries the structure. See [persona/notebook.md](persona/notebook.md).
 
 ## Independence from host CLI
 

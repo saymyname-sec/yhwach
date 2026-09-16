@@ -481,6 +481,33 @@ def findings(lab: str, db_path: str | None) -> None:
 
 
 @main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--out", "out_path", default=None, type=click.Path(),
+              help="Write the Markdown report here (default: stdout).")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def report(lab: str, out_path: str | None, db_path: str | None) -> None:
+    """Render a Markdown engagement report from the world model."""
+    from yhwach.report import build_report
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        md = build_report(conn, eng_id)
+
+    if out_path:
+        Path(out_path).write_text(md, encoding="utf-8")
+        click.echo(f"[+] wrote {out_path}")
+    else:
+        click.echo(md)
+
+
+@main.command()
 def persona() -> None:
     """Print the operator persona in effect (the reasoning frame Yhwach injects)."""
     import hashlib

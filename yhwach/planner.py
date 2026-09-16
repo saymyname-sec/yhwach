@@ -61,6 +61,12 @@ def match_rules(
 
         if rule.technique in consumed:
             report.rules_skipped_consumed.append(rule.id)
+            # Retire any pending tasks already queued for this rule.
+            conn.execute(
+                "UPDATE task SET status = 'abandoned', updated_at = ? "
+                "WHERE engagement_id = ? AND playbook_rule_id = ? AND status = 'pending'",
+                (_now_utc(), engagement_id, rule.id),
+            )
             continue
 
         surfaces = _matching_surfaces(conn, engagement_id, rule)

@@ -99,6 +99,20 @@ def test_planner_skips_consumed_technique(tmp_db: Path) -> None:
     assert "ollama_unauth_api" in report.rules_skipped_consumed
 
 
+def test_consuming_after_plan_retires_pending_task(tmp_db: Path) -> None:
+    # Task exists first, THEN the technique is consumed -> pending task retired.
+    eng, _ = _seed(tmp_db)
+    rule = _rule("ollama_unauth_api", {"surface": "ollama"})
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, [rule])
+        assert len(top_tasks(conn, eng)) == 1
+        mark_technique_consumed(conn, eng, "ollama_unauth_api")
+        match_rules(conn, eng, [rule])          # replan
+        assert top_tasks(conn, eng) == []       # pending task retired
+        st = conn.execute("SELECT status FROM task").fetchone()["status"]
+    assert st == "abandoned"
+
+
 def test_consume_by_shared_technique_key(tmp_db: Path) -> None:
     # Two rules sharing a `technique:` — consuming it retires both.
     eng, _ = _seed(tmp_db, kind="chatbot")

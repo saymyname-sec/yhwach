@@ -106,6 +106,54 @@ def test_top_tasks_orders_by_ev_desc(tmp_db: Path) -> None:
     assert tasks[0]["ev_score"] > tasks[1]["ev_score"]
 
 
+def test_ai_ranks_above_traditional_regardless_of_ev(tmp_db: Path) -> None:
+    # An AI move with LOW EV must still outrank a traditional move with HIGH EV.
+    with yhdb.transaction(tmp_db) as conn:
+        eng_id = yhdb.upsert_engagement(conn, lab="tier", scope="10.0.0.0/24")
+        cur = conn.execute(
+            "INSERT INTO host (engagement_id, ip, os, stage, first_seen) "
+            "VALUES (?, '10.0.0.5', 'linux', 'scanned', '2026-01-01T00:00:00Z')",
+            (eng_id,),
+        )
+        host_id = int(cur.lastrowid)
+        cur = conn.execute(
+            "INSERT INTO service (host_id, port, proto, discovered_at) "
+            "VALUES (?, 11434, 'tcp', '2026-01-01T00:00:00Z')", (host_id,))
+        ai_svc = int(cur.lastrowid)
+        cur = conn.execute(
+            "INSERT INTO service (host_id, port, proto, discovered_at) "
+            "VALUES (?, 445, 'tcp', '2026-01-01T00:00:00Z')", (host_id,))
+        smb_svc = int(cur.lastrowid)
+        yhdb.upsert_surface(conn, host_id, ai_svc, "ollama", "none", "{}")
+        yhdb.upsert_surface(conn, host_id, smb_svc, "smb", "unknown", "{}")
+
+    ai_rule = _rule("ollama_unauth_api", {"surface": "ollama"},
+                    likelihood="M", time_cost="slow", risk="read_only")  # EV 2.25, class ai
+    ai_rule.maps = ["LLM06"]
+    trad_rule = _rule("smb_enumeration", {"surface": "smb"},
+                      likelihood="H", time_cost="fast", risk="read_only")  # EV 10, traditional
+    trad_rule.maps = ["CWE-200"]
+
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng_id, [trad_rule, ai_rule])
+        tasks = top_tasks(conn, eng_id)
+
+    assert tasks[0]["playbook_rule_id"] == "ollama_unauth_api"  # AI first, despite EV 2.25 < 10
+    assert tasks[0]["technique_class"] == "ai"
+    assert tasks[1]["playbook_rule_id"] == "smb_enumeration"
+
+
+def test_real_traditional_playbook_rules_load() -> None:
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    ids = {r.id for r in load_rules(default_playbook_dir())}
+    assert "jenkins_script_console_rce" in ids
+    assert "smb_enumeration" in ids
+    # class derivation: jenkins rule is traditional, ollama rule is ai
+    rules = {r.id: r for r in load_rules(default_playbook_dir())}
+    assert rules["jenkins_script_console_rce"].technique_class == "traditional"
+    assert rules["ollama_unauth_api"].technique_class == "ai"
+
+
 def test_no_surface_no_task(tmp_db: Path) -> None:
     with yhdb.transaction(tmp_db) as conn:
         eng_id = yhdb.upsert_engagement(conn, lab="empty", scope="10.0.0.0/24")

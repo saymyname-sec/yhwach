@@ -327,6 +327,8 @@ def probe(lab: str, host_ip: str | None, timeout: float, db_path: str | None) ->
         click.echo(f"[!] DB not found at {path}; run `yhwach engage` first.", err=True)
         sys.exit(2)
 
+    from yhwach.probes.traditional import detect_traditional
+
     session = new_session()
 
     with yhdb.transaction(path) as conn:
@@ -335,20 +337,19 @@ def probe(lab: str, host_ip: str | None, timeout: float, db_path: str | None) ->
             click.echo(f"[!] Unknown lab '{lab}'.", err=True)
             sys.exit(2)
 
-        targets = yhdb.scanned_hosts_with_ports(conn, eng_id, list(PROBES_BY_PORT.keys()))
+        services = yhdb.all_services_for_scanned_hosts(conn, eng_id)
         if host_ip is not None:
-            targets = [t for t in targets if t["ip"] == host_ip]
+            services = [s for s in services if s["ip"] == host_ip]
 
-        if not targets:
-            click.echo("[!] No scanned hosts with probe-eligible ports.")
+        if not services:
+            click.echo("[!] No scanned hosts with services.")
             return
 
         surfaces_found = 0
         surfaces_new = 0
-        for t in targets:
-            result = run_probes(session, t["ip"], t["port"], timeout=timeout)
-            if result is None:
-                continue
+
+        def _record(t, result, label):
+            nonlocal surfaces_found, surfaces_new
             _, created = yhdb.upsert_surface(
                 conn,
                 host_id=t["host_id"],
@@ -361,8 +362,19 @@ def probe(lab: str, host_ip: str | None, timeout: float, db_path: str | None) ->
             surfaces_new += 1 if created else 0
             click.echo(
                 f"[+] {t['ip']}:{t['port']} -> {result.kind} (auth={result.auth}) "
-                f"{'NEW' if created else 'UPD'}"
+                f"[{label}] {'NEW' if created else 'UPD'}"
             )
+
+        for s in services:
+            # AI surfaces (fixed port list).
+            if s["port"] in PROBES_BY_PORT:
+                ai = run_probes(session, s["ip"], s["port"], timeout=timeout)
+                if ai is not None:
+                    _record(s, ai, "ai")
+            # Traditional surfaces (all services).
+            trad = detect_traditional(session, s["ip"], s["port"], s["product"], timeout=timeout)
+            if trad is not None:
+                _record(s, trad, "traditional")
 
         click.echo(f"[=] {surfaces_found} surfaces detected ({surfaces_new} new).")
 

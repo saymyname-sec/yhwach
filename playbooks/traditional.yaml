@@ -1,0 +1,158 @@
+# Yhwach — traditional (non-AI) playbook. Foothold / lateral / enumeration rules
+# for the services Yhwach fingerprints outside the AI surface set.
+#
+# All carry class:traditional, so the ranker keeps them BELOW any AI hypothesis
+# by doctrine (AI hosts are the OSAI pass mark). Points ~10 (traditional value).
+# `when` matches the surface kinds detect_traditional() emits: jenkins | gitlab |
+# web | smb | ldap | ssh | mssql | winrm | rdp | ftp | mysql.
+
+- id: jenkins_script_console_rce
+  when: { surface: jenkins }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: jenkins_auth_check
+    - action: jenkins_script_console
+    - action: jenkins_cred_dump
+  maps: [CWE-94]
+  points: 10
+  risk: propose
+  routes: /osai-web-exploit
+  source: 'hacktricks . pentesting-web/jenkins'
+  authorized_only: true
+
+- id: gitlab_recon
+  when: { surface: gitlab }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: gitlab_version_cve
+    - action: gitlab_public_repos
+  maps: [CWE-200]
+  points: 10
+  risk: read_only
+  routes: /osai-web-exploit
+  source: 'hacktricks . pentesting-web/gitlab'
+  authorized_only: true
+
+- id: web_portal_recon
+  when: { surface: web }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: nuclei_scan
+    - action: ffuf_content_discovery
+    - action: sqlmap_forms
+  maps: [CWE-89]
+  points: 10
+  risk: read_only
+  routes: /osai-web-exploit
+  source: 'payloadsallthethings . web'
+  authorized_only: true
+
+- id: smb_enumeration
+  when: { surface: smb }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: netexec_smb_null
+    - action: enum4linux_ng
+    - action: smbmap_shares
+  maps: [CWE-200]
+  points: 10
+  risk: read_only
+  routes: /osai-win-enum
+  source: 'internalallthethings . smb'
+  authorized_only: true
+
+- id: ldap_enumeration
+  when: { surface: ldap }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: netexec_ldap
+    - action: ldapsearch_anon
+  maps: [CWE-200]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . ldap'
+  authorized_only: true
+
+- id: mssql_enumeration
+  when: { surface: mssql }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: netexec_mssql
+    - action: mssql_xp_cmdshell_check
+  maps: [CWE-89]
+  points: 10
+  risk: propose
+  routes: /osai-win-enum
+  source: 'hacktricks . pentesting/mssql'
+  authorized_only: true
+
+- id: winrm_access
+  when: { surface: winrm }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: netexec_winrm_spray
+    - action: evil_winrm_login
+  maps: [CWE-287]
+  points: 10
+  risk: propose
+  routes: /osai-spray
+  source: 'internalallthethings . winrm'
+  authorized_only: true
+
+- id: ssh_recon
+  when: { surface: ssh }
+  class: traditional
+  likelihood: L
+  time_cost: fast
+  emits:
+    - action: ssh_version_cve
+    - action: ssh_cred_spray
+  maps: [CWE-287]
+  points: 10
+  risk: read_only
+  routes: /osai-spray
+  source: 'hacktricks . pentesting/ssh'
+  authorized_only: true
+
+- id: rdp_access
+  when: { surface: rdp }
+  class: traditional
+  likelihood: L
+  time_cost: fast
+  emits:
+    - action: netexec_rdp_spray
+  maps: [CWE-287]
+  points: 10
+  risk: propose
+  routes: /osai-spray
+  source: 'internalallthethings . rdp'
+  authorized_only: true
+
+- id: ftp_anonymous
+  when: { surface: ftp }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: ftp_anon_login
+  maps: [CWE-287]
+  points: 10
+  risk: read_only
+  routes: /osai-triage
+  source: 'hacktricks . pentesting/ftp'
+  authorized_only: true

@@ -110,13 +110,14 @@ def _upsert_task(
     if existing is not None:
         conn.execute(
             "UPDATE task SET ev_score = ?, rationale = ?, risk = ?, autonomy = ?, "
-            "kind = ?, updated_at = ? WHERE id = ?",
+            "kind = ?, technique_class = ?, updated_at = ? WHERE id = ?",
             (
                 rule.ev_score,
                 rationale,
                 rule.risk,
                 rule.autonomy,
                 _task_kind_for(rule),
+                rule.technique_class,
                 now,
                 existing["id"],
             ),
@@ -125,14 +126,16 @@ def _upsert_task(
 
     conn.execute(
         "INSERT INTO task (engagement_id, target_host_id, target_surface_id, kind, "
-        "playbook_rule_id, rationale, risk, autonomy, ev_score, status, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
+        "playbook_rule_id, technique_class, rationale, risk, autonomy, ev_score, "
+        "status, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
         (
             engagement_id,
             surf["host_id"],
             surf["surface_id"],
             _task_kind_for(rule),
             rule.id,
+            rule.technique_class,
             rationale,
             rule.risk,
             rule.autonomy,
@@ -148,15 +151,22 @@ def top_tasks(
     engagement_id: int,
     limit: int = 5,
 ) -> list[sqlite3.Row]:
-    """Pending tasks ranked by EV descending (id as stable tie-break)."""
+    """Pending tasks, AI-first then EV descending (id as stable tie-break).
+
+    The `technique_class` tier enforces the OSAI doctrine — AI hosts before
+    traditional — regardless of raw EV, so a low-EV AI move still outranks a
+    high-EV traditional one. Within a tier, EV decides.
+    """
     return conn.execute(
-        "SELECT t.id, t.kind, t.playbook_rule_id, t.rationale, t.risk, t.autonomy, "
-        "t.ev_score, t.status, h.ip AS host_ip, s.kind AS surface_kind "
+        "SELECT t.id, t.kind, t.playbook_rule_id, t.technique_class, t.rationale, "
+        "t.risk, t.autonomy, t.ev_score, t.status, h.ip AS host_ip, "
+        "s.kind AS surface_kind "
         "FROM task t "
         "JOIN host h ON h.id = t.target_host_id "
         "LEFT JOIN surface s ON s.id = t.target_surface_id "
         "WHERE t.engagement_id = ? AND t.status = 'pending' "
-        "ORDER BY t.ev_score DESC, t.id ASC "
+        "ORDER BY CASE t.technique_class WHEN 'ai' THEN 0 ELSE 1 END ASC, "
+        "t.ev_score DESC, t.id ASC "
         "LIMIT ?",
         (engagement_id, limit),
     ).fetchall()

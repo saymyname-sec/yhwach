@@ -48,12 +48,26 @@ class Rule:
     maps: list[str] = field(default_factory=list)
     routes: str | None = None
     source: str | None = None
+    _class: str | None = None
 
     @property
     def ev_score(self) -> float:
         like = LIKELIHOOD_WEIGHT.get(self.likelihood, LIKELIHOOD_WEIGHT[DEFAULT_LIKELIHOOD])
         div = TIME_COST_DIVISOR.get(self.time_cost, TIME_COST_DIVISOR[DEFAULT_TIME_COST])
         return round(like * self.points / div, 4)
+
+    @property
+    def technique_class(self) -> str:
+        """ai | traditional | ad — drives the AI-first tier in the ranker.
+
+        Explicit `class:` in the rule wins; otherwise derived from the OWASP-LLM
+        maps (any LLMxx -> ai), defaulting to traditional.
+        """
+        if self._class:
+            return self._class
+        if any(str(m).upper().startswith("LLM") for m in self.maps):
+            return "ai"
+        return "traditional"
 
 
 def _is_technique_rule(entry: Any) -> bool:
@@ -120,6 +134,10 @@ def _build_rule(entry: dict, *, source_file: str) -> Rule:
     if not isinstance(when, dict):
         raise PlaybookError(f"rule '{rid}' when clause must be a mapping")
 
+    klass = entry.get("class")
+    if klass is not None and klass not in ("ai", "traditional", "ad"):
+        raise PlaybookError(f"rule '{rid}' class must be ai/traditional/ad")
+
     return Rule(
         id=rid,
         when=when,
@@ -132,6 +150,7 @@ def _build_rule(entry: dict, *, source_file: str) -> Rule:
         maps=entry.get("maps") or [],
         routes=entry.get("routes"),
         source=entry.get("source"),
+        _class=klass,
     )
 
 

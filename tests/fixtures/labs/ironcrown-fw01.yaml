@@ -21,10 +21,18 @@ world_model:
         - {port: 80, proto: tcp, product: nginx, version: 1.28.3}
         - {port: 443, proto: tcp, product: nginx, version: 1.28.3}
         - {port: 8080, proto: tcp, product: Jetty, version: 12.1.6}
-      surfaces: []
+      surfaces:
+        - {kind: web, auth: unknown, service_port: 80, meta: {title: Aldinervaide Corp Portal}}
+        - {kind: web, auth: unknown, service_port: 443, meta: {}}
+        - {kind: jenkins, auth: unknown, service_port: 8080, meta: {version: 2.555.1}}
 expected:
-  top_hypothesis: {playbook_rule_id: null}
-  must_include_hypotheses: []
+  # Phase 2: the perimeter foothold is now reasoned about. Jenkins script-console
+  # RCE is the top move; the portal is a secondary recon lead. No AI hypotheses —
+  # the Jenkins-as-chatbot false positive must never return.
+  top_hypothesis: {playbook_rule_id: jenkins_script_console_rce}
+  must_include_hypotheses:
+    - jenkins_script_console_rce
+    - web_portal_recon
   must_not_include:
     - chatbot_direct_injection_probe
     - chatbot_session_enumeration

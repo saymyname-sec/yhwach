@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS task (
     target_surface_id INTEGER REFERENCES surface(id),
     kind              TEXT    NOT NULL,   -- scan | enumerate | craft_injection | probe | spray | privesc | pivot | loot | screenshot | proof
     playbook_rule_id  TEXT,
+    technique_class   TEXT    NOT NULL DEFAULT 'ai',  -- ai | traditional | ad  (drives AI-first tiering)
     rationale         TEXT,
     risk              TEXT    NOT NULL,   -- read_only | exploit | destructive
     autonomy          TEXT    NOT NULL,   -- proceed | propose | ask

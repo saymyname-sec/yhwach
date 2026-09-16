@@ -19,6 +19,7 @@ import click
 from yhwach import __version__
 from yhwach import db as yhdb
 from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml
+from yhwach.probes import PROBES_BY_PORT, new_session, run_probes
 
 DEFAULT_DB_ENV = "YHWACH_DB"
 DEFAULT_DB_FALLBACK = "~/osai/current/state/yhwach.db"
@@ -132,6 +133,67 @@ def status(lab: str, db_path: str | None) -> None:
         click.echo("  (none)")
     for row in task_counts:
         click.echo(f"  {row['status']:<15} {row['n']}")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name (must exist).")
+@click.option("--host", "host_ip", default=None,
+              help="Restrict probing to one host IP; if omitted, probe every scanned host.")
+@click.option("--timeout", default=3.0, show_default=True, type=float,
+              help="Per-request HTTP timeout in seconds.")
+@click.option("--db", "db_path", default=None, type=click.Path(),
+              help="Override DB path.")
+def probe(lab: str, host_ip: str | None, timeout: float, db_path: str | None) -> None:
+    """Probe scanned hosts for AI attack surfaces (Ollama/OpenAI/chatbot/MCP/Gradio).
+
+    Sends short-timeout HTTP requests to authorized targets only. Populates the
+    `surface` table with kind/auth/meta so playbook rules can match against it.
+    """
+    import json as _json
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}; run `yhwach engage` first.", err=True)
+        sys.exit(2)
+
+    session = new_session()
+
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+
+        targets = yhdb.scanned_hosts_with_ports(conn, eng_id, list(PROBES_BY_PORT.keys()))
+        if host_ip is not None:
+            targets = [t for t in targets if t["ip"] == host_ip]
+
+        if not targets:
+            click.echo("[!] No scanned hosts with probe-eligible ports.")
+            return
+
+        surfaces_found = 0
+        surfaces_new = 0
+        for t in targets:
+            result = run_probes(session, t["ip"], t["port"], timeout=timeout)
+            if result is None:
+                continue
+            _, created = yhdb.upsert_surface(
+                conn,
+                host_id=t["host_id"],
+                service_id=t["service_id"],
+                kind=result.kind,
+                auth=result.auth,
+                meta_json=_json.dumps(result.meta, sort_keys=True),
+            )
+            surfaces_found += 1
+            surfaces_new += 1 if created else 0
+            click.echo(
+                f"[+] {t['ip']}:{t['port']} -> {result.kind} (auth={result.auth}) "
+                f"{'NEW' if created else 'UPD'}"
+            )
+
+        click.echo(f"[=] {surfaces_found} surfaces detected ({surfaces_new} new).")
 
 
 if __name__ == "__main__":

@@ -187,3 +187,15 @@ CREATE INDEX IF NOT EXISTS idx_host_stage ON host(engagement_id, stage);
 CREATE INDEX IF NOT EXISTS idx_task_status ON task(engagement_id, status, ev_score DESC);
 CREATE INDEX IF NOT EXISTS idx_surface_kind ON surface(kind);
 CREATE INDEX IF NOT EXISTS idx_finding_status ON finding(status);
+
+-- Surface deduplication.
+-- SQLite treats NULLs as distinct in a straight UNIQUE, so we use two partial
+-- unique indexes to cover both cases:
+--   * surface tied to a specific service -> unique per (host, service, kind)
+--   * surface bound to the host generally -> unique per (host, kind)
+CREATE UNIQUE INDEX IF NOT EXISTS ux_surface_hosted_svc
+    ON surface(host_id, service_id, kind)
+    WHERE service_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_surface_hosted_no_svc
+    ON surface(host_id, kind)
+    WHERE service_id IS NULL;

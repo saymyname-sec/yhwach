@@ -103,3 +103,69 @@ def upsert_engagement(
         (lab, domain, dc_ip, scope, started_at),
     )
     return int(cur.lastrowid)
+
+
+def upsert_surface(
+    conn: sqlite3.Connection,
+    host_id: int,
+    service_id: int | None,
+    kind: str,
+    auth: str,
+    meta_json: str,
+) -> tuple[int, bool]:
+    """Insert or update a `surface` row keyed by (host, service, kind).
+
+    Returns (surface_id, created) where `created` is True on first insert,
+    False on update. Idempotent per the partial unique indexes in schema.sql.
+    """
+    if service_id is None:
+        row = conn.execute(
+            "SELECT id FROM surface WHERE host_id = ? AND service_id IS NULL AND kind = ?",
+            (host_id, kind),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT id FROM surface WHERE host_id = ? AND service_id = ? AND kind = ?",
+            (host_id, service_id, kind),
+        ).fetchone()
+
+    if row is not None:
+        conn.execute(
+            "UPDATE surface SET auth = ?, meta_json = ? WHERE id = ?",
+            (auth, meta_json, row["id"]),
+        )
+        return int(row["id"]), False
+
+    now = _now_utc()
+    cur = conn.execute(
+        "INSERT INTO surface (host_id, service_id, kind, auth, meta_json, discovered_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (host_id, service_id, kind, auth, meta_json, now),
+    )
+    return int(cur.lastrowid), True
+
+
+def scanned_hosts_with_ports(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    ports: list[int],
+) -> list[dict]:
+    """Return [{host_id, ip, port, service_id}, ...] for scanned hosts whose
+    services match any of `ports`. Used by the probe subcommand.
+    """
+    if not ports:
+        return []
+    placeholders = ",".join("?" for _ in ports)
+    rows = conn.execute(
+        f"""
+        SELECT h.id AS host_id, h.ip AS ip, s.id AS service_id, s.port AS port
+          FROM host h
+          JOIN service s ON s.host_id = h.id
+         WHERE h.engagement_id = ?
+           AND h.stage IN ('scanned', 'enumerated')
+           AND s.port IN ({placeholders})
+         ORDER BY h.ip, s.port
+        """,
+        (engagement_id, *ports),
+    ).fetchall()
+    return [dict(r) for r in rows]

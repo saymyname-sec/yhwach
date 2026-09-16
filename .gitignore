@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Yhwach runtime
+*.db
+*.db-journal
+runtime/
+labs/*/state/
+labs/*/loot/
+labs/*/screenshots/
+
+# Secrets and per-user
+.env
+*.pem
+*.key
+!db/schema.sql
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo

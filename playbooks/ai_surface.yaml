@@ -1,0 +1,143 @@
+# Yhwach — AI-surface playbook. Rules for LLM / agent / RAG / MCP / A2A /
+# embedding attack surfaces. Every rule cites a source (OSAI module + OWASP-LLM
+# class) and lists an action or a route to an existing skill.
+
+- id: ollama_unauth_api
+  when:
+    surface: ollama
+    auth: none
+  emits:
+    - action: probe_ollama_models       # curl /api/tags
+    - action: probe_ollama_running      # curl /api/ps
+    - action: try_direct_generate       # test guardrails on /api/generate
+  maps: [LLM06]                         # Excessive Agency — unauth model access
+  points: 15
+  risk: read_only
+  routes: /osai-mcp-attack
+  source: 'osai/07 . README:AI-ports'
+  authorized_only: true
+
+- id: openai_compat_v1_models
+  when:
+    surface: web
+    endpoint_reachable: /v1/models
+  emits:
+    - action: enumerate_models
+    - action: attempt_completion_unauth
+  maps: [LLM02, LLM06]
+  points: 15
+  risk: read_only
+  routes: /osai-ai-hunter
+  source: 'osai/02 . endpoint_fuzz.sh'
+  authorized_only: true
+
+- id: chatbot_direct_injection_probe
+  when:
+    surface: chatbot
+  emits:
+    - action: craft_system_prompt_leak
+    - action: craft_tool_enumeration
+    - action: craft_debug_mode_bypass
+  maps: [LLM01, LLM07]
+  points: 15
+  risk: read_only
+  routes: /osai-inject
+  source: 'osai/03 . Direct Prompts'
+  authorized_only: true
+
+- id: chatbot_session_enumeration
+  when:
+    surface: chatbot
+    auth: none
+    meta_json_contains: session_id
+  emits:
+    - action: enumerate_chatbot_sessions   # bound to session_enum_osai.py
+  maps: [LLM01, LLM02]
+  points: 15
+  risk: read_only
+  routes: /osai-inject
+  source: 'osai/03 . session_enum_osai.py'
+  authorized_only: true
+
+- id: rag_upload_discovery
+  when:
+    surface: chatbot
+    findings_include: ai_surface
+  emits:
+    - action: probe_rag_upload_paths       # /upload /api/documents /ingest ...
+    - action: probe_writable_smb_share     # RAG source is often SMB in OSAI labs
+  maps: [LLM04, LLM01]
+  points: 15
+  risk: read_only
+  routes: /osai-rag-attack
+  source: 'osai/05 . RAG Pipelines'
+  authorized_only: true
+
+- id: rag_zero_width_injection
+  when:
+    surface: rag
+    writable: true
+  emits:
+    - action: rag_hide_injection            # bound to zero_width_obfuscator.py
+    - action: rag_collision_upload          # bound to create_collision_document.py
+  maps: [LLM01, LLM04]
+  points: 15
+  risk: propose
+  routes: /osai-rag-attack
+  source: 'osai/05 . zero_width_obfuscator.py'
+  authorized_only: true
+
+- id: mcp_tools_list_probe
+  when:
+    surface: mcp
+  emits:
+    - action: mcp_tools_list                # jsonrpc tools/list
+    - action: mcp_resources_list
+  maps: [LLM06]
+  points: 15
+  risk: read_only
+  routes: /osai-mcp-attack
+  source: 'osai/07 . MCP Architecture'
+  authorized_only: true
+
+- id: a2a_orchestrator_probe
+  when:
+    surface: a2a
+  emits:
+    - action: enumerate_agent_cards
+    - action: test_agent_card_dns_spoof
+    - action: forge_a2a_message             # bound to poison_injector.py
+  maps: [LLM01, LLM06]
+  points: 15
+  risk: propose
+  routes: /osai-a2a
+  source: 'osai/04 . Agent Card Spoofing'
+  authorized_only: true
+
+- id: vectordb_exposure
+  when:
+    surface: vectordb
+    auth: none
+  emits:
+    - action: vectordb_export               # bound to weaviate_export.py
+    - action: embedding_inversion           # bound to inversion_attack.py
+  maps: [LLM08, LLM02]
+  points: 15
+  risk: read_only
+  routes: /osai-embed
+  source: 'osai/06 . Attacking Embeddings'
+  authorized_only: true
+
+- id: aws_ml_infra_ssrf
+  when:
+    surface: web
+    findings_include: ssrf_confirmed
+  emits:
+    - action: probe_imds_v1                 # ssrf -> 169.254.169.254
+    - action: enumerate_aws_ml              # bound to aws_ml_enum.sh
+  maps: [LLM06]                             # excessive agency via infra
+  points: 15
+  risk: read_only
+  routes: /osai-cloud-loot
+  source: 'osai/09 . aws_ml_enum.sh'
+  authorized_only: true

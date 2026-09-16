@@ -1,0 +1,39 @@
+# Known OffSec build/dev artifacts. NOT attack paths — filter from ranker output.
+# Each entry: what to match, where it typically appears, why it's noise.
+#
+# This list grows every lab where an operator wastes turns on a false lead.
+
+- artifact: cloudbase_init
+  match:
+    - user: cloudbase-init
+    - process: cloudbase-init.exe
+    - path: 'C:\Program Files\Cloudbase Solutions\**'
+    - service: cloudbase-init
+  reason: |
+    OffSec provisions Windows lab hosts with Cloudbase-Init for image
+    initialization. The user, service, install path, and logs are lab
+    infrastructure, not a target. Kapi confirmed: 100% dev artifact, never a lead.
+  authorized_only: true
+
+- artifact: default_administrator_placeholder
+  match:
+    - text: 'PleaseChangeMe'
+    - text: 'ChangeMeNow'
+    - text: 'Password123!'                  # only when found alone in a template
+  reason: |
+    Placeholder strings that appear in OSAI lab templates. Only a lead if paired
+    with a service that accepts it — otherwise noise. Rank the pairing, not the
+    string on its own.
+  authorized_only: true
+
+- artifact: offsec_default_readme
+  match:
+    - path: '**/README-OFFSEC*.txt'
+    - path: '**/lab-setup*.md'
+  reason: |
+    Lab metadata files shipped with the target. Reading them is fine, ranking
+    them as an attack path is not.
+  authorized_only: true
+
+# Add more entries here as they're confirmed lab noise, not exam paths.
+# Format: match keys are OR-ed within an entry; entries are OR-ed across the file.

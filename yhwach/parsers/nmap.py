@@ -37,8 +37,21 @@ def parse_nmap_xml(
     include_open_filtered: bool = False,
 ) -> list[ParsedHost]:
     """Parse an nmap XML file into a list of ParsedHost objects."""
-    tree = ET.parse(str(xml_path))
-    root = tree.getroot()
+    root = ET.parse(str(xml_path)).getroot()
+    return _parse_root(root, include_open_filtered=include_open_filtered)
+
+
+def parse_nmap_xml_text(
+    xml_text: str,
+    *,
+    include_open_filtered: bool = False,
+) -> list[ParsedHost]:
+    """Parse nmap XML from a string (e.g. HexStrike's `-oX -` stdout)."""
+    root = ET.fromstring(xml_text)
+    return _parse_root(root, include_open_filtered=include_open_filtered)
+
+
+def _parse_root(root, *, include_open_filtered: bool = False) -> list[ParsedHost]:
     hosts: list[ParsedHost] = []
 
     for host_elem in root.findall("host"):

@@ -23,6 +23,7 @@ from yhwach.probes import PROBES_BY_PORT, new_session, run_probes
 
 DEFAULT_DB_ENV = "YHWACH_DB"
 DEFAULT_DB_FALLBACK = "~/osai/current/state/yhwach.db"
+_HEXSTRIKE_DEFAULT = "http://127.0.0.1:8888"
 
 
 def _db_path(override: str | None = None) -> Path:
@@ -162,6 +163,63 @@ def status(lab: str, db_path: str | None) -> None:
         click.echo("  (none)")
     for row in task_counts:
         click.echo(f"  {row['status']:<15} {row['n']}")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name (must exist).")
+@click.option("--target", required=True, help="IP/CIDR to scan (must be in scope).")
+@click.option("--ports", default=None, help="Port spec (e.g. '1-1000' or '80,443'); default nmap top-1000.")
+@click.option("--hexstrike-url", default=None, help=f"HexStrike base URL (default {_HEXSTRIKE_DEFAULT}).")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def enum(lab: str, target: str, ports: str | None, hexstrike_url: str | None,
+         db_path: str | None) -> None:
+    """Run nmap through HexStrike and ingest the result (delegated enumeration).
+
+    Yhwach owns the world model; HexStrike owns tool execution. The raw XML is
+    saved to recon/ for the report.
+    """
+    from yhwach.hexstrike import DEFAULT_URL, HexStrikeClient, HexStrikeError, is_loopback
+    from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml_text
+
+    url = hexstrike_url or DEFAULT_URL
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}; run `yhwach engage` first.", err=True)
+        sys.exit(2)
+    if not is_loopback(url):
+        click.echo(f"[!] OPSEC: HexStrike URL {url} is not loopback — unauthenticated "
+                   "RCE over a network. Continuing, but bind HexStrike to 127.0.0.1.", err=True)
+
+    client = HexStrikeClient(url)
+    try:
+        client.health()
+    except Exception as e:  # noqa: BLE001
+        click.echo(f"[!] HexStrike not reachable at {url}: {e}", err=True)
+        sys.exit(2)
+
+    click.echo(f"[*] Running nmap on {target} via HexStrike …")
+    try:
+        xml = client.nmap_xml(target, ports=ports)
+    except HexStrikeError as e:
+        click.echo(f"[!] {e}", err=True)
+        sys.exit(2)
+
+    recon = path.parent.parent / "recon"
+    recon.mkdir(parents=True, exist_ok=True)
+    safe = "".join(c if c.isalnum() else "_" for c in target)[:40]
+    (recon / f"hexstrike_nmap_{safe}.xml").write_text(xml, encoding="utf-8")
+
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        hosts = parse_nmap_xml_text(xml)
+        h, s = insert_hosts(conn, eng_id, hosts)
+        yhdb.log_event(conn, eng_id, "enum", {"target": target, "hosts": h, "services": s,
+                                              "via": "hexstrike"})
+    click.echo(f"[+] HexStrike nmap: {h} hosts, {s} services ingested. "
+               "Next: `yhwach probe` then `yhwach plan`.")
 
 
 @main.command()

@@ -113,6 +113,32 @@ def probe_openai_compat(
 
 _CHATBOT_PATHS = ("/api/chat", "/chat", "/api/completion", "/api/message")
 
+# Reply-shaped keys that mark a JSON body as an actual chat/LLM response.
+_CHAT_REPLY_KEYS = ("response", "reply", "message", "content", "answer", "choices", "output")
+
+# Header fingerprints of known NON-AI web apps. A hit here means "not a chatbot",
+# no matter how the app answers a POST to /api/chat (Jenkins 403s on CSRF crumb).
+_NON_AI_APP_HEADERS = ("x-jenkins", "x-hudson", "x-drupal-dynamic-cache", "x-gitlab-feature-category")
+
+# Substrings that, in a 401/403 body or WWW-Authenticate header, hint the gated
+# endpoint really is an LLM/chat API rather than generic framework auth/CSRF.
+_LLM_AUTH_HINTS = ("chat", "llm", "openai", "completion", "assistant", "gpt", "model")
+
+
+def _headers_lower(resp) -> dict:
+    try:
+        return {k.lower(): str(v) for k, v in resp.headers.items()}
+    except Exception:
+        return {}
+
+
+def _looks_like_chat_json(data) -> bool:
+    return isinstance(data, dict) and any(k in data for k in _CHAT_REPLY_KEYS)
+
+
+def _is_known_non_ai_app(resp) -> bool:
+    return any(h in _headers_lower(resp) for h in _NON_AI_APP_HEADERS)
+
 
 def probe_chatbot(
     session: requests.Session,
@@ -121,8 +147,22 @@ def probe_chatbot(
     *,
     timeout: float = DEFAULT_TIMEOUT,
 ) -> ProbeResult | None:
-    """Anything that isn't a 404 on a common chat path counts as a chatbot."""
+    """Detect a chatbot by POSITIVE evidence, not merely a non-404.
+
+    A 403/401 alone is not a chatbot — frameworks (Jenkins CSRF, generic auth)
+    return those for unknown POST paths. We require either a 200 JSON body with a
+    reply-shaped key, or an auth-gated response that actually hints at an LLM API.
+    Known non-AI apps (Jenkins, GitLab, Drupal) are fingerprinted and rejected.
+    """
     for scheme in ("http", "https"):
+        # Fingerprint the root once per scheme; bail on a known non-AI app.
+        try:
+            root = session.get(f"{scheme}://{host}:{port}/", timeout=timeout)
+            if _is_known_non_ai_app(root):
+                return None
+        except requests.RequestException:
+            pass  # can't fingerprint; proceed cautiously with positive-evidence only
+
         for path in _CHATBOT_PATHS:
             try:
                 r = session.post(
@@ -132,14 +172,31 @@ def probe_chatbot(
                 )
             except requests.RequestException:
                 continue
-            if r.status_code == 404:
-                continue
-            auth = "bearer" if r.status_code in (401, 403) else "unknown"
-            return ProbeResult(
-                kind="chatbot",
-                auth=auth,
-                meta={"endpoint": path, "scheme": scheme, "http_status": r.status_code},
-            )
+
+            if r.status_code == 200:
+                try:
+                    data = r.json()
+                except ValueError:
+                    data = None
+                if _looks_like_chat_json(data):
+                    return ProbeResult(
+                        kind="chatbot",
+                        auth="none",
+                        meta={"endpoint": path, "scheme": scheme, "http_status": 200},
+                    )
+                continue  # 200 but not a chat body — not enough evidence
+
+            if r.status_code in (401, 403):
+                blob = (_headers_lower(r).get("www-authenticate", "") + " "
+                        + (getattr(r, "text", "") or "")[:300]).lower()
+                if any(hint in blob for hint in _LLM_AUTH_HINTS):
+                    return ProbeResult(
+                        kind="chatbot",
+                        auth="bearer",
+                        meta={"endpoint": path, "scheme": scheme, "http_status": r.status_code},
+                    )
+                continue  # generic auth/CSRF — not a chatbot
+
     return None
 
 
@@ -221,6 +278,8 @@ def probe_gradio(
 ProbeFn = Callable[..., "ProbeResult | None"]
 
 PROBES_BY_PORT: dict[int, list[ProbeFn]] = {
+    80:    [probe_openai_compat, probe_chatbot, probe_gradio],
+    443:   [probe_openai_compat, probe_chatbot, probe_gradio],
     11434: [probe_ollama],
     1234:  [probe_openai_compat, probe_chatbot],
     3000:  [probe_openai_compat, probe_chatbot],

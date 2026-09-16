@@ -24,9 +24,11 @@ from yhwach.probes.ai import (
 
 
 class FakeResponse:
-    def __init__(self, status_code: int = 200, json_data=None):
+    def __init__(self, status_code: int = 200, json_data=None, headers=None, text: str = ""):
         self.status_code = status_code
         self._json = json_data
+        self.headers = headers or {}
+        self.text = text
 
     def json(self):
         if self._json is None:
@@ -120,20 +122,43 @@ def test_probe_openai_compat_none_on_missing_endpoint() -> None:
 # probe_chatbot
 # ---------------------------------------------------------------------------
 
-def test_probe_chatbot_detects_first_working_path() -> None:
-    session = FakeSession({("POST", "/api/chat"): FakeResponse(422)})
+def test_probe_chatbot_detects_on_chat_json_body() -> None:
+    session = FakeSession({("POST", "/api/chat"): FakeResponse(200, {"response": "hi there"})})
     result = probe_chatbot(session, "10.0.0.1", 8000)
     assert result is not None
     assert result.kind == "chatbot"
+    assert result.auth == "none"
     assert result.meta["endpoint"] == "/api/chat"
-    assert result.meta["http_status"] == 422
 
 
-def test_probe_chatbot_marks_bearer_on_401() -> None:
-    session = FakeSession({("POST", "/api/chat"): FakeResponse(401)})
+def test_probe_chatbot_ignores_200_non_chat_json() -> None:
+    # A 200 that isn't a chat body (e.g. a generic {"status":"ok"}) is not enough.
+    session = FakeSession({("POST", "/api/chat"): FakeResponse(200, {"status": "ok"})})
+    assert probe_chatbot(session, "10.0.0.1", 8000) is None
+
+
+def test_probe_chatbot_bearer_only_with_llm_hint() -> None:
+    session = FakeSession({
+        ("POST", "/api/chat"): FakeResponse(401, text="Unauthorized: chat completion requires a token")
+    })
     result = probe_chatbot(session, "10.0.0.1", 8000)
     assert result is not None
     assert result.auth == "bearer"
+
+
+def test_probe_chatbot_rejects_jenkins_csrf_403() -> None:
+    # Regression: Iron Crown FW01 - Jenkins on 8080 returned 403 "No valid crumb"
+    # and was misclassified as a bearer chatbot. The X-Jenkins header must veto it.
+    session = FakeSession({
+        ("GET", "/"): FakeResponse(200, headers={"X-Jenkins": "2.555.1"}, text="<html>Jenkins</html>"),
+        ("POST", "/api/chat"): FakeResponse(403, text="No valid crumb was included in the request"),
+    })
+    assert probe_chatbot(session, "192.168.239.10", 8080) is None
+
+
+def test_probe_chatbot_ignores_bare_403_without_llm_hint() -> None:
+    session = FakeSession({("POST", "/api/chat"): FakeResponse(403, text="Forbidden")})
+    assert probe_chatbot(session, "10.0.0.1", 8000) is None
 
 
 def test_probe_chatbot_ignores_404s() -> None:
@@ -201,10 +226,10 @@ def test_probes_for_port_unknown_returns_empty() -> None:
 
 
 def test_run_probes_returns_first_hit_and_stops() -> None:
-    # Port 8000 tries openai_compat first, then chatbot. Set up so openai fails
-    # (no /v1/models) but chatbot succeeds.
+    # Port 8000 tries openai_compat first, then chatbot. openai fails (no
+    # /v1/models); chatbot succeeds via a 200 chat-json body.
     session = FakeSession({
-        ("POST", "/api/chat"): FakeResponse(200),
+        ("POST", "/api/chat"): FakeResponse(200, {"reply": "pong"}),
     })
     result = run_probes(session, "10.0.0.1", 8000)
     assert result is not None

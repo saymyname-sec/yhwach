@@ -293,6 +293,98 @@ def selftest(fixtures_dir: str | None) -> None:
 
 
 @main.command()
+@click.option("--risk", type=click.Choice(["read_only", "propose", "destructive"]), default=None,
+              help="Filter by risk.")
+def actions(risk: str | None) -> None:
+    """List the registered actions (emits -> concrete commands)."""
+    from yhwach.actions import ACTION_REGISTRY
+
+    for aid in sorted(ACTION_REGISTRY):
+        a = ACTION_REGISTRY[aid]
+        if risk and a.risk != risk:
+            continue
+        runflag = "run" if (a.risk == "read_only" and a.runnable) else "render-only"
+        click.echo(f"{aid:<28} {a.risk:<12} {runflag}")
+        if a.note:
+            click.echo(f"    note: {a.note}")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--task", "task_id", required=True, type=int, help="Task id (from `yhwach next`).")
+@click.option("--go", is_flag=True, default=False,
+              help="Execute read-only actions and capture output to loot/ (default: render only).")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
+    """Render (and with --go, execute read-only) the actions for a task.
+
+    Proposal-tier and render-only actions are printed for the operator to run,
+    never auto-executed — Yhwach proposes, the operator exploits.
+    """
+    import json as _json
+
+    from yhwach.actions import context_from_surface, get_action, render_action, run_action
+    from yhwach.playbooks import default_playbook_dir, load_rules
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+
+    rules = {r.id: r for r in load_rules(default_playbook_dir())}
+
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        row = conn.execute(
+            "SELECT t.playbook_rule_id AS rule_id, h.ip AS ip, s.meta_json AS meta, "
+            "svc.port AS port "
+            "FROM task t JOIN host h ON h.id = t.target_host_id "
+            "LEFT JOIN surface s ON s.id = t.target_surface_id "
+            "LEFT JOIN service svc ON svc.id = s.service_id "
+            "WHERE t.id = ? AND t.engagement_id = ?",
+            (task_id, eng_id),
+        ).fetchone()
+
+    if row is None:
+        click.echo(f"[!] Task {task_id} not found in lab '{lab}'.", err=True)
+        sys.exit(2)
+
+    rule = rules.get(row["rule_id"])
+    if rule is None:
+        click.echo(f"[!] Rule '{row['rule_id']}' not found in playbooks.", err=True)
+        sys.exit(2)
+
+    try:
+        meta = _json.loads(row["meta"]) if row["meta"] else {}
+    except (ValueError, TypeError):
+        meta = {}
+    ctx = context_from_surface(row["ip"], row["port"] or "PORT", meta)
+    loot_dir = path.parent.parent / "loot"
+
+    click.echo(f"== Task {task_id}: {row['rule_id']} @ {row['ip']} ==")
+    for emit in rule.emits:
+        action = get_action(emit.get("action", ""))
+        if action is None:
+            click.echo(f"[-] {emit.get('action', '?')}: no command mapped")
+            continue
+        rendered = render_action(action, ctx)
+        can_run = action.risk == "read_only" and action.runnable
+        for cmd in rendered:
+            click.echo(f"  $ {cmd}" + ("" if can_run else f"   [{action.risk}, render-only]"))
+        if go and can_run:
+            for res in run_action(action, ctx, loot_dir=loot_dir):
+                head = "\n".join((res["output"] or "").splitlines()[:8])
+                click.echo(f"    -> rc={res['returncode']}  loot={res.get('loot_file','-')}")
+                if head.strip():
+                    click.echo("    | " + head.replace("\n", "\n    | "))
+        elif go and not can_run:
+            click.echo(f"    (skipped --go: {action.risk}/render-only — operator runs this)")
+
+
+@main.command()
 def persona() -> None:
     """Print the operator persona in effect (the reasoning frame Yhwach injects)."""
     import hashlib

@@ -160,10 +160,11 @@ def top_tasks(
     return conn.execute(
         "SELECT t.id, t.kind, t.playbook_rule_id, t.technique_class, t.rationale, "
         "t.risk, t.autonomy, t.ev_score, t.status, h.ip AS host_ip, "
-        "s.kind AS surface_kind "
+        "s.kind AS surface_kind, s.meta_json AS surface_meta, svc.port AS surface_port "
         "FROM task t "
         "JOIN host h ON h.id = t.target_host_id "
         "LEFT JOIN surface s ON s.id = t.target_surface_id "
+        "LEFT JOIN service svc ON svc.id = s.service_id "
         "WHERE t.engagement_id = ? AND t.status = 'pending' "
         "ORDER BY CASE t.technique_class WHEN 'ai' THEN 0 ELSE 1 END ASC, "
         "t.ev_score DESC, t.id ASC "

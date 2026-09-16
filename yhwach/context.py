@@ -99,10 +99,13 @@ def build_context(
     if not tasks:
         lines.append("(none — run `yhwach probe` then `yhwach plan`)")
     else:
+        import json as _json
+
+        from yhwach.actions import context_from_surface, get_action, render_action
+
         for i, t in enumerate(tasks, 1):
             rule = rule_by_id.get(t["playbook_rule_id"])
             maps = ",".join(rule.maps) if rule and rule.maps else "?"
-            emits = ", ".join(e.get("action", "?") for e in rule.emits) if rule else "?"
             routes = (rule.routes if rule and rule.routes else "")
             source = (rule.source if rule and rule.source else "")
             lines.append(
@@ -110,7 +113,24 @@ def build_context(
                 f"[{t['autonomy']}]  {maps}"
             )
             lines.append(f"     target: {t['host_ip']} / {t['surface_kind']} surface")
-            lines.append(f"     emits:  {emits}")
+
+            # Render concrete commands for each emitted action.
+            meta = {}
+            try:
+                meta = _json.loads(t["surface_meta"]) if t["surface_meta"] else {}
+            except (ValueError, TypeError):
+                meta = {}
+            ctx = context_from_surface(t["host_ip"], t["surface_port"] or "PORT", meta)
+
+            emits = rule.emits if rule else []
+            for emit in emits:
+                action = get_action(emit.get("action", ""))
+                if action is None:
+                    lines.append(f"     - {emit.get('action', '?')}: (no command mapped yet)")
+                    continue
+                for cmd in render_action(action, ctx):
+                    flag = "" if (action.risk == "read_only" and action.runnable) else f"  [{action.risk}]"
+                    lines.append(f"     $ {cmd}{flag}")
             if routes:
                 lines.append(f"     route:  {routes}")
             if source:

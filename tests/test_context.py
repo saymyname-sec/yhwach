@@ -63,7 +63,8 @@ def test_context_includes_frame_state_and_candidates(tmp_db: Path) -> None:
     assert "ollama_unauth_api" in block
     assert "EV=15.0" in block
     assert "LLM06" in block
-    assert "probe_ollama_models" in block
+    # The candidate now shows the rendered concrete command, not the action name.
+    assert "curl -sk http://10.0.0.5:11434/api/tags" in block
     assert "/osai-mcp-attack" in block
     # Task instruction.
     assert "## YOUR TASK" in block

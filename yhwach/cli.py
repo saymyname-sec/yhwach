@@ -183,7 +183,8 @@ def status(lab: str, db_path: str | None) -> None:
 @main.command()
 @click.option("--lab", required=True, help="Lab name (must exist).")
 @click.option("--target", required=True, help="IP/CIDR to scan (must be in scope).")
-@click.option("--ports", default=None, help="Port spec (e.g. '1-1000' or '80,443'); default nmap top-1000.")
+@click.option("--ports", default=None, help="Port spec (e.g. '1-1000' or '80,443'). "
+              "DEFAULT: full-port scan (-p-, all 65535). Narrow only for a deliberate re-scan.")
 @click.option("--hexstrike-url", default=None, help=f"HexStrike base URL (default {_HEXSTRIKE_DEFAULT}).")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
 def enum(lab: str, target: str, ports: str | None, hexstrike_url: str | None,
@@ -192,6 +193,10 @@ def enum(lab: str, target: str, ports: str | None, hexstrike_url: str | None,
 
     Yhwach owns the world model; HexStrike owns tool execution. The raw XML is
     saved to recon/ for the report.
+
+    Every new endpoint gets a FULL-PORT scan (-p-) by default — top-ports scans
+    miss high-port scored surfaces (AI/LLM APIs, ELK, mgmt panels). Pass --ports
+    only to deliberately narrow a re-scan.
     """
     from yhwach.hexstrike import DEFAULT_URL, HexStrikeClient, HexStrikeError, is_loopback
     from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml_text

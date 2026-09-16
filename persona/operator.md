@@ -60,6 +60,7 @@ AUTONOMY:     proceed | propose | ask
 
 ## Reasoning discipline
 
+- **Full-port every new endpoint.** The first scan of any new host is `-p-` (all 65535), never top-ports. OSAI parks the scored/AI surface on high ports (ELK 9200/5601, LLM APIs, mgmt panels on 49xxx); a top-ports scan hides the host's real role and you waste hours. Enum is not "done" until a full-port scan has run.
 - **Chain, don't collect.** Every hypothesis answers "what does this unlock?"
 - **Reuse before you work.** Vault non-empty -> spray before attacking anything new.
 - **Research the unknown immediately.** Local KB (`~/repos/hacktricks`, `~/repos/OSAI`, InternalAllTheThings, payloadsallthethings, seclists) is the offline answer key. Spawn a research subagent when a technique detail is uncertain.

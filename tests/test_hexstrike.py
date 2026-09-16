@@ -71,6 +71,16 @@ def test_nmap_xml_builds_command_and_returns_stdout() -> None:
     assert sess.posted["command"].endswith("10.10.10.9")
 
 
+def test_nmap_xml_defaults_to_full_port_scan() -> None:
+    # No `ports` -> every new endpoint gets a full-port sweep (-p-), never
+    # top-1000. Regression guard: top-ports scans miss high-port scored
+    # surfaces (AI APIs, ELK on 9200/5601, mgmt panels on 49xxx).
+    sess = FakeSession(post_resp=FakeResp(200, {"stdout": _NMAP_XML, "success": True, "return_code": 0}))
+    c = HexStrikeClient(session=sess)
+    c.nmap_xml("10.10.10.9")
+    assert "-p- " in sess.posted["command"]
+
+
 def test_nmap_xml_raises_on_failure() -> None:
     sess = FakeSession(post_resp=FakeResp(200, {"stdout": "", "success": False, "stderr": "boom"}))
     c = HexStrikeClient(session=sess)

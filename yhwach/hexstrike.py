@@ -49,10 +49,19 @@ class HexStrikeClient:
         target: str,
         *,
         ports: str | None = None,
-        flags: str = "-sV -Pn -T4",
+        flags: str = "-sV -Pn -T4 --min-rate 900",
     ) -> str:
-        """Run nmap through HexStrike and return the XML (from `-oX -`)."""
-        portarg = f"-p {ports} " if ports else ""
+        """Run nmap through HexStrike and return the XML (from `-oX -`).
+
+        When `ports` is None the scan covers ALL 65535 TCP ports (`-p-`), not
+        nmap's top-1000 default. Rationale: OSAI targets routinely park the
+        scored surface on a high port (e.g. an AI/LLM API on 8080, an ELK
+        stack on 9200/5601, a management panel on 49xxx). A top-ports scan
+        silently skips them and the operator never learns the host's real
+        role. Full-port is the default for every new endpoint; pass an explicit
+        `ports` spec only to deliberately narrow a re-scan.
+        """
+        portarg = f"-p {ports} " if ports else "-p- "
         cmd = f"nmap {flags} {portarg}--open -oX - {target}"
         data = self.run_command(cmd)
         stdout = data.get("stdout", "")

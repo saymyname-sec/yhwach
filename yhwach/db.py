@@ -171,6 +171,36 @@ def scanned_hosts_with_ports(
     return [dict(r) for r in rows]
 
 
+def add_finding(
+    conn: sqlite3.Connection,
+    host_id: int | None,
+    surface_id: int | None,
+    cls: str,
+    title: str,
+    severity: str,
+    evidence: str,
+    playbook_rule_id: str | None = None,
+) -> tuple[int, bool]:
+    """Insert or update a finding, deduped by (host_id, class, title)."""
+    now = _now_utc()
+    existing = conn.execute(
+        "SELECT id FROM finding WHERE host_id IS ? AND class = ? AND title = ?",
+        (host_id, cls, title),
+    ).fetchone()
+    if existing is not None:
+        conn.execute(
+            "UPDATE finding SET evidence = ?, updated_at = ? WHERE id = ?",
+            (evidence, now, existing["id"]),
+        )
+        return int(existing["id"]), False
+    cur = conn.execute(
+        "INSERT INTO finding (host_id, surface_id, class, title, severity, evidence, "
+        "playbook_rule_id, status, discovered_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+        (host_id, surface_id, cls, title, severity, evidence, playbook_rule_id, now),
+    )
+    return int(cur.lastrowid), True
+
+
 def all_services_for_scanned_hosts(
     conn: sqlite3.Connection,
     engagement_id: int,

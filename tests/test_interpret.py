@@ -1,0 +1,75 @@
+"""Tests for deterministic finding extraction from action output."""
+from __future__ import annotations
+
+from pathlib import Path
+
+from yhwach import db as yhdb
+from yhwach.interpret import interpret_output
+
+
+def test_ollama_models_finding() -> None:
+    out = '{"models":[{"name":"llama3.2"},{"name":"mistral"}]}'
+    f = interpret_output("probe_ollama_models", out, {"URL": "http://10.0.0.5:11434"})
+    assert f is not None
+    assert f.cls == "LLM06"
+    assert f.severity == "high"
+    assert "2 models" in f.evidence
+
+
+def test_ollama_empty_is_no_finding() -> None:
+    assert interpret_output("probe_ollama_models", '{"models":[]}', {}) is None
+
+
+def test_openai_models_finding() -> None:
+    out = 'HTTP noise\n{"object":"list","data":[{"id":"gpt-4"},{"id":"gpt-3.5"}]}'
+    f = interpret_output("enumerate_models", out, {"URL": "http://x"})
+    assert f is not None and f.cls == "LLM02"
+
+
+def test_mcp_tools_finding_is_critical() -> None:
+    out = '{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"run_command"}]}}'
+    f = interpret_output("mcp_tools_list", out, {"URL": "http://x"})
+    assert f is not None
+    assert f.cls == "LLM06"
+    assert f.severity == "critical"
+
+
+def test_jenkins_api_finding() -> None:
+    out = '{"_class":"hudson.model.Hudson","mode":"NORMAL"}'
+    f = interpret_output("jenkins_auth_check", out, {"URL": "http://x"})
+    assert f is not None and f.cls == "CWE-200"
+
+
+def test_smb_pwn3d_is_critical() -> None:
+    out = "SMB  10.0.0.1  445  DC01  [+] domain\\admin (Pwn3d!)"
+    f = interpret_output("netexec_smb_null", out, {"IP": "10.0.0.1"})
+    assert f is not None and f.severity == "critical"
+
+
+def test_rag_upload_finding() -> None:
+    out = "FOUND /api/documents -> 200\nFOUND /upload -> 401"
+    f = interpret_output("probe_rag_upload_paths", out, {"URL": "http://x"})
+    assert f is not None and f.cls == "LLM04"
+
+
+def test_unknown_action_returns_none() -> None:
+    assert interpret_output("no_such_action", "whatever", {}) is None
+
+
+def test_garbage_output_returns_none() -> None:
+    assert interpret_output("probe_ollama_models", "not json at all", {}) is None
+
+
+def test_add_finding_dedupes(tmp_db: Path) -> None:
+    with yhdb.transaction(tmp_db) as conn:
+        eng = yhdb.upsert_engagement(conn, lab="f", scope="10.0.0.0/24")
+        cur = conn.execute(
+            "INSERT INTO host (engagement_id, ip, stage, first_seen) "
+            "VALUES (?, '10.0.0.5', 'scanned', '2026-01-01T00:00:00Z')", (eng,))
+        hid = int(cur.lastrowid)
+        id1, c1 = yhdb.add_finding(conn, hid, None, "LLM06", "Ollama exposed", "high", "2 models")
+        id2, c2 = yhdb.add_finding(conn, hid, None, "LLM06", "Ollama exposed", "high", "3 models")
+        n = conn.execute("SELECT COUNT(*) AS n FROM finding").fetchone()["n"]
+    assert id1 == id2
+    assert c1 is True and c2 is False
+    assert n == 1

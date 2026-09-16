@@ -339,7 +339,8 @@ def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
             click.echo(f"[!] Unknown lab '{lab}'.", err=True)
             sys.exit(2)
         row = conn.execute(
-            "SELECT t.playbook_rule_id AS rule_id, h.ip AS ip, s.meta_json AS meta, "
+            "SELECT t.playbook_rule_id AS rule_id, t.target_host_id AS host_id, "
+            "t.target_surface_id AS surface_id, h.ip AS ip, s.meta_json AS meta, "
             "svc.port AS port "
             "FROM task t JOIN host h ON h.id = t.target_host_id "
             "LEFT JOIN surface s ON s.id = t.target_surface_id "
@@ -375,13 +376,60 @@ def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
         for cmd in rendered:
             click.echo(f"  $ {cmd}" + ("" if can_run else f"   [{action.risk}, render-only]"))
         if go and can_run:
+            from yhwach.interpret import interpret_output
+
             for res in run_action(action, ctx, loot_dir=loot_dir):
                 head = "\n".join((res["output"] or "").splitlines()[:8])
                 click.echo(f"    -> rc={res['returncode']}  loot={res.get('loot_file','-')}")
                 if head.strip():
                     click.echo("    | " + head.replace("\n", "\n    | "))
+                # Deterministic finding extraction.
+                found = interpret_output(action.id, res.get("output", ""), ctx)
+                if found is not None:
+                    with yhdb.transaction(path) as c2:
+                        _, created = yhdb.add_finding(
+                            c2, row["host_id"], row["surface_id"], found.cls,
+                            found.title, found.severity, found.evidence, row["rule_id"],
+                        )
+                    click.echo(
+                        f"    [finding] {found.severity.upper()} {found.cls} "
+                        f"{found.title} ({'new' if created else 'updated'})"
+                    )
         elif go and not can_run:
             click.echo(f"    (skipped --go: {action.risk}/render-only — operator runs this)")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def findings(lab: str, db_path: str | None) -> None:
+    """List recorded findings, most severe first."""
+    order = "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 " \
+            "WHEN 'medium' THEN 2 ELSE 3 END"
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        rows = conn.execute(
+            "SELECT f.class, f.title, f.severity, f.evidence, h.ip AS ip "
+            "FROM finding f LEFT JOIN host h ON h.id = f.host_id "
+            "WHERE (h.engagement_id = ? OR f.host_id IS NULL) AND f.status = 'open' "
+            f"ORDER BY {order}, f.id",
+            (eng_id,),
+        ).fetchall()
+    if not rows:
+        click.echo("[!] No findings yet. Run `yhwach run --task N --go` on read-only tasks.")
+        return
+    click.echo(f"== Findings for '{lab}' ({len(rows)}) ==")
+    for r in rows:
+        click.echo(f"[{r['severity'].upper():<8}] {r['class']:<8} {r['ip'] or '-':<16} {r['title']}")
+        if r["evidence"]:
+            click.echo(f"           {r['evidence']}")
 
 
 @main.command()

@@ -49,6 +49,16 @@ class Rule:
     routes: str | None = None
     source: str | None = None
     _class: str | None = None
+    _technique: str | None = None
+
+    @property
+    def technique(self) -> str:
+        """The exhaustion key. Explicit `technique:` wins; else the rule id.
+
+        Rules that share a technique (e.g. two chatbot-injection variants) can
+        set the same `technique:` so consuming one retires the family.
+        """
+        return self._technique or self.id
 
     @property
     def ev_score(self) -> float:
@@ -151,6 +161,7 @@ def _build_rule(entry: dict, *, source_file: str) -> Rule:
         routes=entry.get("routes"),
         source=entry.get("source"),
         _class=klass,
+        _technique=entry.get("technique"),
     )
 
 

@@ -164,6 +164,12 @@ def plan(lab: str, db_path: str | None) -> None:
     click.echo(f"[+] Rules loaded: {len(rules)}")
     click.echo(f"[+] Rules matched: {report.rules_matched}")
     click.echo(f"[+] Tasks: {report.tasks_created} new, {report.tasks_updated} updated")
+    if report.rules_skipped_consumed:
+        click.echo("[i] Skipped (technique already consumed): "
+                   + ", ".join(report.rules_skipped_consumed))
+    if report.surfaces_filtered_denylist:
+        click.echo(f"[i] Filtered {report.surfaces_filtered_denylist} surface(s) on "
+                   "denylisted (dev-artifact) hosts")
     if report.rules_skipped_unsupported:
         click.echo(
             "[i] Skipped (unsupported when-keys, land in a later phase): "
@@ -325,6 +331,7 @@ def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
 
     from yhwach.actions import context_from_surface, get_action, render_action, run_action
     from yhwach.playbooks import default_playbook_dir, load_rules
+    from yhwach.primitives import check_denylist, load_denylist, record_denylist_hit
 
     path = _db_path(db_path)
     if not path.exists():
@@ -332,6 +339,7 @@ def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
         sys.exit(2)
 
     rules = {r.id: r for r in load_rules(default_playbook_dir())}
+    _denylist = load_denylist(default_playbook_dir())
 
     with yhdb.transaction(path) as conn:
         eng_id = yhdb.engagement_id_for(conn, lab)
@@ -395,8 +403,48 @@ def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
                         f"    [finding] {found.severity.upper()} {found.cls} "
                         f"{found.title} ({'new' if created else 'updated'})"
                     )
+                # Lore denylist: flag OffSec dev artifacts in the output.
+                artifact = check_denylist(res.get("output", ""), _denylist)
+                if artifact is not None:
+                    with yhdb.transaction(path) as c3:
+                        if record_denylist_hit(c3, eng_id, row["host_id"], artifact):
+                            click.echo(f"    [denylist] '{artifact}' — host tagged "
+                                       "dev_artifact, will be filtered from ranking")
         elif go and not can_run:
             click.echo(f"    (skipped --go: {action.risk}/render-only — operator runs this)")
+
+
+@main.command()
+@click.argument("technique")
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--host", "host_ip", default=None, help="Host where it landed (optional).")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def consume(technique: str, lab: str, host_ip: str | None, db_path: str | None) -> None:
+    """Mark a technique consumed — the planner will stop proposing it this engagement.
+
+    TECHNIQUE is a rule id or a rule's `technique:` key. Use after a technique
+    lands: OSAI labs don't reuse infra flaws, so re-proposing it wastes turns.
+    """
+    from yhwach.primitives import mark_technique_consumed
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        host_id = None
+        if host_ip:
+            r = conn.execute(
+                "SELECT id FROM host WHERE engagement_id = ? AND ip = ?", (eng_id, host_ip)
+            ).fetchone()
+            host_id = r["id"] if r else None
+        mark_technique_consumed(conn, eng_id, technique, host_id)
+    click.echo(f"[+] Technique '{technique}' marked consumed for '{lab}'. "
+               "Re-run `yhwach plan` to drop it from the queue.")
 
 
 @main.command()

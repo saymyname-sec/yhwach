@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from yhwach.playbooks import Rule
+from yhwach.primitives import consumed_techniques, denylisted_host_ids
 
 SUPPORTED_WHEN_KEYS = {"surface", "auth", "product", "os"}
 
@@ -22,6 +23,8 @@ class MatchReport:
     tasks_updated: int = 0
     rules_matched: int = 0
     rules_skipped_unsupported: list[str] = field(default_factory=list)
+    rules_skipped_consumed: list[str] = field(default_factory=list)
+    surfaces_filtered_denylist: int = 0
 
 
 def _now_utc() -> str:
@@ -41,8 +44,14 @@ def match_rules(
     engagement_id: int,
     rules: list[Rule],
 ) -> MatchReport:
-    """Match every rule against current surfaces; upsert a task per matching surface."""
+    """Match every rule against current surfaces; upsert a task per matching surface.
+
+    Applies the cross-cutting primitives: consumed techniques are skipped, and
+    surfaces on denylisted (dev-artifact) hosts are filtered out.
+    """
     report = MatchReport()
+    consumed = consumed_techniques(conn, engagement_id)
+    denylisted = denylisted_host_ids(conn, engagement_id)
 
     for rule in rules:
         unsupported = set(rule.when.keys()) - SUPPORTED_WHEN_KEYS
@@ -50,10 +59,16 @@ def match_rules(
             report.rules_skipped_unsupported.append(rule.id)
             continue
 
+        if rule.technique in consumed:
+            report.rules_skipped_consumed.append(rule.id)
+            continue
+
         surfaces = _matching_surfaces(conn, engagement_id, rule)
-        if surfaces:
+        kept = [s for s in surfaces if s["host_id"] not in denylisted]
+        report.surfaces_filtered_denylist += len(surfaces) - len(kept)
+        if kept:
             report.rules_matched += 1
-        for surf in surfaces:
+        for surf in kept:
             created, updated = _upsert_task(conn, engagement_id, rule, surf)
             report.tasks_created += created
             report.tasks_updated += updated

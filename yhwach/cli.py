@@ -729,6 +729,13 @@ def report(lab: str, out_path: str | None, db_path: str | None) -> None:
 
 
 @main.command()
+def mcp() -> None:
+    """Run Yhwach as an MCP server (stdio) for Claude Code. Needs `pip install yhwach[mcp]`."""
+    from yhwach.mcp_server import run
+    run()
+
+
+@main.command()
 def persona() -> None:
     """Print the operator persona in effect (the reasoning frame Yhwach injects)."""
     import hashlib

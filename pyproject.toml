@@ -33,6 +33,9 @@ dev = [
     "ruff>=0.6",
     "black>=24.0",
 ]
+mcp = [
+    "mcp>=1.0,<2",
+]
 
 [project.scripts]
 yhwach = "yhwach.cli:main"

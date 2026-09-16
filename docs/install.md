@@ -38,10 +38,10 @@ Yhwach's RESEARCH step reads from local repos already used by OSAI operators:
 
 ```bash
 mkdir -p ~/repos && cd ~/repos
-git clone --depth 1 https://github.com/HackTricks-wiki/hacktricks
-git clone --depth 1 https://github.com/swisskyrepo/PayloadsAllTheThings
-git clone --depth 1 https://github.com/swisskyrepo/InternalAllTheThings
-git clone --depth 1 https://github.com/danielmiessler/SecLists
+git clone --depth 1 https://github.com/HackTricks-wiki/hacktricks.git
+git clone --depth 1 https://github.com/swisskyrepo/PayloadsAllTheThings.git
+git clone --depth 1 https://github.com/swisskyrepo/InternalAllTheThings.git
+git clone --depth 1 https://github.com/danielmiessler/SecLists.git
 # OSAI notes: your private repo, checked out separately.
 ```
 

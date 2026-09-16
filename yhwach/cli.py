@@ -31,6 +31,17 @@ def _db_path(override: str | None = None) -> Path:
     return Path(os.path.expanduser(raw))
 
 
+def _artifact_dir(path: Path, name: str) -> Path:
+    """Locate an engagement artifact dir (recon/loot/...) relative to the DB.
+
+    For the canonical layout (<lab>/state/yhwach.db) this is <lab>/<name>; for a
+    flat DB path it is <db_dir>/<name>, so a bare /tmp/x.db never resolves to /.
+    """
+    if path.parent.name == "state":
+        return path.parent.parent / name
+    return path.parent / name
+
+
 @click.group()
 @click.version_option(__version__, prog_name="yhwach")
 def main() -> None:
@@ -204,10 +215,13 @@ def enum(lab: str, target: str, ports: str | None, hexstrike_url: str | None,
         click.echo(f"[!] {e}", err=True)
         sys.exit(2)
 
-    recon = path.parent.parent / "recon"
-    recon.mkdir(parents=True, exist_ok=True)
-    safe = "".join(c if c.isalnum() else "_" for c in target)[:40]
-    (recon / f"hexstrike_nmap_{safe}.xml").write_text(xml, encoding="utf-8")
+    recon = _artifact_dir(path, "recon")
+    try:
+        recon.mkdir(parents=True, exist_ok=True)
+        safe = "".join(c if c.isalnum() else "_" for c in target)[:40]
+        (recon / f"hexstrike_nmap_{safe}.xml").write_text(xml, encoding="utf-8")
+    except OSError as e:  # best-effort; ingest is what matters
+        click.echo(f"[i] Could not save recon XML ({e}); continuing with ingest.", err=True)
 
     with yhdb.transaction(path) as conn:
         eng_id = yhdb.engagement_id_for(conn, lab)
@@ -458,7 +472,7 @@ def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
     except (ValueError, TypeError):
         meta = {}
     ctx = context_from_surface(row["ip"], row["port"] or "PORT", meta)
-    loot_dir = path.parent.parent / "loot"
+    loot_dir = _artifact_dir(path, "loot")
 
     click.echo(f"== Task {task_id}: {row['rule_id']} @ {row['ip']} ==")
     for emit in rule.emits:

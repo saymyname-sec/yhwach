@@ -152,6 +152,156 @@
   source: 'osai/05 . indirect injection via document upload (careers/resume screening)'
   authorized_only: true
 
+# --- AI advanced attack techniques (self-learned from OSAI modules + Shadow Supply) ---
+
+- id: pickle_deserialization_rce
+  when: { surface: chatbot, findings_include: pickle_endpoint }
+  class: ai
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: craft_pickle_sympify
+  maps: [LLM05, CWE-502]
+  points: 15
+  risk: propose
+  routes: /osai-inject
+  source: 'osai/10 + joplin . sympify pickle bypass (portable, evades picklescan)'
+  authorized_only: true
+
+- id: mcp_tool_description_poisoning
+  when: { surface: mcp }
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: mcp_tools_list
+    - action: craft_mcp_tool_description_poison
+  maps: [LLM01, LLM07]
+  points: 15
+  risk: propose
+  routes: /osai-mcp-attack
+  source: 'osai/07 . MCP tool descriptions are prompt-injection vectors for consuming LLMs'
+  technique: mcp_attack
+  authorized_only: true
+
+- id: jinja2_ssti_ai_ticketing
+  when: { surface: web, findings_include: jinja2_template }
+  class: ai
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: craft_jinja2_ssti_split
+  maps: [LLM01, CWE-1336]
+  points: 15
+  risk: propose
+  routes: /osai-web-exploit
+  source: 'osai/08 . split Jinja2 SSTI across ticket fields (subject+body concat)'
+  authorized_only: true
+
+- id: rag_kb_advanced_poisoning
+  when: { surface: chatbot, findings_include: rag_upload }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: craft_two_file_injection
+    - action: craft_character_spacing_bypass
+    - action: probe_document_summarizer
+  maps: [LLM01, LLM04]
+  points: 15
+  risk: propose
+  routes: /osai-rag-attack
+  source: 'osai/05 + shadow-supply . advanced RAG poisoning (two-file template, character spacing)'
+  technique: rag_poisoning
+  authorized_only: true
+
+- id: openapi_surface_discovery
+  when: { surface: openai_compat }
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: probe_openapi_spec
+  maps: [LLM06]
+  points: 15
+  risk: read_only
+  routes: /osai-ai-hunter
+  source: 'osai/02 + joplin . OpenAPI specs reveal all endpoints and auth requirements'
+  authorized_only: true
+
+- id: rag_kb_probing
+  when: { surface: chatbot }
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: rag_kb_probe
+  maps: [LLM01, LLM02]
+  points: 15
+  risk: read_only
+  routes: /osai-rag-attack
+  source: 'osai/05 . probe KB contents, chunk sizes, source filenames before attacking'
+  technique: rag_probing
+  authorized_only: true
+
+- id: embedding_collision_attack
+  when: { surface: chatbot, findings_include: rag_upload }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: craft_embedding_collision_doc
+    - action: craft_retrieval_hijack
+    - action: craft_cyrillic_homoglyph_bypass
+    - action: craft_output_filter_substitution
+  maps: [LLM01, LLM04]
+  points: 15
+  risk: propose
+  routes: /osai-rag-attack
+  source: 'osai/05+06 . embedding collision PDF + retrieval hijacking + homoglyph bypass'
+  technique: rag_poisoning
+  authorized_only: true
+
+- id: embedding_inversion_pipeline
+  when: { surface: vectordb, auth: none }
+  likelihood: H
+  time_cost: slow
+  emits:
+    - action: embedding_model_fingerprint
+    - action: chunk_triage_pipeline
+    - action: embedding_inversion
+  maps: [LLM08, LLM02]
+  points: 15
+  risk: read_only
+  routes: /osai-embed
+  source: 'osai/06 + joplin . fingerprint model -> triage chunks -> invert embeddings'
+  technique: embedding_attack
+  authorized_only: true
+
+- id: openapi_surface_discovery_web
+  when: { surface: web }
+  class: ai
+  likelihood: L
+  time_cost: med
+  emits:
+    - action: probe_openapi_spec
+  maps: [LLM06]
+  points: 10
+  risk: read_only
+  routes: /osai-ai-hunter
+  source: 'osai/02 . OpenAPI/Swagger discovery on web surfaces'
+  authorized_only: true
+
+- id: vectordb_opsec_check
+  when: { surface: vectordb, auth: none }
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: qdrant_read_detection_rules
+  maps: [LLM08]
+  points: 15
+  risk: read_only
+  routes: /osai-embed
+  source: 'shadow-supply . OPSEC: read detection_rules from Qdrant BEFORE acting'
+  authorized_only: true
+
 # --- Forward-compatible rule: uses a `when` key the Phase 1.3 matcher does not
 # --- yet support (findings_include). It stays here as valid config and starts
 # --- matching once finding-based conditions land. The matcher reports it as

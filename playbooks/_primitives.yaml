@@ -56,3 +56,43 @@
   emits:
     - action: run_initial_hexstrike_smart_scan
   authorized_only: true
+
+# --- OPSEC invariants (self-learned from Shadow Supply + Iron Crown) ---
+
+- id: opsec_qdrant_detection_rules
+  kind: invariant
+  description: |
+    ALWAYS read the Qdrant detection_rules collection (or equivalent security
+    policy store) BEFORE taking offensive action against an AI target. OSAI labs
+    store YARA/Sigma-style rules in vector DBs; tripping them may fail the
+    objective or trigger an alert that blocks further progress.
+    Self-learned from Shadow Supply: Qdrant contained detection rules that would
+    have caught unscreened exploit traffic.
+  applies_to: vectordb_actions
+  action: pre_check
+  authorized_only: true
+
+- id: opsec_never_hexstrike_metasploit
+  kind: invariant
+  description: |
+    NEVER use HexStrike's metasploit_run MCP tool. It is unreliable, creates
+    sessions that are hard to control, and has burned lab time in every
+    engagement where it was used. Use standalone exploit scripts or manual
+    MSF console instead.
+    Confirmed across Iron Crown + Shadow Supply + multiple module labs.
+  applies_to: hexstrike_actions
+  action: filter_out
+  authorized_only: true
+
+- id: pwn3d_auto_screenshot
+  kind: escalator
+  description: |
+    When a host reaches stage "pwn3d" (DA / root / objective flag captured),
+    automatically trigger the screenshot pipeline and record a milestone note
+    with the proof. This ensures exam evidence is captured before the session
+    state changes.
+    Added per Kapi's explicit request: notes + screenshots on every milestone.
+  triggers:
+    - stage_pwn3d
+  action: auto_screenshot_and_note
+  authorized_only: true

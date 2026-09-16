@@ -301,6 +301,80 @@ def probe_a2a(
     return None
 
 
+def probe_openapi(
+    session: requests.Session,
+    host: str,
+    port: int,
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> ProbeResult | None:
+    """Detect an OpenAPI/Swagger spec — reveals all endpoints and auth requirements."""
+    spec_paths = (
+        "/openapi.json", "/swagger.json", "/api-docs",
+        "/v1/openapi.json", "/api/openapi.json",
+    )
+    for scheme in ("http", "https"):
+        for path in spec_paths:
+            try:
+                r = session.get(f"{scheme}://{host}:{port}{path}", timeout=timeout)
+            except requests.RequestException:
+                continue
+            if r.status_code != 200:
+                continue
+            try:
+                data = r.json()
+            except ValueError:
+                continue
+            if not isinstance(data, dict):
+                continue
+            if any(k in data for k in ("openapi", "swagger", "paths", "info")):
+                paths = list(data.get("paths", {}).keys())[:20]
+                return ProbeResult(
+                    kind="openapi",
+                    auth="none",
+                    meta={
+                        "endpoint": path, "scheme": scheme,
+                        "version": data.get("openapi") or data.get("swagger"),
+                        "title": (data.get("info") or {}).get("title"),
+                        "paths": paths,
+                    },
+                )
+    return None
+
+
+def probe_vault(
+    session: requests.Session,
+    host: str,
+    port: int,
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> ProbeResult | None:
+    """Detect HashiCorp Vault by its /v1/sys/health endpoint."""
+    for scheme in ("http", "https"):
+        try:
+            r = session.get(f"{scheme}://{host}:{port}/v1/sys/health", timeout=timeout)
+        except requests.RequestException:
+            continue
+        if r.status_code not in (200, 429, 472, 473, 501, 503):
+            continue
+        try:
+            data = r.json()
+        except ValueError:
+            continue
+        if isinstance(data, dict) and "sealed" in data:
+            return ProbeResult(
+                kind="vault",
+                auth="token",
+                meta={
+                    "endpoint": "/v1/sys/health", "scheme": scheme,
+                    "version": data.get("version"),
+                    "sealed": data.get("sealed"),
+                    "initialized": data.get("initialized"),
+                },
+            )
+    return None
+
+
 def probe_vectordb(
     session: requests.Session,
     host: str,
@@ -349,22 +423,23 @@ def probe_vectordb(
 ProbeFn = Callable[..., "ProbeResult | None"]
 
 PROBES_BY_PORT: dict[int, list[ProbeFn]] = {
-    80:    [probe_openai_compat, probe_chatbot, probe_gradio, probe_a2a],
-    443:   [probe_openai_compat, probe_chatbot, probe_gradio, probe_a2a],
+    80:    [probe_openai_compat, probe_chatbot, probe_gradio, probe_a2a, probe_openapi],
+    443:   [probe_openai_compat, probe_chatbot, probe_gradio, probe_a2a, probe_openapi],
     6333:  [probe_vectordb],
+    8200:  [probe_vault],
     11434: [probe_ollama],
-    1234:  [probe_openai_compat, probe_chatbot],
-    3000:  [probe_openai_compat, probe_chatbot],
-    4000:  [probe_openai_compat, probe_chatbot],
-    5000:  [probe_openai_compat, probe_chatbot, probe_mcp],
-    5001:  [probe_openai_compat, probe_chatbot],
+    1234:  [probe_openai_compat, probe_chatbot, probe_openapi],
+    3000:  [probe_openai_compat, probe_chatbot, probe_openapi],
+    4000:  [probe_openai_compat, probe_chatbot, probe_openapi],
+    5000:  [probe_openai_compat, probe_chatbot, probe_mcp, probe_openapi],
+    5001:  [probe_openai_compat, probe_chatbot, probe_openapi],
     7860:  [probe_gradio, probe_chatbot],
-    8000:  [probe_openai_compat, probe_chatbot, probe_mcp, probe_gradio, probe_a2a, probe_vectordb],
-    8001:  [probe_openai_compat, probe_chatbot],
-    8080:  [probe_openai_compat, probe_chatbot, probe_mcp, probe_a2a, probe_vectordb],
-    8443:  [probe_openai_compat, probe_chatbot, probe_mcp],
+    8000:  [probe_openai_compat, probe_chatbot, probe_mcp, probe_gradio, probe_a2a, probe_vectordb, probe_openapi],
+    8001:  [probe_openai_compat, probe_chatbot, probe_openapi],
+    8080:  [probe_openai_compat, probe_chatbot, probe_mcp, probe_a2a, probe_vectordb, probe_openapi],
+    8443:  [probe_openai_compat, probe_chatbot, probe_mcp, probe_openapi],
     8888:  [probe_chatbot, probe_mcp],
-    9000:  [probe_openai_compat, probe_chatbot, probe_a2a],
+    9000:  [probe_openai_compat, probe_chatbot, probe_a2a, probe_openapi],
 }
 
 

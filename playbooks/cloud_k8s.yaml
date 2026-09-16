@@ -1,0 +1,81 @@
+# Yhwach — cloud / Kubernetes / AWS playbook.
+#
+# Self-learned from OSAI module 9 (AI Infrastructure & Deployment Exploits),
+# capstone labs, and Joplin notes. Covers IAM role chain escalation, K8s
+# cross-namespace secret exfil, SageMaker notebook privesc, SSM/CloudWatch
+# credential hunting, and GPU container escape.
+
+- id: k8s_sa_token_and_secrets
+  when: { surface: kubernetes }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: k8s_sa_token_enum
+    - action: k8s_secret_sweep
+  maps: [LLM06, CWE-200]
+  points: 15
+  risk: propose
+  routes: /osai-cloud-loot
+  source: 'osai/09 + capstone . K8s SA token theft + cross-namespace secret sweep'
+  authorized_only: true
+
+- id: k8s_privileged_escape
+  when: { surface: kubernetes, findings_include: pod_create_permission }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: k8s_privileged_pod_escape
+  maps: [LLM06, CWE-250]
+  points: 15
+  risk: destructive
+  routes: /osai-cloud-loot
+  source: 'osai/09 capstone . privileged pod with hostPID + nsenter for node root'
+  authorized_only: true
+
+- id: aws_iam_role_chain_escalation
+  when: { findings_include: aws_credentials }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: aws_iam_role_chain
+    - action: aws_sagemaker_enum
+    - action: aws_ssm_secret_dump
+    - action: aws_cloudwatch_cred_hunt
+    - action: aws_ecr_image_inspect
+  maps: [LLM06, CWE-269]
+  points: 15
+  risk: propose
+  routes: /osai-cloud-loot
+  source: 'osai/09 . 4-hop IAM chain: Lambda->DataScientist->MLOps->SageMaker'
+  authorized_only: true
+
+- id: aws_sagemaker_notebook_privesc
+  when: { findings_include: sagemaker_create_notebook }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: aws_sagemaker_notebook_privesc
+  maps: [LLM06, CWE-269]
+  points: 15
+  risk: destructive
+  routes: /osai-cloud-loot
+  source: 'osai/09 . CreateNotebookInstance+PassRole bypasses sts:AssumeRole'
+  authorized_only: true
+
+- id: gpu_container_escape
+  when: { surface: kubernetes, findings_include: nvidia_toolkit }
+  class: ai
+  likelihood: M
+  time_cost: slow
+  emits:
+    - action: gpu_container_escape_cve
+  maps: [CVE-2025-23266]
+  points: 15
+  risk: destructive
+  routes: /osai-cloud-loot
+  source: 'osai/09 . CVE-2025-23266: nvidia-container-toolkit LD_PRELOAD escape'
+  authorized_only: true

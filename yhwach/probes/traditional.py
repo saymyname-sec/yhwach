@@ -52,6 +52,9 @@ PORT_KIND: dict[int, str] = {
     8161: "activemq",       # ActiveMQ web console / Jolokia
     61616: "activemq_openwire",
     9092: "kafka",
+    8200: "vault",
+    6443: "kubernetes",     # K8s API server (default HTTPS)
+    10250: "kubelet",       # Kubelet API
 }
 
 # Ports worth an HTTP fingerprint when not matched by PORT_KIND.

@@ -1,0 +1,131 @@
+# Yhwach — supply-chain playbook.
+#
+# Self-learned from Shadow Supply (Challenge Lab): numpy.py hijack, PyPI
+# dependency poisoning, GitLab CI/CD variable exfiltration, Vault token theft.
+# Also incorporates patterns from OSAI modules 8 (code review evasion) and 11
+# (training pipeline attacks).
+#
+# Supply chain rules sit at the intersection of AI and traditional: the vector
+# is code/package/CI, but the target is often an AI pipeline or model.
+
+- id: pypi_supply_chain_inspect
+  when: { surface: web, findings_include: python_requirements }
+  class: ai
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: pip_requirements_audit
+    - action: pypi_package_inspect
+  maps: [LLM05, CWE-506]
+  points: 15
+  risk: propose
+  routes: /osai-supplychain
+  source: 'shadow-supply . Chain 2: numpy.py hijack replaced real numpy on import'
+  authorized_only: true
+
+- id: gitlab_ci_variable_exfil
+  when: { surface: gitlab, findings_include: gitlab_token }
+  class: ai
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: gitlab_ci_variables
+    - action: gitlab_runner_enum
+    - action: gitlab_direct_api_commit
+  maps: [LLM06, CWE-200]
+  points: 15
+  risk: propose
+  routes: /osai-supplychain
+  source: 'shadow-supply . Chain 4: CI vars contained Vault tokens + service creds'
+  authorized_only: true
+
+- id: vault_token_exploitation
+  when: { surface: vault }
+  class: ai
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: vault_health_check
+    - action: vault_token_lookup
+    - action: vault_list_secrets
+    - action: vault_read_secret
+  maps: [LLM06, CWE-200]
+  points: 15
+  risk: propose
+  routes: /osai-supplychain
+  source: 'shadow-supply . Chain 5: Vault token from CI yielded DA service account'
+  authorized_only: true
+
+- id: gitlab_ai_scanner_bypass
+  when: { surface: gitlab, findings_include: code_scanner }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: gitlab_direct_api_commit
+  maps: [LLM01, LLM05]
+  points: 15
+  risk: propose
+  routes: /osai-supplychain
+  source: 'shadow-supply . Chain 4: direct API commits bypass pre-receive AI code scanner'
+  authorized_only: true
+
+- id: training_pipeline_poisoning
+  when: { surface: chatbot, findings_include: training_pipeline }
+  class: ai
+  likelihood: L
+  time_cost: slow
+  emits:
+    - action: craft_training_data_poison
+    - action: craft_lora_adapter_poison
+    - action: craft_tokenizer_swap
+  maps: [LLM03]
+  points: 15
+  risk: propose
+  routes: /osai-supplychain
+  source: 'osai/11 . training pipeline attacks (SSH ProxyCommand, LoRA, tokenizer swap)'
+  authorized_only: true
+
+- id: zero_width_code_review_evasion
+  when: { surface: gitlab, findings_include: ai_code_review }
+  class: ai
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: craft_zero_width_code_evasion
+  maps: [LLM01, LLM05]
+  points: 15
+  risk: propose
+  routes: /osai-supplychain
+  source: 'osai/08 + joplin . zero-width Unicode evades AI code reviewers'
+  authorized_only: true
+
+- id: mcp_remote_oauth_exploitation
+  when: { findings_include: mcp_config_writable }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: mcp_remote_oauth_rce
+  maps: [LLM03, LLM06, CVE-2025-6514]
+  points: 15
+  risk: destructive
+  routes: /osai-supplychain
+  source: 'shadow-supply chain 6 . CVE-2025-6514 mcp-remote OAuth command injection'
+  authorized_only: true
+
+- id: gitlab_ci_env_exfil
+  when: { surface: gitlab, findings_include: gitlab_token }
+  class: ai
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: gitlab_ci_env_dump
+    - action: gitlab_code_scanner_bypass_ref
+  maps: [LLM06, CWE-200]
+  points: 15
+  risk: propose
+  routes: /osai-supplychain
+  source: 'shadow-supply chain 5 . modify .gitlab-ci.yml to dump env vars (VAULT_CI_TOKEN)'
+  technique: gitlab_ci_exfil
+  authorized_only: true

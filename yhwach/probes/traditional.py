@@ -45,6 +45,13 @@ PORT_KIND: dict[int, str] = {
     3389: "rdp",
     5985: "winrm",
     5986: "winrm",
+    # Message brokers — in an AI environment these often carry agent (A2A) traffic.
+    1883: "mqtt",
+    8883: "mqtt",
+    5672: "amqp",
+    8161: "activemq",       # ActiveMQ web console / Jolokia
+    61616: "activemq_openwire",
+    9092: "kafka",
 }
 
 # Ports worth an HTTP fingerprint when not matched by PORT_KIND.

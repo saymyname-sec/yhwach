@@ -170,6 +170,30 @@ ACTION_REGISTRY: dict[str, Action] = {
         ["sqlmap -u $URL/ --forms --batch --level 2 --risk 2"], risk="propose", runnable=False,
         note="Active SQLi; operator confirms scope."),
 
+    # --- Message brokers (self-learned from Iron Crown BROKER01) ---
+    "activemq_version_jolokia": _a("activemq_version_jolokia",
+        ["curl -sk $SCHEME://$IP:8161/api/jolokia/read/org.apache.activemq:type=Broker,"
+         "brokerName=localhost/BrokerVersion"], outputs="http",
+        note="Jolokia is often unauthenticated; reveals the ActiveMQ version for CVE matching."),
+    "activemq_default_creds": _a("activemq_default_creds",
+        ["curl -sk -u admin:admin $SCHEME://$IP:8161/admin/xml/queues.jsp"],
+        note="ActiveMQ web console default creds admin/admin."),
+    "activemq_openwire_cve_check": _a("activemq_openwire_cve_check",
+        ["# CVE-2023-46604 (OpenWire RCE) if <5.15.16/5.16.7/5.17.6/5.18.3 and :61616 reachable",
+         "nmap -sV -p61616 $IP  # confirm OpenWire; then metasploit exploit/multi/misc/apache_activemq_rce_cve_2023_46604"],
+        risk="propose", runnable=False,
+        note="Needs :61616 (OpenWire). Host a malicious Spring XML the broker loads."),
+    "mqtt_subscribe_all": _a("mqtt_subscribe_all",
+        ["mosquitto_sub -h $IP -p 1883 -t '#' -v -W 8"], outputs="raw",
+        note="Subscribe to all topics; agent messages (A2A) may flow through here."),
+    "mqtt_publish_injection": _a("mqtt_publish_injection",
+        ["# publish an indirect-injection message onto a topic an AI agent consumes",
+         "mosquitto_pub -h $IP -p 1883 -t <agent_topic> -m '<A2A injection payload>'"],
+        risk="propose", runnable=False, note="A2A injection via the message bus."),
+    "amqp_enum_queues": _a("amqp_enum_queues",
+        ["curl -sk -u admin:admin $SCHEME://$IP:8161/admin/xml/queues.jsp",
+         "# or: rabbitmqadmin / amqp-tools list queues on :5672"], outputs="http"),
+
     # --- Traditional: SMB / LDAP ---
     "netexec_smb_null": _a("netexec_smb_null", ["nxc smb $IP -u '' -p ''"], outputs="raw"),
     "enum4linux_ng": _a("enum4linux_ng", ["enum4linux-ng $IP"], outputs="raw"),

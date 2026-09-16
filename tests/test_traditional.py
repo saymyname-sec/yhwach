@@ -115,3 +115,20 @@ def test_web_app_plain_html_stays_web() -> None:
         200, headers={"Content-Type": "text/html"}, text="<html><title>Home</title></html>")})
     res = probe_web_app(session, "10.0.0.1", 80)
     assert res is not None and res.kind == "web"
+
+
+# --- message-broker detection (self-learned from Iron Crown BROKER01) ---
+
+def test_classify_broker_ports() -> None:
+    assert classify_service(None, 1883) == "mqtt"
+    assert classify_service(None, 5672) == "amqp"
+    assert classify_service(None, 8161) == "activemq"
+    assert classify_service(None, 61616) == "activemq_openwire"
+
+
+def test_broker_playbook_rules_load_and_class() -> None:
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    rules = {r.id: r for r in load_rules(default_playbook_dir())}
+    assert "activemq_rce" in rules and rules["activemq_rce"].technique_class == "traditional"
+    # message bus carries agent traffic -> AI-tier
+    assert rules["mqtt_agent_bus"].technique_class == "ai"

@@ -23,15 +23,27 @@ The persona travels with the engine. Whatever CLI, host, or client executes the 
 
 ## Status
 
-Early scaffold. Design and rules first; Python next; MCP integration after that. See [ROADMAP.md](ROADMAP.md).
+**Working.** The full deterministic engine runs end-to-end — from an nmap scan to a
+persona-framed, doctrine-ranked operator brief with concrete commands — and has been
+validated against a live challenge lab. 127 tests, green on Linux and Windows.
 
-Nothing in this repo is runnable yet. What is here:
+What works today:
 
-- Architecture, roadmap, and authorization docs
-- Strict operator persona and Autonomy Contract schema
-- SQLite world-model schema (`db/schema.sql`)
-- Seed playbook rules (primitives, AI-surface, lore denylist)
-- CLI / actions / tests scoping docs
+- **World model** — SQLite; hosts / services / surfaces / findings / credentials / tasks / proofs
+- **Ingestion** — nmap XML → hosts + services (monotonic host FSM)
+- **Surface detection** — AI (Ollama, OpenAI-compat, chatbot, MCP, Gradio, A2A, vector DB) **and**
+  traditional (Jenkins, GitLab, SMB, LDAP, MSSQL, WinRM, SSH, web portal), via live probes
+- **Planner** — declarative YAML playbooks matched to surfaces, EV-ranked, **AI-first tiering**
+- **Primitives** — technique exhaustion (no repeats), lore denylist (OffSec dev-artifact filtering)
+- **Actions layer** — every playbook step → concrete command; read-only recon runs itself,
+  exploitation is render-only for the operator
+- **Findings** — deterministic extraction from action output (unambiguous only; the rest is
+  operator judgment via the contract)
+- **Operator handoff** — `yhwach next --contract` emits persona + state + ranked candidates + commands
+- **Report** — `yhwach report` renders a Markdown engagement report
+- **Calibration harness** — YAML fixtures + golden runner + `yhwach snapshot` (a real run becomes a test)
+
+See [ROADMAP.md](ROADMAP.md) for what's next (post-foothold FSM, HexStrike MCP backend).
 
 ---
 
@@ -51,7 +63,26 @@ Not for unauthorized targets. Contributors: submit rules only for authorized-tar
 
 ## Quick start
 
-Not runnable yet. [ROADMAP.md](ROADMAP.md) tracks the milestones; the first runnable slice is the AI-surface pipeline (Ollama + chatbot). See [docs/install.md](docs/install.md) for the intended install shape.
+```bash
+git clone https://github.com/saymyname-sec/yhwach ~/yhwach && cd ~/yhwach
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+pytest -q            # 127 tests
+yhwach selftest      # golden fixtures
+
+# Drive an engagement (authorized targets only):
+yhwach engage  --lab lab01 --scope 10.10.10.0/24
+yhwach ingest  scan.xml --lab lab01           # nmap -oX output
+yhwach probe   --lab lab01                     # AI + traditional surfaces
+yhwach plan    --lab lab01                     # match playbooks -> ranked tasks
+yhwach next    --lab lab01 --contract          # operator brief for Claude Code
+yhwach run     --lab lab01 --task 1 --go       # run read-only recon; render exploits
+yhwach findings --lab lab01
+yhwach report  --lab lab01 --out report.md
+```
+
+Yhwach never auto-runs exploitation — it proposes, and the operator (you, or Claude Code
+on Kali) executes with judgment. See [docs/install.md](docs/install.md) and [docs/deploy.md](docs/deploy.md).
 
 ---
 

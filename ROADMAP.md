@@ -1,6 +1,31 @@
 # Roadmap
 
-## Phase 0 — Scaffold (current)
+## Status
+
+**Done and validated on a live challenge lab (127 tests):**
+- ✅ World model (SQLite) + nmap ingestion + host FSM (`undiscovered → scanned`)
+- ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
+- ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web)
+- ✅ Deterministic planner: YAML playbooks → EV-ranked tasks, AI-first tiering
+- ✅ Cross-cutting primitives: technique exhaustion + lore denylist
+- ✅ Actions layer: emits → concrete commands; read-only runs, exploitation render-only
+- ✅ Deterministic finding extraction from action output
+- ✅ Operator handoff: `next --contract` (persona + state + candidates + commands)
+- ✅ Markdown report generation
+- ✅ Calibration harness: fixtures + golden runner + `snapshot`
+
+**Remaining (bigger lifts / need design input):**
+- ⬜ Post-foothold FSM: credential vault, spray, PEAS parsers, `foothold → looted → pivoted`
+- ⬜ HexStrike MCP as the enumeration backend (richer ingestion than raw nmap)
+- ⬜ Yhwach-as-MCP server for Claude Code (Path A in docs/deploy.md)
+- ⬜ Report v2: event log + verbatim reproduction commands
+
+The original phased plan below is kept for reference; the numbering predates the
+build order above.
+
+---
+
+## Phase 0 — Scaffold
 
 - Repository layout, license, authorization notice
 - Architecture doc and persona draft

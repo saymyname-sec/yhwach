@@ -23,6 +23,7 @@ classifiers = [
 dependencies = [
     "click>=8.1",
     "requests>=2.31",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

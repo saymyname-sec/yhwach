@@ -137,6 +137,76 @@ def status(lab: str, db_path: str | None) -> None:
 
 @main.command()
 @click.option("--lab", required=True, help="Lab name (must exist).")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def plan(lab: str, db_path: str | None) -> None:
+    """Match playbook rules against the world model; populate the task queue.
+
+    Deterministic — no LLM. Reads playbooks/*.yaml, matches each rule's `when`
+    clause against current surfaces, and upserts an EV-scored task per match.
+    """
+    from yhwach.planner import match_rules
+    from yhwach.playbooks import default_playbook_dir, load_rules
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}; run `yhwach engage` first.", err=True)
+        sys.exit(2)
+
+    rules = load_rules(default_playbook_dir())
+
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        report = match_rules(conn, eng_id, rules)
+
+    click.echo(f"[+] Rules loaded: {len(rules)}")
+    click.echo(f"[+] Rules matched: {report.rules_matched}")
+    click.echo(f"[+] Tasks: {report.tasks_created} new, {report.tasks_updated} updated")
+    if report.rules_skipped_unsupported:
+        click.echo(
+            "[i] Skipped (unsupported when-keys, land in a later phase): "
+            + ", ".join(report.rules_skipped_unsupported)
+        )
+
+
+@main.command("next")
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--limit", default=5, show_default=True, type=int,
+              help="How many top tasks to show.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def next_cmd(lab: str, limit: int, db_path: str | None) -> None:
+    """Show the top EV-ranked pending tasks (deterministic; LLM RANK lands later)."""
+    from yhwach.planner import top_tasks
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        tasks = top_tasks(conn, eng_id, limit)
+
+    if not tasks:
+        click.echo("[!] No pending tasks. Run `yhwach probe` then `yhwach plan` first.")
+        return
+
+    click.echo(f"== Top {len(tasks)} tasks for '{lab}' (by EV) ==")
+    for i, t in enumerate(tasks, 1):
+        click.echo(
+            f"{i}. EV={t['ev_score']:<6} [{t['autonomy']:<7}] "
+            f"{t['host_ip']} {t['surface_kind']} -> {t['playbook_rule_id']} ({t['kind']})"
+        )
+        click.echo(f"     {t['rationale']}")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name (must exist).")
 @click.option("--host", "host_ip", default=None,
               help="Restrict probing to one host IP; if omitted, probe every scanned host.")
 @click.option("--timeout", default=3.0, show_default=True, type=float,

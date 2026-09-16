@@ -1,26 +1,33 @@
 # Yhwach — AI-surface playbook. Rules for LLM / agent / RAG / MCP / A2A /
-# embedding attack surfaces. Every rule cites a source (OSAI module + OWASP-LLM
-# class) and lists an action or a route to an existing skill.
+# embedding attack surfaces.
+#
+# Each rule cites a source (OSAI module + OWASP-LLM class), carries static EV
+# inputs (likelihood H/M/L, time_cost fast/med/slow), and either an action or a
+# route to an existing skill.
+#
+# `when` clauses match the surface KINDS the probes actually emit:
+#   ollama | openai_compat | chatbot | mcp | gradio | a2a | vectordb
+# (a2a and vectordb probes land in a later phase; their rules are here and will
+#  start matching automatically once those surfaces get populated.)
 
 - id: ollama_unauth_api
-  when:
-    surface: ollama
-    auth: none
+  when: { surface: ollama, auth: none }
+  likelihood: H
+  time_cost: fast
   emits:
-    - action: probe_ollama_models       # curl /api/tags
-    - action: probe_ollama_running      # curl /api/ps
-    - action: try_direct_generate       # test guardrails on /api/generate
-  maps: [LLM06]                         # Excessive Agency — unauth model access
+    - action: probe_ollama_models
+    - action: try_direct_generate
+  maps: [LLM06]
   points: 15
   risk: read_only
   routes: /osai-mcp-attack
   source: 'osai/07 . README:AI-ports'
   authorized_only: true
 
-- id: openai_compat_v1_models
-  when:
-    surface: web
-    endpoint_reachable: /v1/models
+- id: openai_compat_models
+  when: { surface: openai_compat }
+  likelihood: H
+  time_cost: fast
   emits:
     - action: enumerate_models
     - action: attempt_completion_unauth
@@ -32,8 +39,9 @@
   authorized_only: true
 
 - id: chatbot_direct_injection_probe
-  when:
-    surface: chatbot
+  when: { surface: chatbot }
+  likelihood: H
+  time_cost: med
   emits:
     - action: craft_system_prompt_leak
     - action: craft_tool_enumeration
@@ -46,12 +54,11 @@
   authorized_only: true
 
 - id: chatbot_session_enumeration
-  when:
-    surface: chatbot
-    auth: none
-    meta_json_contains: session_id
+  when: { surface: chatbot }
+  likelihood: M
+  time_cost: med
   emits:
-    - action: enumerate_chatbot_sessions   # bound to session_enum_osai.py
+    - action: enumerate_chatbot_sessions
   maps: [LLM01, LLM02]
   points: 15
   risk: read_only
@@ -60,12 +67,12 @@
   authorized_only: true
 
 - id: rag_upload_discovery
-  when:
-    surface: chatbot
-    findings_include: ai_surface
+  when: { surface: chatbot }
+  likelihood: M
+  time_cost: med
   emits:
-    - action: probe_rag_upload_paths       # /upload /api/documents /ingest ...
-    - action: probe_writable_smb_share     # RAG source is often SMB in OSAI labs
+    - action: probe_rag_upload_paths
+    - action: probe_writable_smb_share
   maps: [LLM04, LLM01]
   points: 15
   risk: read_only
@@ -73,25 +80,12 @@
   source: 'osai/05 . RAG Pipelines'
   authorized_only: true
 
-- id: rag_zero_width_injection
-  when:
-    surface: rag
-    writable: true
-  emits:
-    - action: rag_hide_injection            # bound to zero_width_obfuscator.py
-    - action: rag_collision_upload          # bound to create_collision_document.py
-  maps: [LLM01, LLM04]
-  points: 15
-  risk: propose
-  routes: /osai-rag-attack
-  source: 'osai/05 . zero_width_obfuscator.py'
-  authorized_only: true
-
 - id: mcp_tools_list_probe
-  when:
-    surface: mcp
+  when: { surface: mcp }
+  likelihood: H
+  time_cost: fast
   emits:
-    - action: mcp_tools_list                # jsonrpc tools/list
+    - action: mcp_tools_list
     - action: mcp_resources_list
   maps: [LLM06]
   points: 15
@@ -100,13 +94,28 @@
   source: 'osai/07 . MCP Architecture'
   authorized_only: true
 
+- id: gradio_surface_recon
+  when: { surface: gradio }
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: gradio_api_enumerate
+    - action: gradio_file_component_probe
+  maps: [LLM06, LLM05]
+  points: 15
+  risk: read_only
+  routes: /osai-ai-hunter
+  source: 'osai/02 . model_fingerprint.sh'
+  authorized_only: true
+
 - id: a2a_orchestrator_probe
-  when:
-    surface: a2a
+  when: { surface: a2a }
+  likelihood: M
+  time_cost: med
   emits:
     - action: enumerate_agent_cards
     - action: test_agent_card_dns_spoof
-    - action: forge_a2a_message             # bound to poison_injector.py
+    - action: forge_a2a_message
   maps: [LLM01, LLM06]
   points: 15
   risk: propose
@@ -115,12 +124,12 @@
   authorized_only: true
 
 - id: vectordb_exposure
-  when:
-    surface: vectordb
-    auth: none
+  when: { surface: vectordb, auth: none }
+  likelihood: H
+  time_cost: med
   emits:
-    - action: vectordb_export               # bound to weaviate_export.py
-    - action: embedding_inversion           # bound to inversion_attack.py
+    - action: vectordb_export
+    - action: embedding_inversion
   maps: [LLM08, LLM02]
   points: 15
   risk: read_only
@@ -128,14 +137,18 @@
   source: 'osai/06 . Attacking Embeddings'
   authorized_only: true
 
+# --- Forward-compatible rule: uses a `when` key the Phase 1.3 matcher does not
+# --- yet support (findings_include). It stays here as valid config and starts
+# --- matching once finding-based conditions land. The matcher reports it as
+# --- skipped rather than erroring.
 - id: aws_ml_infra_ssrf
-  when:
-    surface: web
-    findings_include: ssrf_confirmed
+  when: { surface: web, findings_include: ssrf_confirmed }
+  likelihood: M
+  time_cost: slow
   emits:
-    - action: probe_imds_v1                 # ssrf -> 169.254.169.254
-    - action: enumerate_aws_ml              # bound to aws_ml_enum.sh
-  maps: [LLM06]                             # excessive agency via infra
+    - action: probe_imds_v1
+    - action: enumerate_aws_ml
+  maps: [LLM06]
   points: 15
   risk: read_only
   routes: /osai-cloud-loot

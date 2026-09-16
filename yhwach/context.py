@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 
 from yhwach import persona_path
+from yhwach.db import list_credentials
 from yhwach.planner import top_tasks
 from yhwach.playbooks import Rule, default_playbook_dir, load_rules
 
@@ -91,6 +92,30 @@ def build_context(
     lines.append(f"Credentials in vault: {summary['creds']}"
                  + ("  (reuse before attacking anything new)" if summary["creds"] else ""))
     lines.append(f"Findings so far: {summary['findings']}")
+
+    # ------------------------------------------------------------------
+    # VAULT — inline so "reuse before you work" is actionable, not aspirational.
+    # Every stored access artifact (password/hash/ssh_key/token) is quoted in
+    # full: the operator downstream (Claude, msf, spray) can't reuse what it
+    # can't see. Long/multiline secrets are one-line-summarised.
+    # ------------------------------------------------------------------
+    cred_rows = list_credentials(conn, engagement_id)
+    lines.append("")
+    lines.append("=" * 70)
+    lines.append(f"## VAULT ({len(cred_rows)})  — reuse before you work")
+    lines.append("=" * 70)
+    if not cred_rows:
+        lines.append("(empty)")
+    else:
+        for r in cred_rows:
+            sec = r["secret"] or "(none)"
+            if "\n" in sec:
+                sec = sec.split("\n", 1)[0][:60] + " …(multiline; use yhwach_creds)"
+            src = r["source"] or ""
+            if r["source_host_ip"]:
+                src = f"{src} @ {r['source_host_ip']}"
+            lines.append(f"  - {r['identifier']}  ({r['kind']})  =  {sec}   [{src}]")
+
     lines.append("")
     lines.append("=" * 70)
     lines.append(f"## RANKED CANDIDATES ({len(tasks)}) — EV pre-computed by Yhwach")

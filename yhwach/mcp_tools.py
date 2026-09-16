@@ -35,11 +35,15 @@ def tool_status(db_path: Path | str, lab: str) -> str:
             (eid,)).fetchone()["n"]
         pend = conn.execute(
             "SELECT COUNT(*) n FROM task WHERE engagement_id=? AND status='pending'", (eid,)).fetchone()["n"]
-        creds = conn.execute(
-            "SELECT COUNT(*) n FROM credential WHERE engagement_id=?", (eid,)).fetchone()["n"]
+        vault_rows = yhdb.list_credentials(conn, eid)
     lines = [f"Engagement '{lab}':"]
     lines += [f"  {r['stage']}: {r['n']}" for r in stages] or ["  (no hosts)"]
-    lines.append(f"  services={svc}  pending_tasks={pend}  vault={creds}")
+    lines.append(f"  services={svc}  pending_tasks={pend}  vault={len(vault_rows)}")
+    if vault_rows:
+        # Compact vault preview — identifier(kind); full secrets via yhwach_creds.
+        preview = ", ".join(f"{r['identifier']}({r['kind']})" for r in vault_rows[:8])
+        more = f" +{len(vault_rows) - 8} more" if len(vault_rows) > 8 else ""
+        lines.append(f"  vault_ids: {preview}{more}")
     return "\n".join(lines)
 
 
@@ -93,12 +97,63 @@ def tool_spray(db_path: Path | str, lab: str) -> str:
 
 
 def tool_add_cred(db_path: Path | str, lab: str, user: str, secret: str,
-                  kind: str = "password", source: str = "operator") -> str:
+                  kind: str = "password", source: str = "operator",
+                  source_host: str | None = None) -> str:
+    """Store a credential in the vault.
+
+    `user` is the login/identifier (username, key label, token id).
+    `secret` is the plaintext, hash, or key material (raw SSH private key blob
+    is fine — newlines are preserved by SQLite). `kind` picks the credential
+    class (`password` | `ntlm` | `kerberos` | `ssh_key` | `api_key` | `token`
+    | `dpapi`). `source_host`, if given, is the host IP where the cred was
+    dumped and gets joined back on read. On update the `source` string is
+    appended (not clobbered), so provenance survives re-discovery.
+    """
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
-        _, created = yhdb.add_credential(conn, eid, user, secret, kind, source)
-        yhdb.log_event(conn, eid, "credential", {"id": user, "kind": kind, "source": source})
+        source_host_id: int | None = None
+        if source_host:
+            row = conn.execute(
+                "SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                (eid, source_host)).fetchone()
+            source_host_id = int(row["id"]) if row else None
+        _, created = yhdb.add_credential(
+            conn, eid, user, secret, kind, source, source_host_id=source_host_id
+        )
+        yhdb.log_event(conn, eid, "credential",
+                       {"id": user, "kind": kind, "source": source,
+                        "source_host": source_host})
     return f"credential '{user}' ({kind}) {'added' if created else 'updated'}"
+
+
+def tool_creds(db_path: Path | str, lab: str, kind: str | None = None) -> str:
+    """Print the full credential vault — identifier, secret, kind, source, source_host.
+
+    Every stored cred is returned in the clear: the vault is the operator's
+    authoritative access ledger and spraying/reuse depends on it being
+    directly readable. `kind`, if given, filters (`password` | `ntlm` |
+    `ssh_key` | `api_key` | `token` | `dpapi` | `kerberos`).
+    """
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        rows = yhdb.list_credentials(conn, eid, kind=kind)
+    if not rows:
+        return f"vault empty ({'kind=' + kind if kind else 'no filter'})"
+    header = f"== Vault for '{lab}' ({len(rows)}{' ' + kind if kind else ''}) =="
+    lines = [header,
+             f"{'IDENTIFIER':<24} {'KIND':<10} {'SECRET':<40} SOURCE"]
+    for r in rows:
+        sec = r["secret"] or "(none)"
+        # SSH keys / long tokens: keep one-line for the table, mark truncation.
+        if "\n" in sec:
+            sec = sec.split("\n", 1)[0][:36] + " …(multiline)"
+        elif len(sec) > 38:
+            sec = sec[:35] + "..."
+        src = r["source"] or ""
+        if r["source_host_ip"]:
+            src = f"{src} @ {r['source_host_ip']}"
+        lines.append(f"{r['identifier']:<24} {r['kind']:<10} {sec:<40} {src}")
+    return "\n".join(lines)
 
 
 def tool_advance(db_path: Path | str, lab: str, host: str, stage: str) -> str:
@@ -118,6 +173,12 @@ TOOL_SPECS = [
     ("yhwach_findings", tool_findings, "Recorded findings, most severe first."),
     ("yhwach_report", tool_report, "Full Markdown engagement report."),
     ("yhwach_spray", tool_spray, "Credential-spray commands (vault creds x sprayable surfaces)."),
-    ("yhwach_add_cred", tool_add_cred, "Add a credential to the vault."),
+    ("yhwach_add_cred", tool_add_cred,
+     "Add a credential to the vault (username/label + secret + kind + source; "
+     "source is appended on update, never clobbered)."),
+    ("yhwach_creds", tool_creds,
+     "List the credential vault in full (identifier, secret, kind, source, source_host). "
+     "Every access-granting artifact — passwords, hashes, SSH keys, API tokens — lives here. "
+     "Query before attacking anything new."),
     ("yhwach_advance", tool_advance, "Advance a host's FSM stage (foothold/looted/pivoted/...)."),
 ]

@@ -646,9 +646,19 @@ def creds(lab: str, db_path: str | None) -> None:
         return
     click.echo(f"== Vault for '{lab}' ({len(rows)}) ==")
     for r in rows:
-        sec = r["secret"] or ""
-        shown = sec if len(sec) <= 12 else sec[:6] + "…" + sec[-3:]
-        click.echo(f"  {r['identifier']:<20} {r['kind']:<10} {shown:<16} ({r['source']})")
+        # Print secrets in full — the vault IS the operator's authoritative
+        # access ledger; hidden secrets can't be reused. Multiline blobs
+        # (SSH keys) get a one-line note so the table stays scannable.
+        sec = r["secret"] or "(none)"
+        if "\n" in sec:
+            head = sec.split("\n", 1)[0][:44]
+            sec = f"{head} …(multiline)"
+        src = r["source"] or ""
+        # Look up the source-host IP if the row carries one.
+        src_ip = r["source_host_ip"] if "source_host_ip" in r.keys() else None
+        if src_ip:
+            src = f"{src} @ {src_ip}"
+        click.echo(f"  {r['identifier']:<20} {r['kind']:<10} {sec:<40} ({src})")
 
 
 @main.command()

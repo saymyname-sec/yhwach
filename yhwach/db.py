@@ -210,16 +210,28 @@ def add_credential(
     source: str,
     source_host_id: int | None = None,
 ) -> tuple[int, bool]:
-    """Add/update a credential (deduped by engagement+identifier+kind). Creds are
-    never exhausted — the spray primitive keeps them in play against every host."""
+    """Add/update a credential (deduped by engagement+identifier+kind).
+
+    Creds are never exhausted — the spray primitive keeps them in play against
+    every host. On update, `source` is APPENDED (comma-joined) rather than
+    overwritten, so a cred rediscovered via a new channel keeps its full
+    provenance chain (e.g. `sqli_app_config,jenkins_credentials.xml`).
+    `source_host_id`, when supplied on an update, is only filled in if the
+    row didn't already carry one — the original discovery host wins.
+    """
     existing = conn.execute(
-        "SELECT id FROM credential WHERE engagement_id = ? AND identifier = ? AND kind = ?",
+        "SELECT id, source, source_host_id FROM credential "
+        "WHERE engagement_id = ? AND identifier = ? AND kind = ?",
         (engagement_id, identifier, kind),
     ).fetchone()
     if existing is not None:
+        merged_source = existing["source"]
+        if source and source not in [s.strip() for s in (existing["source"] or "").split(",")]:
+            merged_source = f"{existing['source']},{source}" if existing["source"] else source
         conn.execute(
-            "UPDATE credential SET secret = COALESCE(?, secret), source = ? WHERE id = ?",
-            (secret, source, existing["id"]),
+            "UPDATE credential SET secret = COALESCE(?, secret), source = ?, "
+            "source_host_id = COALESCE(source_host_id, ?) WHERE id = ?",
+            (secret, merged_source, source_host_id, existing["id"]),
         )
         return int(existing["id"]), False
     cur = conn.execute(
@@ -230,12 +242,33 @@ def add_credential(
     return int(cur.lastrowid), True
 
 
-def list_credentials(conn: sqlite3.Connection, engagement_id: int) -> list[sqlite3.Row]:
-    return conn.execute(
-        "SELECT identifier, secret, kind, source FROM credential "
-        "WHERE engagement_id = ? ORDER BY id",
-        (engagement_id,),
-    ).fetchall()
+def list_credentials(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    *,
+    kind: str | None = None,
+) -> list[sqlite3.Row]:
+    """Return every credential for the engagement, with source-host IP joined in.
+
+    `kind`, if given, filters to one kind (`password`, `ntlm`, `ssh_key`,
+    `api_key`, `token`, `dpapi`, `kerberos`). Secrets are returned in full —
+    the vault is the operator's authoritative access ledger and downstream
+    tools (spray, MCP surface) rely on it being readable.
+    """
+    q = (
+        "SELECT c.identifier, c.secret, c.kind, c.source, c.discovered_at, "
+        "sh.ip AS source_host_ip, vh.ip AS validated_on_host_ip "
+        "FROM credential c "
+        "LEFT JOIN host sh ON sh.id = c.source_host_id "
+        "LEFT JOIN host vh ON vh.id = c.validated_on_host_id "
+        "WHERE c.engagement_id = ?"
+    )
+    params: tuple = (engagement_id,)
+    if kind is not None:
+        q += " AND c.kind = ?"
+        params = (engagement_id, kind)
+    q += " ORDER BY c.id"
+    return conn.execute(q, params).fetchall()
 
 
 def log_event(

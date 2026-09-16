@@ -8,6 +8,7 @@ from yhwach.mcp_tools import (
     TOOL_SPECS,
     tool_add_cred,
     tool_advance,
+    tool_creds,
     tool_findings,
     tool_next,
     tool_plan,
@@ -71,6 +72,60 @@ def test_unknown_lab_raises(tmp_db: Path) -> None:
 
 def test_tool_specs_shape() -> None:
     names = {t[0] for t in TOOL_SPECS}
-    assert {"yhwach_status", "yhwach_next", "yhwach_report"}.issubset(names)
+    # yhwach_creds is the vault-read surface; without it the operator can't
+    # reuse creds via MCP and re-derives what's already stored.
+    assert {"yhwach_status", "yhwach_next", "yhwach_report",
+            "yhwach_creds", "yhwach_add_cred"}.issubset(names)
     for name, fn, desc in TOOL_SPECS:
         assert name.startswith("yhwach_") and callable(fn) and desc
+
+
+def test_creds_empty_and_populated(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    assert "vault empty" in tool_creds(tmp_db, "m")
+    tool_add_cred(tmp_db, "m", "svc_portal", "P0rt@l!Svc#2025",
+                  kind="password", source="jenkins_xml")
+    out = tool_creds(tmp_db, "m")
+    # Full secret must appear — the vault is the operator's own working data.
+    assert "svc_portal" in out
+    assert "P0rt@l!Svc#2025" in out
+    assert "jenkins_xml" in out
+
+
+def test_creds_filter_by_kind(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    tool_add_cred(tmp_db, "m", "webservice", "pw", kind="password", source="s")
+    tool_add_cred(tmp_db, "m", "svc_ci",
+                  "-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END-----",
+                  kind="ssh_key", source="loot")
+    out = tool_creds(tmp_db, "m", kind="ssh_key")
+    assert "svc_ci" in out and "webservice" not in out
+    # Multiline secrets are one-line-summarised in the table view.
+    assert "multiline" in out
+
+
+def test_add_cred_appends_source(tmp_db: Path) -> None:
+    """Re-adding a cred with a new source must preserve the original."""
+    _seed(tmp_db)
+    tool_add_cred(tmp_db, "m", "svc_portal", "P0rt@l!", source="sqli")
+    tool_add_cred(tmp_db, "m", "svc_portal", "P0rt@l!", source="jenkins_xml")
+    out = tool_creds(tmp_db, "m")
+    assert "sqli,jenkins_xml" in out
+
+
+def test_status_shows_vault_ids(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    tool_add_cred(tmp_db, "m", "svc_portal", "P0rt@l!Svc#2025", source="dump")
+    out = tool_status(tmp_db, "m")
+    assert "vault_ids: svc_portal(password)" in out
+
+
+def test_next_context_inlines_vault(tmp_db: Path) -> None:
+    """`build_context` — the block yhwach_next returns — must quote the vault
+    inline, otherwise the persona rule 'reuse before you work' is aspirational."""
+    _seed(tmp_db)
+    tool_add_cred(tmp_db, "m", "svc_portal", "P0rt@l!Svc#2025",
+                  kind="password", source="jenkins_xml")
+    ctx = tool_next(tmp_db, "m")
+    assert "## VAULT" in ctx
+    assert "svc_portal" in ctx and "P0rt@l!Svc#2025" in ctx

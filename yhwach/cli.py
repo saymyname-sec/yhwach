@@ -537,8 +537,14 @@ def advance(host_ip: str, stage: str, lab: str, force: bool, db_path: str | None
         changed, msg = yhdb.set_host_stage(conn, eng_id, host_ip, stage, monotonic=not force)
         if changed:
             yhdb.log_event(conn, eng_id, "stage", {"host": host_ip, "stage": stage})
+            # Reaching an objective ALWAYS takes a note (Kapi's rule).
+            from yhwach import notes as yhnotes
+            yhnotes.auto_note_stage(conn, eng_id, host_ip, stage)
+            written = yhnotes.write_notebook(conn, eng_id, _artifact_dir(path, "notes"))
     if changed:
         click.echo(f"[+] {host_ip} -> {stage}")
+        click.echo(f"[note] milestone note written; notebook refreshed "
+                   f"({len(written)} files in {_artifact_dir(path, 'notes')})")
     else:
         click.echo(f"[!] {msg}", err=True)
         sys.exit(1)
@@ -573,7 +579,17 @@ def cred(lab: str, identifier: str, secret: str | None, kind: str, source: str,
                              (eng_id, host_ip)).fetchone()
             host_id = r["id"] if r else None
         _, created = yhdb.add_credential(conn, eng_id, identifier, secret, kind, source, host_id)
-        yhdb.log_event(conn, eng_id, "credential", {"id": identifier, "kind": kind, "source": source})
+        yhdb.log_event(conn, eng_id, "credential",
+                       {"id": identifier, "kind": kind, "source": source, "host": host_ip})
+        # Loot is an objective — note it.
+        from yhwach import notes as yhnotes
+        yhnotes.record_note(
+            conn, eng_id, host_id=host_id, objective="looted", category="loot",
+            title=f"Credential: {identifier} ({kind})",
+            body=f"- **identifier:** `{identifier}`\n- **kind:** {kind}\n- **source:** {source}"
+                 + (f"\n- **recovered from:** `{host_ip}`" if host_ip else ""),
+            tags=f"loot,credential,{kind}",
+        )
     click.echo(f"[+] Credential '{identifier}' ({kind}) {'added' if created else 'updated'}. "
                "Run `yhwach spray` to reuse it across the scope.")
 
@@ -820,6 +836,139 @@ def probe(lab: str, host_ip: str | None, timeout: float, db_path: str | None) ->
                 _record(s, trad, "traditional")
 
         click.echo(f"[=] {surfaces_found} surfaces detected ({surfaces_new} new).")
+
+
+@main.group()
+def note() -> None:
+    """Engagement notebook — record and render notes (attack chains, PoCs, evidence).
+
+    Kapi's rule: take a note every time we reach the next objective. FSM
+    `advance` and `cred` already auto-note; these subcommands add the rich
+    content (instructions, PoC command + captured output, screenshots).
+    """
+
+
+def _note_engagement(db_path: str | None, lab: str):
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    return path
+
+
+def _resolve_eng(conn, lab: str) -> int:
+    eng_id = yhdb.engagement_id_for(conn, lab)
+    if eng_id is None:
+        click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+        sys.exit(2)
+    return eng_id
+
+
+@note.command("add")
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--host", "host_ip", default=None, help="Host IP the note is about.")
+@click.option("--objective", default="note", help="Milestone slug (foothold/looted/cve-.../...).")
+@click.option("--category",
+              type=click.Choice(["attack_chain", "instructions", "poc", "evidence",
+                                 "loot", "recon", "screenshot"]),
+              default="evidence", help="Note category.")
+@click.option("--title", required=True, help="Note title.")
+@click.option("--body", default="", help="Markdown body.")
+@click.option("--screenshot", "screenshot_path", default=None, help="Path to a screenshot.")
+@click.option("--tags", default=None, help="Comma-separated Obsidian tags.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def note_add(lab, host_ip, objective, category, title, body, screenshot_path, tags, db_path):
+    """Record a freeform note."""
+    from yhwach import notes as yhnotes
+
+    path = _note_engagement(db_path, lab)
+    with yhdb.transaction(path) as conn:
+        eng_id = _resolve_eng(conn, lab)
+        hid = yhnotes.host_id_for(conn, eng_id, host_ip) if host_ip else None
+        yhnotes.record_note(conn, eng_id, host_id=hid, objective=objective,
+                            category=category, title=title, body=body,
+                            screenshot_path=screenshot_path, tags=tags)
+        yhdb.log_event(conn, eng_id, "note", {"title": title, "host": host_ip})
+        written = yhnotes.write_notebook(conn, eng_id, _artifact_dir(path, "notes"))
+    click.echo(f"[+] note '{title}' recorded; notebook refreshed ({len(written)} files).")
+
+
+@note.command("poc")
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--host", "host_ip", default=None, help="Host IP the PoC targets.")
+@click.option("--objective", default="poc", help="Milestone slug (e.g. cve-2023-46604).")
+@click.option("--title", required=True, help="PoC title.")
+@click.option("--body", default="", help="Instructions / notes (Markdown).")
+@click.option("--command", "command", default=None, help="The exact reproducible command/payload.")
+@click.option("--command-file", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Read the command/payload from a file.")
+@click.option("--output", default=None, help="Captured evidence output.")
+@click.option("--output-file", type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Read captured output from a file.")
+@click.option("--screenshot", "screenshot_path", default=None, help="Path to a screenshot.")
+@click.option("--tags", default=None, help="Comma-separated tags.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def note_poc(lab, host_ip, objective, title, body, command, command_file, output,
+             output_file, screenshot_path, tags, db_path):
+    """Record a proof-of-concept: instructions + exact command + captured output."""
+    from yhwach import notes as yhnotes
+
+    if command_file:
+        command = Path(command_file).read_text(encoding="utf-8")
+    if output_file:
+        output = Path(output_file).read_text(encoding="utf-8")
+
+    path = _note_engagement(db_path, lab)
+    with yhdb.transaction(path) as conn:
+        eng_id = _resolve_eng(conn, lab)
+        hid = yhnotes.host_id_for(conn, eng_id, host_ip) if host_ip else None
+        yhnotes.record_note(conn, eng_id, host_id=hid, objective=objective,
+                            category="poc", title=title, body=body, command=command,
+                            output=output, screenshot_path=screenshot_path,
+                            tags=tags or "poc")
+        yhdb.log_event(conn, eng_id, "note", {"title": title, "host": host_ip, "poc": True})
+        written = yhnotes.write_notebook(conn, eng_id, _artifact_dir(path, "notes"))
+    click.echo(f"[+] PoC '{title}' recorded; notebook refreshed ({len(written)} files).")
+
+
+@note.command("render")
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--out", "out_dir", default=None, type=click.Path(),
+              help="Notebook output dir (default: <lab>/notes).")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def note_render(lab, out_dir, db_path):
+    """(Re)render the whole notebook to Markdown files on disk."""
+    from yhwach import notes as yhnotes
+
+    path = _note_engagement(db_path, lab)
+    target = Path(out_dir) if out_dir else _artifact_dir(path, "notes")
+    with yhdb.transaction(path) as conn:
+        eng_id = _resolve_eng(conn, lab)
+        written = yhnotes.write_notebook(conn, eng_id, target)
+    click.echo(f"[+] notebook rendered: {len(written)} files under {target}")
+    for p in written:
+        click.echo(f"    {p.name}")
+
+
+@note.command("show")
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--host", "host_ip", default=None, help="Show one host's note (default: index).")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def note_show(lab, host_ip, db_path):
+    """Print a note to stdout (host note, or the index if no host given)."""
+    from yhwach import notes as yhnotes
+
+    path = _note_engagement(db_path, lab)
+    with yhdb.transaction(path) as conn:
+        eng_id = _resolve_eng(conn, lab)
+        if host_ip:
+            hid = yhnotes.host_id_for(conn, eng_id, host_ip)
+            if hid is None:
+                click.echo(f"[!] host {host_ip} not found.", err=True)
+                sys.exit(1)
+            click.echo(yhnotes.render_host_notebook(conn, eng_id, hid))
+        else:
+            click.echo(yhnotes.render_index(conn, eng_id))
 
 
 if __name__ == "__main__":

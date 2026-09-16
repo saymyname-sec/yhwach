@@ -171,6 +171,30 @@ CREATE TABLE IF NOT EXISTS lore_denylist_hit (
 );
 
 -- ---------------------------------------------------------------------------
+-- Notes — the engagement notebook. Every objective reached (FSM advance, loot,
+-- finding, PoC) produces a note. Rendered to Obsidian-ready Markdown by notes.py.
+-- Kapi's rule: take notes every time we reach the next objective — attack chain,
+-- instructions, PoC, evidence, screenshot.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS note (
+    id              INTEGER PRIMARY KEY,
+    engagement_id   INTEGER NOT NULL REFERENCES engagement(id),
+    host_id         INTEGER REFERENCES host(id),
+    objective       TEXT    NOT NULL,   -- milestone slug: foothold | looted | pivoted | cve-2023-46604 | ...
+    category        TEXT    NOT NULL,   -- attack_chain | instructions | poc | evidence | loot | recon | screenshot
+    title           TEXT    NOT NULL,
+    body            TEXT    NOT NULL DEFAULT '',  -- freeform Markdown
+    command         TEXT,               -- exact reproducible command / payload (the PoC)
+    output          TEXT,               -- captured evidence (trimmed)
+    screenshot_path TEXT,               -- path to a screenshot / capture on disk
+    tags            TEXT,               -- comma-separated Obsidian tags
+    created_at      TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_host ON note(engagement_id, host_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_note_objective ON note(engagement_id, objective);
+
+-- ---------------------------------------------------------------------------
 -- Event — append-only audit log. Drives the report and the replay/regression tests.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS event (

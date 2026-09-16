@@ -175,9 +175,19 @@ def plan(lab: str, db_path: str | None) -> None:
 @click.option("--lab", required=True, help="Lab name.")
 @click.option("--limit", default=5, show_default=True, type=int,
               help="How many top tasks to show.")
+@click.option("--host", "host_ip", default=None, help="Focus on one host IP.")
+@click.option("--contract", is_flag=True, default=False,
+              help="Emit the full operator context block (persona + state + "
+                   "candidates) for Claude Code to reason over into an Autonomy Contract.")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def next_cmd(lab: str, limit: int, db_path: str | None) -> None:
-    """Show the top EV-ranked pending tasks (deterministic; LLM RANK lands later)."""
+def next_cmd(lab: str, limit: int, host_ip: str | None, contract: bool,
+             db_path: str | None) -> None:
+    """Show the top EV-ranked pending tasks, or (--contract) the operator context.
+
+    Default: a compact ranked list. With --contract: the full persona + state +
+    candidate block the operator reasons over. Yhwach never calls a model itself.
+    """
+    from yhwach.context import build_context
     from yhwach.planner import top_tasks
 
     path = _db_path(db_path)
@@ -190,7 +200,15 @@ def next_cmd(lab: str, limit: int, db_path: str | None) -> None:
         if eng_id is None:
             click.echo(f"[!] Unknown lab '{lab}'.", err=True)
             sys.exit(2)
+
+        if contract:
+            block = build_context(conn, eng_id, host_ip=host_ip, limit=limit)
+            click.echo(block)
+            return
+
         tasks = top_tasks(conn, eng_id, limit)
+        if host_ip is not None:
+            tasks = [t for t in tasks if t["host_ip"] == host_ip]
 
     if not tasks:
         click.echo("[!] No pending tasks. Run `yhwach probe` then `yhwach plan` first.")
@@ -203,6 +221,20 @@ def next_cmd(lab: str, limit: int, db_path: str | None) -> None:
             f"{t['host_ip']} {t['surface_kind']} -> {t['playbook_rule_id']} ({t['kind']})"
         )
         click.echo(f"     {t['rationale']}")
+
+
+@main.command()
+def persona() -> None:
+    """Print the operator persona in effect (the reasoning frame Yhwach injects)."""
+    import hashlib
+
+    from yhwach.context import load_persona
+
+    text = load_persona()
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+    click.echo(text)
+    click.echo("")
+    click.echo(f"# persona sha256:{digest}")
 
 
 @main.command()

@@ -27,3 +27,21 @@ def schema_sql_path() -> Path:
     raise FileNotFoundError(
         "yhwach schema.sql not found — expected in package (_schema.sql) or repo db/ dir"
     )
+
+
+def persona_path() -> Path:
+    """Locate the operator persona markdown (source checkout / installed wheel)."""
+    pkg_root = Path(__file__).resolve().parent
+
+    installed = pkg_root / "_operator.md"
+    if installed.exists():
+        return installed
+
+    dev = pkg_root.parent / "persona" / "operator.md"
+    if dev.exists():
+        return dev
+
+    raise FileNotFoundError(
+        "yhwach operator persona not found — expected in package (_operator.md) "
+        "or repo persona/ dir"
+    )

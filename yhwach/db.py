@@ -171,6 +171,89 @@ def scanned_hosts_with_ports(
     return [dict(r) for r in rows]
 
 
+STAGES = ["undiscovered", "scanned", "enumerated", "foothold", "looted", "pivoted", "done"]
+
+
+def set_host_stage(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    ip: str,
+    stage: str,
+    *,
+    monotonic: bool = True,
+) -> tuple[bool, str | None]:
+    """Set a host's FSM stage. With monotonic=True, refuse to move backwards
+    (except to 'blocked'). Returns (changed, message)."""
+    row = conn.execute(
+        "SELECT id, stage FROM host WHERE engagement_id = ? AND ip = ?",
+        (engagement_id, ip),
+    ).fetchone()
+    if row is None:
+        return False, f"host {ip} not found"
+    cur_stage = row["stage"]
+    if monotonic and stage != "blocked" and cur_stage in STAGES and stage in STAGES:
+        if STAGES.index(stage) < STAGES.index(cur_stage):
+            return False, f"{ip} is already at '{cur_stage}'; refusing to move back to '{stage}'"
+    conn.execute(
+        "UPDATE host SET stage = ?, last_updated = ? WHERE id = ?",
+        (stage, _now_utc(), row["id"]),
+    )
+    return True, None
+
+
+def add_credential(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    identifier: str,
+    secret: str | None,
+    kind: str,
+    source: str,
+    source_host_id: int | None = None,
+) -> tuple[int, bool]:
+    """Add/update a credential (deduped by engagement+identifier+kind). Creds are
+    never exhausted — the spray primitive keeps them in play against every host."""
+    existing = conn.execute(
+        "SELECT id FROM credential WHERE engagement_id = ? AND identifier = ? AND kind = ?",
+        (engagement_id, identifier, kind),
+    ).fetchone()
+    if existing is not None:
+        conn.execute(
+            "UPDATE credential SET secret = COALESCE(?, secret), source = ? WHERE id = ?",
+            (secret, source, existing["id"]),
+        )
+        return int(existing["id"]), False
+    cur = conn.execute(
+        "INSERT INTO credential (engagement_id, identifier, secret, kind, source, "
+        "source_host_id, discovered_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (engagement_id, identifier, secret, kind, source, source_host_id, _now_utc()),
+    )
+    return int(cur.lastrowid), True
+
+
+def list_credentials(conn: sqlite3.Connection, engagement_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT identifier, secret, kind, source FROM credential "
+        "WHERE engagement_id = ? ORDER BY id",
+        (engagement_id,),
+    ).fetchall()
+
+
+def log_event(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    kind: str,
+    payload: dict,
+) -> int:
+    """Append an audit event (drives the report + replay)."""
+    import json as _json
+
+    cur = conn.execute(
+        "INSERT INTO event (engagement_id, ts, kind, payload_json) VALUES (?, ?, ?, ?)",
+        (engagement_id, _now_utc(), kind, _json.dumps(payload, sort_keys=True)),
+    )
+    return int(cur.lastrowid)
+
+
 def add_finding(
     conn: sqlite3.Connection,
     host_id: int | None,

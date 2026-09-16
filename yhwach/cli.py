@@ -63,19 +63,21 @@ def engage(lab: str, scope: str, domain: str | None, dc_ip: str | None,
 @main.command()
 @click.argument("file", type=click.Path(exists=True, dir_okay=False))
 @click.option("--lab", required=True, help="Lab name (must exist).")
-@click.option("--kind", type=click.Choice(["nmap"]), default="nmap",
-              help="Parser kind. Only 'nmap' is implemented in Phase 1.1.")
+@click.option("--kind", type=click.Choice(["nmap", "linpeas", "winpeas"]), default="nmap",
+              help="Parser kind.")
+@click.option("--host", "host_ip", default=None,
+              help="Host IP (required for linpeas/winpeas — findings are host-scoped).")
 @click.option("--db", "db_path", default=None, type=click.Path(),
               help="Override DB path.")
-def ingest(file: str, lab: str, kind: str, db_path: str | None) -> None:
-    """Parse a tool output file and update the world model."""
+def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | None) -> None:
+    """Parse a tool output file and update the world model.
+
+    nmap XML -> hosts + services. linpeas/winpeas -> privesc findings on --host
+    (also advances that host to 'enumerated').
+    """
     path = _db_path(db_path)
     if not path.exists():
         click.echo(f"[!] DB not found at {path}; run `yhwach engage` first.", err=True)
-        sys.exit(2)
-
-    if kind != "nmap":  # future-proof; click.Choice enforces the set for now
-        click.echo(f"[!] Parser '{kind}' not implemented yet.", err=True)
         sys.exit(2)
 
     with yhdb.transaction(path) as conn:
@@ -83,9 +85,36 @@ def ingest(file: str, lab: str, kind: str, db_path: str | None) -> None:
         if eng_id is None:
             click.echo(f"[!] Unknown lab '{lab}'. Did you run `yhwach engage`?", err=True)
             sys.exit(2)
-        hosts = parse_nmap_xml(file)
-        h, s = insert_hosts(conn, eng_id, hosts)
-    click.echo(f"[+] Ingested {kind}: {h} hosts, {s} services")
+
+        if kind == "nmap":
+            hosts = parse_nmap_xml(file)
+            h, s = insert_hosts(conn, eng_id, hosts)
+            click.echo(f"[+] Ingested nmap: {h} hosts, {s} services")
+            return
+
+        # PEAS: host-scoped privesc findings
+        if not host_ip:
+            click.echo(f"[!] --host is required for {kind}.", err=True)
+            sys.exit(2)
+        hrow = conn.execute("SELECT id FROM host WHERE engagement_id = ? AND ip = ?",
+                            (eng_id, host_ip)).fetchone()
+        if hrow is None:
+            click.echo(f"[!] Host {host_ip} not found; ingest an nmap scan first.", err=True)
+            sys.exit(2)
+
+        from yhwach.parsers.peas import parse_peas
+
+        text = Path(file).read_text(encoding="utf-8", errors="replace")
+        found = parse_peas(text, kind)
+        for f in found:
+            yhdb.add_finding(conn, hrow["id"], None, f.cls, f.title, f.severity, f.evidence)
+        yhdb.set_host_stage(conn, eng_id, host_ip, "enumerated")
+        yhdb.log_event(conn, eng_id, "ingest", {"kind": kind, "host": host_ip, "findings": len(found)})
+
+    click.echo(f"[+] Ingested {kind} on {host_ip}: {len(found)} privesc finding(s); "
+               "host -> enumerated")
+    for f in found:
+        click.echo(f"    [{f.severity.upper()}] {f.cls} {f.title}")
 
 
 @main.command()
@@ -412,6 +441,126 @@ def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
                                        "dev_artifact, will be filtered from ranking")
         elif go and not can_run:
             click.echo(f"    (skipped --go: {action.risk}/render-only — operator runs this)")
+
+
+@main.command()
+@click.option("--host", "host_ip", required=True, help="Host IP.")
+@click.option("--to", "stage", required=True,
+              type=click.Choice(yhdb.STAGES + ["blocked"]),
+              help="New FSM stage.")
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--force", is_flag=True, default=False, help="Allow moving the stage backwards.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def advance(host_ip: str, stage: str, lab: str, force: bool, db_path: str | None) -> None:
+    """Advance a host's FSM stage (foothold/looted/pivoted/...). Monotonic by default."""
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        changed, msg = yhdb.set_host_stage(conn, eng_id, host_ip, stage, monotonic=not force)
+        if changed:
+            yhdb.log_event(conn, eng_id, "stage", {"host": host_ip, "stage": stage})
+    if changed:
+        click.echo(f"[+] {host_ip} -> {stage}")
+    else:
+        click.echo(f"[!] {msg}", err=True)
+        sys.exit(1)
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--user", "identifier", required=True, help="Username / key label / token id.")
+@click.option("--secret", default=None, help="Password / hash / key material.")
+@click.option("--kind", default="password",
+              type=click.Choice(["password", "ntlm", "kerberos", "ssh_key", "api_key",
+                                 "token", "dpapi"]), help="Credential kind.")
+@click.option("--source", default="user_provided",
+              help="Where it came from (prompt_injection/chrome/dump/spray/...).")
+@click.option("--host", "host_ip", default=None, help="Host it was recovered from.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def cred(lab: str, identifier: str, secret: str | None, kind: str, source: str,
+         host_ip: str | None, db_path: str | None) -> None:
+    """Add a credential to the vault. Creds are never exhausted — always in play."""
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        host_id = None
+        if host_ip:
+            r = conn.execute("SELECT id FROM host WHERE engagement_id = ? AND ip = ?",
+                             (eng_id, host_ip)).fetchone()
+            host_id = r["id"] if r else None
+        _, created = yhdb.add_credential(conn, eng_id, identifier, secret, kind, source, host_id)
+        yhdb.log_event(conn, eng_id, "credential", {"id": identifier, "kind": kind, "source": source})
+    click.echo(f"[+] Credential '{identifier}' ({kind}) {'added' if created else 'updated'}. "
+               "Run `yhwach spray` to reuse it across the scope.")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--proto", default=None,
+              type=click.Choice(["smb", "winrm", "ssh", "ldap", "mssql", "rdp"]),
+              help="Restrict to one protocol.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def spray(lab: str, proto: str | None, db_path: str | None) -> None:
+    """Render credential-spray commands (vault creds x sprayable surfaces).
+
+    Proposal-tier: active auth-testing, so Yhwach renders — the operator runs.
+    """
+    from yhwach.spray import build_spray_plan
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        cmds = build_spray_plan(conn, eng_id, proto_filter=proto)
+
+    if not cmds:
+        click.echo("[!] Nothing to spray (empty vault or no sprayable surfaces).")
+        return
+    click.echo(f"== Spray plan for '{lab}' ({len(cmds)} commands) [propose — operator runs] ==")
+    for c in cmds:
+        click.echo(f"  $ {c}")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def creds(lab: str, db_path: str | None) -> None:
+    """List the credential vault."""
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        rows = yhdb.list_credentials(conn, eng_id)
+    if not rows:
+        click.echo("[!] Vault empty.")
+        return
+    click.echo(f"== Vault for '{lab}' ({len(rows)}) ==")
+    for r in rows:
+        sec = r["secret"] or ""
+        shown = sec if len(sec) <= 12 else sec[:6] + "…" + sec[-3:]
+        click.echo(f"  {r['identifier']:<20} {r['kind']:<10} {shown:<16} ({r['source']})")
 
 
 @main.command()

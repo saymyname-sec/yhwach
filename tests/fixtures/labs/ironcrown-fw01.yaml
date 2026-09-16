@@ -1,0 +1,32 @@
+name: ironcrown_fw01
+description: |
+  REAL capture — Challenge Lab 3 "Iron Crown", perimeter host FW01
+  (192.168.239.10), captured via `yhwach snapshot`. nginx PHP portal on 80/443
+  and Jenkins 2.555.1 (Jetty) on 8080. Both are traditional targets; NO AI
+  surface is reachable externally.
+
+  Regression value: an earlier chatbot probe misclassified the Jenkins CSRF 403
+  as a bearer chatbot. This fixture asserts the planner emits NO AI hypotheses
+  for a surfaceless perimeter host — the false positive must never come back at
+  the planning layer. (Traditional-host coverage — flagging Jenkins as a foothold
+  — is Phase 2, tracked separately.)
+world_model:
+  engagement:
+    lab: ironcrown_fw01
+    scope: [192.168.239.10]
+  hosts:
+    - ip: 192.168.239.10
+      stage: scanned
+      services:
+        - {port: 80, proto: tcp, product: nginx, version: 1.28.3}
+        - {port: 443, proto: tcp, product: nginx, version: 1.28.3}
+        - {port: 8080, proto: tcp, product: Jetty, version: 12.1.6}
+      surfaces: []
+expected:
+  top_hypothesis: {playbook_rule_id: null}
+  must_include_hypotheses: []
+  must_not_include:
+    - chatbot_direct_injection_probe
+    - chatbot_session_enumeration
+    - rag_upload_discovery
+    - ollama_unauth_api

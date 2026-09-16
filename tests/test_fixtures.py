@@ -19,7 +19,8 @@ from yhwach.fixtures import (
 )
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
-FIXTURE_FILES = sorted(FIXTURE_DIR.glob("*.yaml"))
+# Recurse so captured lab scenarios under fixtures/labs/ are golden tests too.
+FIXTURE_FILES = sorted(FIXTURE_DIR.rglob("*.yaml"))
 
 
 def test_there_are_fixtures() -> None:

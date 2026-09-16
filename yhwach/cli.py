@@ -272,7 +272,7 @@ def selftest(fixtures_dir: str | None) -> None:
     from yhwach.fixtures import default_fixtures_dir, run_fixture_file
 
     d = Path(fixtures_dir) if fixtures_dir else default_fixtures_dir()
-    files = sorted(d.glob("*.yaml"))
+    files = sorted(d.rglob("*.yaml"))
     if not files:
         click.echo(f"[!] No *.yaml fixtures in {d}.", err=True)
         sys.exit(2)

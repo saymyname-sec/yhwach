@@ -154,6 +154,13 @@ ACTION_REGISTRY: dict[str, Action] = {
         ["curl -sk $URL/api/v4/projects?visibility=public"], outputs="http"),
 
     # --- Traditional: web ---
+    "sqli_error_probe": _a("sqli_error_probe",
+        ["for ep in / /search.php /directory.php /projects.php /product.php /item.php; do "
+         "for p in q id search name user page cat; do "
+         "b=$(curl -sk -m 5 \"$URL$ep?$p=%27\" 2>/dev/null); "
+         "echo \"$b\" | grep -iqE \"unrecognized token|SQL error|SQL syntax|mysql_|ODBC|ORA-[0-9]|"
+         "unclosed quotation\" && echo \"[SQLi] $URL$ep?$p\"; done; done"],
+        outputs="raw", note="Error-based SQLi sweep over common endpoints/params."),
     "nuclei_scan": _a("nuclei_scan", ["nuclei -u $URL"], runnable=False,
         note="Wire via HexStrike MCP in practice; heavy scan."),
     "ffuf_content_discovery": _a("ffuf_content_discovery",

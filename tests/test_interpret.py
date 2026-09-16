@@ -73,3 +73,19 @@ def test_add_finding_dedupes(tmp_db: Path) -> None:
     assert id1 == id2
     assert c1 is True and c2 is False
     assert n == 1
+
+
+def test_sqli_error_sqlite() -> None:
+    out = "<pre class=err>SQL error: unrecognized token: \"'\"</pre>"
+    f = interpret_output("sqli_error_probe", out, {"URL": "http://10.0.0.1"})
+    assert f is not None and f.cls == "CWE-89" and f.severity == "critical"
+
+
+def test_sqli_marker_extracts_location() -> None:
+    out = "[SQLi] http://10.0.0.1/search.php?q"
+    f = interpret_output("sqli_error_probe", out, {})
+    assert f is not None and "search.php?q" in f.evidence
+
+
+def test_sqli_clean_output_none() -> None:
+    assert interpret_output("sqli_error_probe", "all results returned normally", {}) is None

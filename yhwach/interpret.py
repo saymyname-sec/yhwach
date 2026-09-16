@@ -111,7 +111,30 @@ def _rag_upload(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+_SQL_ERROR_SIGNATURES = (
+    "unrecognized token", "sql error", "sqlite3.", "sqlite_error",            # sqlite
+    "you have an error in your sql syntax", "mysql_fetch", "mysqlsyntaxerror",  # mysql
+    "unclosed quotation mark", "microsoft ole db", "odbc sql server",          # mssql
+    "postgresql query failed", "pg::syntaxerror",                             # postgres
+    "ora-01756", "ora-00933",                                                 # oracle
+    "[sqli]",                                                                 # our probe marker
+)
+
+
+def _sqli_error(output: str, ctx: dict) -> ExtractedFinding | None:
+    low = (output or "").lower()
+    for sig in _SQL_ERROR_SIGNATURES:
+        if sig in low:
+            hit = re.search(r"\[SQLi\]\s*(\S+)", output)
+            where = hit.group(1) if hit else ctx.get("URL", "?")
+            return ExtractedFinding(
+                "CWE-89", "SQL injection (error-based)", "critical",
+                f"SQL error reflected from {where} on a single-quote payload")
+    return None
+
+
 _EXTRACTORS: dict[str, Callable[[str, dict], ExtractedFinding | None]] = {
+    "sqli_error_probe": _sqli_error,
     "probe_ollama_models": _ollama_models,
     "enumerate_models": _openai_models,
     "mcp_tools_list": _mcp_tools,

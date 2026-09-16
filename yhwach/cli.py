@@ -324,10 +324,10 @@ def next_cmd(lab: str, limit: int, host_ip: str | None, contract: bool,
     click.echo(f"== Top {len(tasks)} tasks for '{lab}' (by EV) ==")
     for i, t in enumerate(tasks, 1):
         click.echo(
-            f"{i}. EV={t['ev_score']:<6} [{t['autonomy']:<7}] "
+            f"{i}. [task #{t['id']}] EV={t['ev_score']:<6} [{t['autonomy']:<7}] "
             f"{t['host_ip']} {t['surface_kind']} -> {t['playbook_rule_id']} ({t['kind']})"
         )
-        click.echo(f"     {t['rationale']}")
+        click.echo(f"     {t['rationale']}  (run: yhwach run --lab {lab} --task {t['id']} --go)")
 
 
 @main.command()

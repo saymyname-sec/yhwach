@@ -43,6 +43,7 @@
   likelihood: M
   time_cost: med
   emits:
+    - action: sqli_error_probe
     - action: nuclei_scan
     - action: ffuf_content_discovery
     - action: sqlmap_forms

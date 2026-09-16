@@ -271,6 +271,77 @@ def probe_gradio(
     )
 
 
+def probe_a2a(
+    session: requests.Session,
+    host: str,
+    port: int,
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> ProbeResult | None:
+    """Detect an A2A agent by its published agent card (/.well-known/agent.json)."""
+    for scheme in ("http", "https"):
+        for path in ("/.well-known/agent.json", "/.well-known/agent-card.json", "/agent.json"):
+            try:
+                r = session.get(f"{scheme}://{host}:{port}{path}", timeout=timeout)
+            except requests.RequestException:
+                continue
+            if r.status_code != 200:
+                continue
+            try:
+                data = r.json()
+            except ValueError:
+                continue
+            # Agent cards carry a name plus skills/capabilities (distinctive of A2A).
+            if isinstance(data, dict) and ("skills" in data or "capabilities" in data):
+                return ProbeResult(
+                    kind="a2a",
+                    auth="none",
+                    meta={"endpoint": path, "scheme": scheme, "name": data.get("name")},
+                )
+    return None
+
+
+def probe_vectordb(
+    session: requests.Session,
+    host: str,
+    port: int,
+    *,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> ProbeResult | None:
+    """Detect an exposed vector DB (Qdrant / Weaviate / Chroma)."""
+    # Qdrant: GET /collections -> {"result":{"collections":[...]}}
+    try:
+        r = session.get(f"http://{host}:{port}/collections", timeout=timeout)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, dict) and isinstance(data.get("result"), dict) \
+                    and "collections" in data["result"]:
+                return ProbeResult(kind="vectordb", auth="none",
+                                   meta={"engine": "qdrant", "endpoint": "/collections"})
+    except (requests.RequestException, ValueError):
+        pass
+    # Weaviate: GET /v1/meta -> {"version": ...}
+    try:
+        r = session.get(f"http://{host}:{port}/v1/meta", timeout=timeout)
+        if r.status_code == 200:
+            data = r.json()
+            if isinstance(data, dict) and ("version" in data or "hostname" in data):
+                return ProbeResult(kind="vectordb", auth="none",
+                                   meta={"engine": "weaviate", "endpoint": "/v1/meta",
+                                         "version": data.get("version")})
+    except (requests.RequestException, ValueError):
+        pass
+    # Chroma: GET /api/v1/heartbeat -> {"nanosecond heartbeat": ...}
+    try:
+        r = session.get(f"http://{host}:{port}/api/v1/heartbeat", timeout=timeout)
+        if r.status_code == 200 and "heartbeat" in (getattr(r, "text", "") or "").lower():
+            return ProbeResult(kind="vectordb", auth="none",
+                               meta={"engine": "chroma", "endpoint": "/api/v1/heartbeat"})
+    except requests.RequestException:
+        pass
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Dispatch: port -> probes to try
 # ---------------------------------------------------------------------------
@@ -278,8 +349,9 @@ def probe_gradio(
 ProbeFn = Callable[..., "ProbeResult | None"]
 
 PROBES_BY_PORT: dict[int, list[ProbeFn]] = {
-    80:    [probe_openai_compat, probe_chatbot, probe_gradio],
-    443:   [probe_openai_compat, probe_chatbot, probe_gradio],
+    80:    [probe_openai_compat, probe_chatbot, probe_gradio, probe_a2a],
+    443:   [probe_openai_compat, probe_chatbot, probe_gradio, probe_a2a],
+    6333:  [probe_vectordb],
     11434: [probe_ollama],
     1234:  [probe_openai_compat, probe_chatbot],
     3000:  [probe_openai_compat, probe_chatbot],
@@ -287,11 +359,12 @@ PROBES_BY_PORT: dict[int, list[ProbeFn]] = {
     5000:  [probe_openai_compat, probe_chatbot, probe_mcp],
     5001:  [probe_openai_compat, probe_chatbot],
     7860:  [probe_gradio, probe_chatbot],
-    8000:  [probe_openai_compat, probe_chatbot, probe_mcp, probe_gradio],
+    8000:  [probe_openai_compat, probe_chatbot, probe_mcp, probe_gradio, probe_a2a, probe_vectordb],
     8001:  [probe_openai_compat, probe_chatbot],
-    8080:  [probe_openai_compat, probe_chatbot, probe_mcp],
+    8080:  [probe_openai_compat, probe_chatbot, probe_mcp, probe_a2a, probe_vectordb],
     8443:  [probe_openai_compat, probe_chatbot, probe_mcp],
     8888:  [probe_chatbot, probe_mcp],
+    9000:  [probe_openai_compat, probe_chatbot, probe_a2a],
 }
 
 

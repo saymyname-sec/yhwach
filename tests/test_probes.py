@@ -254,3 +254,53 @@ def test_probes_by_port_covers_expected_ports() -> None:
 @pytest.mark.parametrize("port", [11434, 7860, 8000, 8080, 5000])
 def test_every_port_has_at_least_one_probe(port: int) -> None:
     assert len(probes_for_port(port)) >= 1
+
+
+# ---------------------------------------------------------------------------
+# probe_a2a / probe_vectordb  (Batch C)
+# ---------------------------------------------------------------------------
+
+def test_probe_a2a_agent_card() -> None:
+    from yhwach.probes.ai import probe_a2a
+    session = FakeSession({
+        ("GET", "/.well-known/agent.json"): FakeResponse(200, {
+            "name": "orchestrator", "skills": [{"id": "summarize"}], "url": "http://x"
+        })
+    })
+    res = probe_a2a(session, "10.0.0.1", 8000)
+    assert res is not None
+    assert res.kind == "a2a"
+    assert res.meta["name"] == "orchestrator"
+
+
+def test_probe_a2a_ignores_non_agent_json() -> None:
+    from yhwach.probes.ai import probe_a2a
+    session = FakeSession({("GET", "/.well-known/agent.json"): FakeResponse(200, {"hello": "world"})})
+    assert probe_a2a(session, "10.0.0.1", 8000) is None
+
+
+def test_probe_vectordb_qdrant() -> None:
+    from yhwach.probes.ai import probe_vectordb
+    session = FakeSession({
+        ("GET", "/collections"): FakeResponse(200, {"result": {"collections": [{"name": "docs"}]}})
+    })
+    res = probe_vectordb(session, "10.0.0.1", 6333)
+    assert res is not None
+    assert res.kind == "vectordb"
+    assert res.meta["engine"] == "qdrant"
+
+
+def test_probe_vectordb_weaviate() -> None:
+    from yhwach.probes.ai import probe_vectordb
+    session = FakeSession({
+        ("GET", "/collections"): FakeResponse(404),
+        ("GET", "/v1/meta"): FakeResponse(200, {"version": "1.24.1", "hostname": "weav"}),
+    })
+    res = probe_vectordb(session, "10.0.0.1", 8080)
+    assert res is not None
+    assert res.meta["engine"] == "weaviate"
+
+
+def test_probe_vectordb_none() -> None:
+    from yhwach.probes.ai import probe_vectordb
+    assert probe_vectordb(FakeSession({}), "10.0.0.1", 8080) is None

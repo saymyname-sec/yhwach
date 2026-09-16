@@ -1,0 +1,20 @@
+name: ollama_unauth
+description: Single Linux host exposing an unauthenticated Ollama API. The classic
+  free-15-points AI target. Top move must be the unauth Ollama rule, proceed-tier.
+world_model:
+  engagement:
+    lab: fx_ollama
+    scope: [10.10.10.0/24]
+  hosts:
+    - ip: 10.10.10.15
+      os: linux
+      stage: scanned
+      services:
+        - {port: 11434, proto: tcp, product: ollama, version: 0.1.28}
+      surfaces:
+        - {kind: ollama, auth: none, service_port: 11434, meta: {models: [llama3.2]}}
+expected:
+  autonomy: proceed
+  top_hypothesis: {playbook_rule_id: ollama_unauth_api}
+  must_include_hypotheses: [ollama_unauth_api]
+  must_not_include: []

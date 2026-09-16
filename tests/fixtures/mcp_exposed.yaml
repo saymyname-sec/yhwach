@@ -1,0 +1,20 @@
+name: mcp_exposed
+description: Exposed MCP server with tools/list reachable and no auth. The MCP
+  tool-abuse rule (LLM06 excessive agency) is the top move, proceed-tier.
+world_model:
+  engagement:
+    lab: fx_mcp
+    scope: [10.10.10.0/24]
+  hosts:
+    - ip: 10.10.10.30
+      os: linux
+      stage: scanned
+      services:
+        - {port: 8080, proto: tcp, product: node}
+      surfaces:
+        - {kind: mcp, auth: none, service_port: 8080, meta: {tools: [run_command, read_file]}}
+expected:
+  autonomy: proceed
+  top_hypothesis: {playbook_rule_id: mcp_tools_list_probe}
+  must_include_hypotheses: [mcp_tools_list_probe]
+  must_not_include: [ollama_unauth_api, chatbot_direct_injection_probe]

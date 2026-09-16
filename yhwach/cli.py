@@ -224,6 +224,75 @@ def next_cmd(lab: str, limit: int, host_ip: str | None, contract: bool,
 
 
 @main.command()
+@click.option("--lab", required=True, help="Lab name (must exist).")
+@click.option("--out", "out_path", default=None, type=click.Path(),
+              help="Write the fixture YAML here (default: stdout).")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def snapshot(lab: str, out_path: str | None, db_path: str | None) -> None:
+    """Dump the current world model as a fixture YAML (for the regression corpus).
+
+    Run this after a lab so the scenario becomes a permanent golden test. Add an
+    `expected:` block by hand (or your correction) to turn it into an assertion.
+    """
+    import yaml as _yaml
+
+    from yhwach.fixtures import snapshot_world_model
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        snap = snapshot_world_model(conn, eng_id)
+
+    snap["expected"] = {
+        "autonomy": None,
+        "top_hypothesis": {"playbook_rule_id": None},
+        "must_include_hypotheses": [],
+        "must_not_include": [],
+    }
+    text = _yaml.safe_dump(snap, sort_keys=False, allow_unicode=True)
+    if out_path:
+        Path(out_path).write_text(text, encoding="utf-8")
+        click.echo(f"[+] wrote {out_path} — fill in the `expected:` block to make it a golden test")
+    else:
+        click.echo(text)
+
+
+@main.command()
+@click.option("--fixtures", "fixtures_dir", default=None, type=click.Path(),
+              help="Fixtures dir (default: repo tests/fixtures).")
+def selftest(fixtures_dir: str | None) -> None:
+    """Run all golden fixtures and report pass/fail. Exits non-zero on any failure."""
+    from yhwach.fixtures import default_fixtures_dir, run_fixture_file
+
+    d = Path(fixtures_dir) if fixtures_dir else default_fixtures_dir()
+    files = sorted(d.glob("*.yaml"))
+    if not files:
+        click.echo(f"[!] No *.yaml fixtures in {d}.", err=True)
+        sys.exit(2)
+
+    failed = 0
+    for f in files:
+        res = run_fixture_file(f)
+        mark = "PASS" if res.passed else "FAIL"
+        click.echo(f"[{mark}] {res.name}  (top={res.top_actual})")
+        for msg in res.failures:
+            click.echo(f"        - {msg}")
+        failed += 0 if res.passed else 1
+
+    total = len(files)
+    click.echo(f"[=] {total - failed}/{total} fixtures passed.")
+    if failed:
+        sys.exit(1)
+
+
+@main.command()
 def persona() -> None:
     """Print the operator persona in effect (the reasoning frame Yhwach injects)."""
     import hashlib

@@ -23,6 +23,7 @@ import click
 
 from yhwach import __version__
 from yhwach import db as yhdb
+from yhwach.coverage import enum_gaps, render_gaps
 from yhwach.engine import artifact_dir as _artifact_dir
 from yhwach.engine import execute_task
 from yhwach.parsers.nmap import insert_hosts, parse_nmap
@@ -119,9 +120,25 @@ def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | N
             sys.exit(2)
 
         if kind == "nmap":
-            hosts = parse_nmap(Path(file).read_text(encoding="utf-8", errors="replace"))
-            h, s = insert_hosts(conn, eng_id, hosts)
+            from yhwach.parsers.nmap import parse_scan_meta
+
+            raw = Path(file).read_text(encoding="utf-8", errors="replace")
+            hosts = parse_nmap(raw)
+            meta = parse_scan_meta(raw)
+            h, s = insert_hosts(conn, eng_id, hosts, meta)
+            # Log it: the CLI path used to be invisible to the timeline (and so
+            # to `recall`/`report`), unlike the MCP one.
+            yhdb.log_event(conn, eng_id, "ingest",
+                           {"kind": "nmap", "hosts": h, "services": s})
             click.echo(f"[+] Ingested nmap: {h} hosts, {s} services")
+            for cov in meta.coverage:
+                click.echo(f"    coverage: {cov.proto} {cov.ports} "
+                           f"({cov.port_count} ports)"
+                           + ("  full-range" if cov.full_range else "")
+                           + ("  +versions" if meta.version_scan else ""))
+            gaps = enum_gaps(conn, eng_id)
+            if gaps:
+                click.echo(f"[!] {len(gaps)} host(s) under-enumerated — `yhwach gaps --lab {lab}`")
             return
 
         # Host-scoped findings (linpeas/winpeas privesc, bloodhound AD facts).
@@ -225,7 +242,7 @@ def enum(lab: str, target: str, ports: str | None, hexstrike_url: str | None,
     only to deliberately narrow a re-scan.
     """
     from yhwach.hexstrike import DEFAULT_URL, HexStrikeClient, HexStrikeError, is_loopback
-    from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml_text
+    from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml_text, parse_scan_meta
 
     url = hexstrike_url or DEFAULT_URL
     path = _db_path(db_path)
@@ -282,7 +299,7 @@ def enum(lab: str, target: str, ports: str | None, hexstrike_url: str | None,
             click.echo(f"[!] Unknown lab '{lab}'.", err=True)
             sys.exit(2)
         hosts = parse_nmap_xml_text(xml)
-        h, s = insert_hosts(conn, eng_id, hosts)
+        h, s = insert_hosts(conn, eng_id, hosts, parse_scan_meta(xml))
         yhdb.log_event(conn, eng_id, "enum", {"target": target, "hosts": h, "services": s,
                                               "via": "hexstrike"})
     click.echo(f"[+] HexStrike nmap: {h} hosts, {s} services ingested. "
@@ -339,15 +356,20 @@ def plan(lab: str, db_path: str | None) -> None:
 @click.option("--contract", is_flag=True, default=False,
               help="Emit the full operator context block (persona + state + "
                    "candidates) for Claude Code to reason over into an Autonomy Contract.")
+@click.option("--no-persona", "no_persona", is_flag=True, default=False,
+              help="Cheap turn: with --contract, send the persona's sha256 instead of its "
+                   "body. Use once the frame is already in the operator's context.")
+@click.option("--json", "as_json", is_flag=True, default=False,
+              help="Emit the handoff as JSON (implies --contract; persona by digest).")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
 def next_cmd(lab: str, limit: int, host_ip: str | None, contract: bool,
-             db_path: str | None) -> None:
+             no_persona: bool, as_json: bool, db_path: str | None) -> None:
     """Show the top EV-ranked pending tasks, or (--contract) the operator context.
 
     Default: a compact ranked list. With --contract: the full persona + state +
     candidate block the operator reasons over. Yhwach never calls a model itself.
     """
-    from yhwach.context import build_context
+    from yhwach.context import build_context, build_context_json
     from yhwach.planner import top_tasks
 
     path = _db_path(db_path)
@@ -361,8 +383,12 @@ def next_cmd(lab: str, limit: int, host_ip: str | None, contract: bool,
             click.echo(f"[!] Unknown lab '{lab}'.", err=True)
             sys.exit(2)
 
+        if as_json:
+            click.echo(build_context_json(conn, eng_id, host_ip=host_ip, limit=limit))
+            return
         if contract:
-            block = build_context(conn, eng_id, host_ip=host_ip, limit=limit)
+            block = build_context(conn, eng_id, host_ip=host_ip, limit=limit,
+                                  persona=not no_persona)
             click.echo(block)
             return
 
@@ -524,8 +550,17 @@ def advance(host_ip: str, stage: str, lab: str, force: bool, db_path: str | None
         changed, msg = yhdb.set_host_stage(conn, eng_id, host_ip, stage, monotonic=not force)
         if changed:
             yhdb.log_event(conn, eng_id, "stage", {"host": host_ip, "stage": stage})
+        # Advisory under-enumeration check. Calling a half-scanned host
+        # 'enumerated' is the top OSAI failure mode; the engine warns rather than
+        # refuses, because scans legitimately arrive out of band.
+        warn_gaps = enum_gaps(conn, eng_id, host_ip=host_ip) if (
+            changed and stage == "enumerated") else []
     if changed:
         click.echo(f"[+] {host_ip} -> {stage}")
+        if warn_gaps:
+            click.echo(f"[!] {host_ip} is NOT fully enumerated: {warn_gaps[0].summary}", err=True)
+            for g in warn_gaps[0].gaps:
+                click.echo(f"      $ {g.fix}", err=True)
         click.echo(f"[note] objective reached — write the {host_ip} note in the Obsidian vault "
                    "now (via the Obsidian MCP): full detail per persona/notebook.md.")
     else:
@@ -844,6 +879,128 @@ def report(lab: str, out_path: str | None, db_path: str | None) -> None:
         click.echo(f"[+] wrote {out_path}")
     else:
         click.echo(md)
+
+
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--result", required=True,
+              type=click.Choice(list(yhdb.ATTEMPT_RESULTS)),
+              help="How the move went. success consumes the technique; fail/blocked "
+                   "retire the task and decay its EV; partial keeps it queued.")
+@click.option("--task", "task_id", default=None, type=int,
+              help="Task id from `yhwach next` (carries the host + rule).")
+@click.option("--rule", "rule_id", default=None,
+              help="playbook_rule_id, for a move run outside the task queue.")
+@click.option("--host", "host_ip", default=None, help="Target host IP (with --rule).")
+@click.option("--why", "reason", default=None,
+              help="One line: WHY it went that way. This is what your future self reads.")
+@click.option("--evidence", default=None, help="Loot path / Obsidian ref / output excerpt.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def outcome(lab: str, result: str, task_id: int | None, rule_id: str | None,
+            host_ip: str | None, reason: str | None, evidence: str | None,
+            db_path: str | None) -> None:
+    """Record how an attempt went — the engine's memory of what you already burned.
+
+    `technique_state` only ever recorded success. This records the other three
+    outcomes too, so a failed move leaves the queue, ranks lower if it ever
+    returns, and shows up as a DEAD END in the next handoff. An unrecorded
+    attempt is an attempt you will repeat after your context is compacted.
+    """
+    from yhwach.memory import record_outcome
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        try:
+            rep = record_outcome(
+                conn, eng_id, result=result, task_id=task_id, rule_id=rule_id,
+                host_ip=host_ip, reason=reason, evidence=evidence)
+        except ValueError as e:
+            click.echo(f"[!] {e}", err=True)
+            sys.exit(2)
+    click.echo(f"[+] {rep.render()}")
+    if result == "success":
+        click.echo("[note] objective reached — write the note in the Obsidian vault now.")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--events", default=8, show_default=True, type=int,
+              help="How many recent events to replay.")
+@click.option("--tasks", default=3, show_default=True, type=int,
+              help="How many ranked next moves to preview.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Emit JSON.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def recall(lab: str, events: int, tasks: int, as_json: bool, db_path: str | None) -> None:
+    """Catch up on an engagement after a context reset — compact, persona-free.
+
+    Where am I, what did I already try (wins + dead ends), what is still open,
+    what is next. This is the first command to run in a fresh operator session
+    or after a /compact: it costs a few hundred tokens instead of a full handoff.
+    """
+    import json as _json
+
+    from yhwach.memory import build_recall, collect_recall
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        if as_json:
+            click.echo(_json.dumps(
+                collect_recall(conn, eng_id, events=events, tasks=tasks), indent=2))
+            return
+        click.echo(build_recall(conn, eng_id, events=events, tasks=tasks))
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--host", "host_ip", default=None, help="Check one host IP.")
+@click.option("--all", "show_all", is_flag=True, default=False,
+              help="Include hosts whose enumeration is already complete.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Emit JSON.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def gaps(lab: str, host_ip: str | None, show_all: bool, as_json: bool,
+         db_path: str | None) -> None:
+    """Show under-enumerated hosts and the exact scan that closes each gap.
+
+    Built from `scan_coverage` — what the ingested nmap runs actually covered,
+    not what they found. A host is complete when it has a full-port TCP scan,
+    service versions, and a UDP top-100 sweep.
+    """
+    import json as _json
+
+    from yhwach.coverage import gaps_as_dicts
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        found = enum_gaps(conn, eng_id, host_ip=host_ip, include_complete=show_all)
+    if as_json:
+        click.echo(_json.dumps(gaps_as_dicts(found), indent=2))
+        return
+    click.echo(f"== Enumeration gaps for '{lab}' ({len(found)} host(s)) ==")
+    for line in render_gaps(found):
+        click.echo(line)
 
 
 @main.command()

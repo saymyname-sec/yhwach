@@ -83,10 +83,71 @@ def tool_plan(db_path: Path | str, lab: str) -> str:
     return msg
 
 
-def tool_next(db_path: Path | str, lab: str, limit: int = 4) -> str:
+def tool_next(db_path: Path | str, lab: str, limit: int = 4, persona: bool = True,
+              fmt: str = "text") -> str:
+    """The operator context block: persona frame + state + EV-ranked candidates.
+
+    `persona=False` swaps the persona body for its sha256 — use it once the
+    frame is already in your context, and the handoff costs a fraction of the
+    tokens. `fmt="json"` returns the same slice as data (persona by digest).
+    """
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
-        return build_context(conn, eid, limit=limit)
+        if fmt == "json":
+            from yhwach.context import build_context_json
+            return build_context_json(conn, eid, limit=limit)
+        return build_context(conn, eid, limit=limit, persona=persona)
+
+
+def tool_recall(db_path: Path | str, lab: str, events: int = 8, tasks: int = 3) -> str:
+    """Catch up on an engagement after a context reset — compact and persona-free.
+
+    Where the engagement stands, what has already been TRIED (wins + dead ends),
+    which leads are open, what enumeration is missing, and the next ranked moves.
+    Call this first in a fresh session or after a compaction, before yhwach_next.
+    """
+    from yhwach.memory import build_recall
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        return build_recall(conn, eid, events=events, tasks=tasks)
+
+
+def tool_outcome(db_path: Path | str, lab: str, result: str, task_id: int | None = None,
+                 rule_id: str | None = None, host: str | None = None,
+                 why: str | None = None, evidence: str | None = None) -> str:
+    """Record how an attempt went: success | fail | blocked | partial.
+
+    Identify the move by `task_id` (from yhwach_next) or by `rule_id` [+ `host`].
+    success consumes the technique and closes the task; fail/blocked retire it
+    and decay its EV, and it is listed as a DEAD END in every later handoff;
+    partial leaves it queued. Always pass `why` — one line, for your future self.
+    Report EVERY resolved move: an unrecorded attempt is one you will repeat.
+    """
+    from yhwach.memory import record_outcome
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        rep = record_outcome(conn, eid, result=result, task_id=task_id, rule_id=rule_id,
+                             host_ip=host, reason=why, evidence=evidence)
+    return rep.render()
+
+
+def tool_gaps(db_path: Path | str, lab: str, host: str | None = None) -> str:
+    """Under-enumerated hosts + the exact scan that closes each gap.
+
+    Derived from what the ingested nmap runs actually COVERED (port range,
+    -sV, UDP), not what they found. A host is complete only with a full-port
+    TCP scan, service versions and a UDP top-100 sweep — under-enumeration is
+    the top scoring failure in OSAI-style labs.
+    """
+    from yhwach.coverage import enum_gaps, render_gaps
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        found = enum_gaps(conn, eid, host_ip=host)
+    return "\n".join([f"== Enumeration gaps for '{lab}' ({len(found)} host(s)) ==",
+                      *render_gaps(found)])
 
 
 def tool_findings(db_path: Path | str, lab: str) -> str:
@@ -179,12 +240,28 @@ def tool_creds(db_path: Path | str, lab: str, kind: str | None = None) -> str:
 
 
 def tool_advance(db_path: Path | str, lab: str, host: str, stage: str) -> str:
+    """Advance a host's FSM stage. Monotonic; 'looted'/'pivoted' need proof/tunnel.
+
+    Advancing to 'enumerated' also reports any remaining scan coverage gaps —
+    advisory, not a refusal, but calling a half-scanned host enumerated is how
+    engagements lose points."""
+    from yhwach.coverage import enum_gaps
+
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
         changed, msg = yhdb.set_host_stage(conn, eid, host, stage)
+        warn: list = []
         if changed:
             yhdb.log_event(conn, eid, "stage", {"host": host, "stage": stage})
-    return f"{host} -> {stage}" if changed else f"refused: {msg}"
+            if stage == "enumerated":
+                warn = enum_gaps(conn, eid, host_ip=host)
+    if not changed:
+        return f"refused: {msg}"
+    out = f"{host} -> {stage}"
+    if warn:
+        out += f"\n[!] NOT fully enumerated: {warn[0].summary}"
+        out += "".join(f"\n    $ {g.fix}" for g in warn[0].gaps)
+    return out
 
 
 def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
@@ -200,10 +277,17 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
         if kind == "nmap":
+            from yhwach.coverage import enum_gaps
+            from yhwach.parsers.nmap import parse_scan_meta
+
             nmap_text = Path(file).read_text(encoding="utf-8", errors="replace")
-            h, s = insert_hosts(conn, eid, parse_nmap(nmap_text))
+            meta = parse_scan_meta(nmap_text)
+            h, s = insert_hosts(conn, eid, parse_nmap(nmap_text), meta)
             yhdb.log_event(conn, eid, "ingest", {"kind": "nmap", "hosts": h, "services": s})
-            return f"nmap ingested: {h} hosts, {s} services"
+            cov = "; ".join(f"{c.proto} {c.ports}" for c in meta.coverage) or "unknown"
+            gaps = enum_gaps(conn, eid)
+            tail = f"; {len(gaps)} host(s) under-enumerated (yhwach_gaps)" if gaps else ""
+            return f"nmap ingested: {h} hosts, {s} services; coverage {cov}{tail}"
         if kind not in ("linpeas", "winpeas", "bloodhound", "certipy"):
             raise ValueError(
                 f"unknown kind '{kind}' (use nmap|linpeas|winpeas|bloodhound|certipy)")
@@ -240,7 +324,7 @@ def tool_enum(db_path: Path | str, lab: str, target: str, ports: str | None = No
     """Run nmap through HexStrike and ingest the result (delegated enumeration)."""
     from yhwach.engine import artifact_dir
     from yhwach.hexstrike import DEFAULT_URL, HexStrikeClient, HexStrikeError, is_loopback
-    from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml_text
+    from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml_text, parse_scan_meta
 
     url = hexstrike_url or DEFAULT_URL
     client = HexStrikeClient(url)
@@ -263,7 +347,7 @@ def tool_enum(db_path: Path | str, lab: str, target: str, ports: str | None = No
 
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
-        h, s = insert_hosts(conn, eid, parse_nmap_xml_text(xml))
+        h, s = insert_hosts(conn, eid, parse_nmap_xml_text(xml), parse_scan_meta(xml))
         yhdb.log_event(conn, eid, "enum",
                        {"target": target, "hosts": h, "services": s, "via": "hexstrike"})
     warn = "" if is_loopback(url) else f"  [OPSEC: {url} is not loopback]"
@@ -435,6 +519,17 @@ TOOL_SPECS = [
     ("yhwach_pivot", tool_pivot,
      "Record a pivot (subnet reachable via a host), render the Ligolo deploy, and advance "
      "the host looted -> pivoted."),
+    ("yhwach_recall", tool_recall,
+     "Catch up after a context reset: state + what was already TRIED (wins and dead ends) "
+     "+ open leads + enum gaps + the next ranked moves. Compact and persona-free — call "
+     "this first in a fresh session, before yhwach_next."),
+    ("yhwach_outcome", tool_outcome,
+     "Record how an attempt went (success|fail|blocked|partial) with a one-line reason. "
+     "Success consumes the technique; fail/blocked retire the task, decay its EV and list "
+     "it as a DEAD END so it is never re-proposed. Call it for EVERY resolved move."),
+    ("yhwach_gaps", tool_gaps,
+     "Under-enumerated hosts and the exact nmap that closes each gap (full-port / -sV / "
+     "UDP top-100), from recorded scan coverage."),
     ("yhwach_consume", tool_consume,
      "Mark a technique consumed so the planner stops proposing it this engagement."),
 ]

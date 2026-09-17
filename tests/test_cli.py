@@ -188,3 +188,102 @@ def test_unknown_lab_exits_2(tmp_db: Path) -> None:
 def test_missing_db_exits_2(tmp_path: Path) -> None:
     r = _run(["status", "--lab", "L", "--db", str(tmp_path / "nope.db")])
     assert r.exit_code == 2 and "not found" in r.output
+
+
+# --- operator memory + enumeration coverage ---------------------------------
+
+def test_outcome_fail_drops_the_task_from_next(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    _run(["plan", "--lab", "L", "--db", str(tmp_db)])
+    tid = _task_id(tmp_db)
+    r = _run(["outcome", "--lab", "L", "--result", "fail", "--task", str(tid),
+              "--why", "endpoint 404s", "--db", str(tmp_db)])
+    assert r.exit_code == 0 and "abandoned" in r.output
+    nxt = _run(["next", "--lab", "L", "--db", str(tmp_db)])
+    assert "No pending tasks" in nxt.output
+
+
+def test_outcome_success_consumes_and_prompts_for_the_note(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    _run(["plan", "--lab", "L", "--db", str(tmp_db)])
+    r = _run(["outcome", "--lab", "L", "--result", "success", "--task",
+              str(_task_id(tmp_db)), "--why", "leaked key", "--db", str(tmp_db)])
+    assert r.exit_code == 0
+    assert "consumed" in r.output and "Obsidian vault" in r.output
+
+
+def test_outcome_needs_a_target(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    r = _run(["outcome", "--lab", "L", "--result", "fail", "--db", str(tmp_db)])
+    assert r.exit_code == 2 and "task id or a playbook rule id" in r.output
+
+
+def test_outcome_rejects_an_unknown_result(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    r = _run(["outcome", "--lab", "L", "--result", "sideways", "--task", "1",
+              "--db", str(tmp_db)])
+    assert r.exit_code == 2  # click rejects it against the choice list
+
+
+def test_recall_renders_and_has_a_json_mode(tmp_db: Path) -> None:
+    import json
+
+    _seed(tmp_db)
+    r = _run(["recall", "--lab", "L", "--db", str(tmp_db)])
+    assert r.exit_code == 0 and "YHWACH RECALL" in r.output
+    j = _run(["recall", "--lab", "L", "--json", "--db", str(tmp_db)])
+    assert j.exit_code == 0 and json.loads(j.output)["lab"] == "L"
+
+
+def test_gaps_lists_hosts_and_the_fix_command(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    r = _run(["gaps", "--lab", "L", "--db", str(tmp_db)])
+    assert r.exit_code == 0
+    assert "10.0.0.5" in r.output and "nmap -p-" in r.output
+
+
+def test_ingest_records_coverage_and_flags_gaps(tmp_db: Path, tmp_path: Path) -> None:
+    _run(["engage", "--lab", "L", "--scope", "10.0.0.0/24", "--db", str(tmp_db)])
+    xml = tmp_path / "s.xml"
+    xml.write_text(
+        '<?xml version="1.0"?><nmaprun args="nmap -p 1-1000 -oX - 10.0.0.5">'
+        '<scaninfo type="syn" protocol="tcp" numservices="1000" services="1-1000"/>'
+        '<host><status state="up"/><address addr="10.0.0.5" addrtype="ipv4"/>'
+        '<ports><port protocol="tcp" portid="22"><state state="open"/>'
+        '<service name="ssh"/></port></ports></host></nmaprun>', encoding="utf-8")
+    r = _run(["ingest", str(xml), "--lab", "L", "--db", str(tmp_db)])
+    assert r.exit_code == 0
+    assert "coverage: tcp 1-1000" in r.output
+    assert "under-enumerated" in r.output
+    g = _run(["gaps", "--lab", "L", "--json", "--db", str(tmp_db)])
+    assert "full_tcp" in g.output
+
+
+def test_advance_to_enumerated_warns_but_still_advances(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    r = _run(["advance", "--lab", "L", "--host", "10.0.0.5", "--to", "enumerated",
+              "--db", str(tmp_db)])
+    assert r.exit_code == 0
+    assert "-> enumerated" in r.output
+    assert "NOT fully enumerated" in r.output
+
+
+def test_next_contract_no_persona_is_much_cheaper(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    _run(["plan", "--lab", "L", "--db", str(tmp_db)])
+    full = _run(["next", "--lab", "L", "--contract", "--db", str(tmp_db)]).output
+    cheap = _run(["next", "--lab", "L", "--contract", "--no-persona",
+                  "--db", str(tmp_db)]).output
+    assert "sha256:" in cheap and len(cheap) < len(full) / 2
+    assert "## RANKED CANDIDATES" in cheap
+
+
+def test_next_json_emits_the_handoff_as_data(tmp_db: Path) -> None:
+    import json
+
+    _seed(tmp_db)
+    _run(["plan", "--lab", "L", "--db", str(tmp_db)])
+    r = _run(["next", "--lab", "L", "--json", "--db", str(tmp_db)])
+    data = json.loads(r.output)
+    assert data["engagement"]["lab"] == "L"
+    assert data["candidates"] and data["candidates"][0]["task_id"]

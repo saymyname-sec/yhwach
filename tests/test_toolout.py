@@ -29,6 +29,11 @@ def test_nxc_smb_realistic_multi_signal() -> None:
     assert any(f.severity == "critical" for f in fs)   # (Pwn3d!)
 
 
+def test_nxc_rid_brute_userlist() -> None:
+    fs = interpret_all("netexec_rid_brute", _read("nxc_rid_brute.txt"), {"IP": "10.10.11.231"})
+    assert any(f.tag == "domain_users" for f in fs)
+
+
 def test_kerbrute_userlist() -> None:
     fs = interpret_all("kerbrute_userenum", _read("kerbrute_users.txt"), {"IP": "10.10.10.20"})
     assert any(f.tag == "domain_users" for f in fs)

@@ -290,6 +290,13 @@ ACTION_REGISTRY: dict[str, Action] = {
 
     # --- Traditional: SMB / LDAP ---
     "netexec_smb_null": _a("netexec_smb_null", ["nxc smb $IP -u '' -p ''"], outputs="raw"),
+    "netexec_rid_brute": _a("netexec_rid_brute",
+        ["nxc smb $IP -u guest -p '' --rid-brute 10000",
+         "# fallback if guest is disabled: nxc smb $IP -u '' -p '' --rid-brute 10000",
+         "# or: impacket-lookupsid -no-pass 'guest@$DOMAIN' 20000"],
+        outputs="raw",
+        note="RID cycling: resolve SIDs 500-N to usernames over a null/guest session when "
+             "anonymous LDAP is closed. Feeds the domain user list (AS-REP roast / spraying)."),
     "enum4linux_ng": _a("enum4linux_ng", ["enum4linux-ng $IP"], outputs="raw"),
     "smbmap_shares": _a("smbmap_shares", ["smbmap -H $IP -u '' -p ''"], outputs="raw"),
     "netexec_ldap": _a("netexec_ldap", ["nxc ldap $IP -u '' -p ''"], outputs="raw"),

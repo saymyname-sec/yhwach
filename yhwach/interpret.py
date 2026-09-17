@@ -331,6 +331,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "ldapsearch_anon": _ldap_anon,
     "ldap_anon_dump": _ad_users,
     "kerbrute_userenum": _ad_users,
+    "netexec_rid_brute": _ad_users,
     "asreproast_users": _kerberos_roast,
     "kerberoast_getuserspns": _kerberos_roast,
 }

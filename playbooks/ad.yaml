@@ -23,6 +23,22 @@
   source: 'internalallthethings . kerberos user enumeration (kerbrute)'
   authorized_only: true
 
+# SMB null/guest session -> RID cycling resolves SIDs to usernames when anon
+# LDAP is closed. First-contact user enumeration; feeds domain_users.
+- id: smb_rid_cycling
+  when: { surface: smb }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: netexec_rid_brute
+  maps: [T1087.002]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . RID cycling (netexec --rid-brute / lookupsid)'
+  authorized_only: true
+
 # Anonymous LDAP bind confirmed -> dump users/groups (feeds domain_users).
 - id: ldap_anon_dump
   when: { surface: ldap, findings_include: ldap_anon }

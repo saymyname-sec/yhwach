@@ -12,10 +12,10 @@ in an ORM. The schema is the contract.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterator
 
 from yhwach import schema_sql_path
 
@@ -69,7 +69,7 @@ def transaction(db_path: Path | str) -> Iterator[sqlite3.Connection]:
 
 
 def _now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def engagement_id_for(conn: sqlite3.Connection, lab: str) -> int | None:
@@ -194,9 +194,9 @@ def set_host_stage(
     if row is None:
         return False, f"host {ip} not found"
     cur_stage = row["stage"]
-    if monotonic and stage != "blocked" and cur_stage in STAGES and stage in STAGES:
-        if STAGES.index(stage) < STAGES.index(cur_stage):
-            return False, f"{ip} is already at '{cur_stage}'; refusing to move back to '{stage}'"
+    if (monotonic and stage != "blocked" and cur_stage in STAGES and stage in STAGES
+            and STAGES.index(stage) < STAGES.index(cur_stage)):
+        return False, f"{ip} is already at '{cur_stage}'; refusing to move back to '{stage}'"
     # foothold -> looted requires evidence: a proof row with a screenshot.
     if monotonic and stage == "looted":
         has_proof = conn.execute(

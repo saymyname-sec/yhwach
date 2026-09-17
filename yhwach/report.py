@@ -7,14 +7,14 @@ their evidence and the rendered command lives in the task/action layer.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 _SEV_ORDER = "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 " \
              "WHEN 'medium' THEN 2 ELSE 3 END"
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def build_report(conn: sqlite3.Connection, engagement_id: int) -> str:

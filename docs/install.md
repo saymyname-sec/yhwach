@@ -29,6 +29,10 @@ pip install -e ".[dev]"      # add ,mcp -> ".[dev,mcp]" to run `yhwach mcp`
 
 Optional extras: `dev` (pytest / ruff / black), `mcp` (the `mcp` SDK for `yhwach mcp`).
 
+A non-editable install works too — the wheel bundles the schema, persona, playbooks, and fixtures,
+so `pip install .` (or a built wheel) ships everything `engage`/`plan`/`selftest` need. CI
+(`.github/workflows/ci.yml`) runs the suite + a clean-venv wheel-install smoke on Linux and Windows.
+
 Verify:
 
 ```bash

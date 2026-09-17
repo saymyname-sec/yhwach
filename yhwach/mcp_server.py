@@ -39,7 +39,7 @@ def _load_fastmcp():
 
 
 def build_server():
-    FastMCP = _load_fastmcp()
+    FastMCP = _load_fastmcp()  # noqa: N806 — a class, conventionally CamelCase
     server = FastMCP("yhwach")
 
     def _make(fn):

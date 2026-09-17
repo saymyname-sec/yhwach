@@ -12,8 +12,9 @@ observe. Populating the world model happens in the caller.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 import requests
 from urllib3.exceptions import InsecureRequestWarning

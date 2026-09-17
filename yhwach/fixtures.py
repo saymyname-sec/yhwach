@@ -10,11 +10,12 @@ regression. A rule change that would have mis-ranked a past scenario fails CI.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -25,7 +26,7 @@ from yhwach.playbooks import Rule, default_playbook_dir, load_rules
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def load_fixture(path: Path | str) -> dict:
@@ -192,12 +193,14 @@ def run_fixture_file(path: Path | str, *, rules: list[Rule] | None = None) -> Ev
             return evaluate_fixture(conn, eng_id, fixture.get("expected", {}), rules, name=name)
     finally:
         for p in (tmp, tmp + "-wal", tmp + "-shm"):
-            try:
+            with contextlib.suppress(OSError):
                 os.unlink(p)
-            except OSError:
-                pass
 
 
 def default_fixtures_dir() -> Path:
-    """Repo-relative tests/fixtures dir (source checkout)."""
+    """Fixtures dir: packaged `_fixtures` for an installed wheel, else the repo
+    `tests/fixtures` for a source checkout."""
+    pkg = Path(__file__).resolve().parent / "_fixtures"
+    if pkg.is_dir():
+        return pkg
     return Path(__file__).resolve().parent.parent / "tests" / "fixtures"

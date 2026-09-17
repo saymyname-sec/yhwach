@@ -47,6 +47,17 @@ Issues = "https://github.com/saymyname-sec/yhwach/issues"
 [tool.hatch.build.targets.wheel]
 packages = ["yhwach"]
 
+# Bundle the data files that live outside the package so a non-editable install
+# (a built wheel) ships schema, persona, playbooks, and fixtures. Runtime
+# resolvers check these packaged locations first, then fall back to the repo
+# layout for editable/source use (see __init__.py, playbooks.py, fixtures.py).
+[tool.hatch.build.targets.wheel.force-include]
+"db/schema.sql" = "yhwach/_schema.sql"
+"persona/operator.md" = "yhwach/_operator.md"
+"persona/notebook.md" = "yhwach/_notebook.md"
+"playbooks" = "yhwach/_playbooks"
+"tests/fixtures" = "yhwach/_fixtures"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
@@ -57,6 +68,9 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+# Line length is owned by the formatter (black, 100); many action command
+# templates are single long strings that don't benefit from wrapping.
+ignore = ["E501"]
 
 [tool.black]
 line-length = 100

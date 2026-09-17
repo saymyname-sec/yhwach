@@ -14,6 +14,7 @@ DB location resolution:
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from pathlib import Path
@@ -46,6 +47,18 @@ def _artifact_dir(path: Path, name: str) -> Path:
     return path.parent / name
 
 
+def _force_utf8_output() -> None:
+    """Emit UTF-8 regardless of the console codepage.
+
+    Personas, reports, and rendered commands contain non-ASCII (→, —, ·); a
+    legacy Windows console (cp1252) would otherwise raise UnicodeEncodeError.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        # not a reconfigurable stream (e.g. captured in tests) -> leave it as-is
+        with contextlib.suppress(AttributeError, ValueError):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 @click.group()
 @click.version_option(__version__, prog_name="yhwach")
 def main() -> None:
@@ -54,6 +67,7 @@ def main() -> None:
     Authorized for the OffSec OSAI exam and authorized AI-security labs only.
     See AUTHORIZATION.md.
     """
+    _force_utf8_output()
 
 
 @main.command()
@@ -716,8 +730,9 @@ def creds(lab: str, db_path: str | None) -> None:
             head = sec.split("\n", 1)[0][:44]
             sec = f"{head} …(multiline)"
         src = r["source"] or ""
-        # Look up the source-host IP if the row carries one.
-        src_ip = r["source_host_ip"] if "source_host_ip" in r.keys() else None
+        # Look up the source-host IP if the row carries one. NB: r is a
+        # sqlite3.Row — `in r` tests VALUES, so `.keys()` is required here.
+        src_ip = r["source_host_ip"] if "source_host_ip" in r.keys() else None  # noqa: SIM118
         if src_ip:
             src = f"{src} @ {src_ip}"
         click.echo(f"  {r['identifier']:<20} {r['kind']:<10} {sec:<40} ({src})")

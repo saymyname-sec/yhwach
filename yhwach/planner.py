@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from yhwach.playbooks import Rule
 from yhwach.primitives import consumed_techniques, denylisted_host_ids
@@ -34,7 +34,7 @@ class MatchReport:
 
 
 def _now_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _task_kind_for(rule: Rule) -> str:

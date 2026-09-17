@@ -62,12 +62,11 @@ def test_engagement_upsert_updates_scope(tmp_db: Path) -> None:
 
 
 def test_foreign_keys_enforced(tmp_db: Path) -> None:
-    with yhdb.transaction(tmp_db) as conn:
-        with pytest.raises(sqlite3.IntegrityError):
-            conn.execute(
-                "INSERT INTO host (engagement_id, ip, first_seen) VALUES (?, ?, ?)",
-                (9999, "10.0.0.1", "2026-01-01T00:00:00Z"),
-            )
+    with yhdb.transaction(tmp_db) as conn, pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "INSERT INTO host (engagement_id, ip, first_seen) VALUES (?, ?, ?)",
+            (9999, "10.0.0.1", "2026-01-01T00:00:00Z"),
+        )
 
 
 def test_engagement_id_for_returns_none_for_missing(tmp_db: Path) -> None:

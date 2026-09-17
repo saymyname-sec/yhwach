@@ -47,11 +47,16 @@ once the target host carries the required finding tag.
       `mcp_config_writable`, `pod_create_permission`, `nvidia_toolkit`, `sagemaker_create_notebook`,
       `jinja2_template`.
 
-### Phase 2 — Installable + CI
-- [ ] Packaging: `force-include` `db/`, `persona/`, `playbooks/`; installed-path fallbacks in
-      `__init__.py` / `playbooks.default_playbook_dir` / `fixtures.default_fixtures_dir`.
-- [ ] GitHub Actions: pytest + `selftest` + ruff on push/PR (Linux + Windows).
-- **Done when:** a non-editable `pip install` wheel runs `engage`/`plan`/`next`; CI is green.
+### Phase 2 — Installable + CI ✅ DONE
+- [x] Packaging: `force-include` bundles `db/schema.sql`, `persona/`, `playbooks/`, `tests/fixtures/`
+      into the wheel; `__init__` / `default_playbook_dir` / `default_fixtures_dir` check the packaged
+      location first, then fall back to the repo layout. Verified: a wheel installed into a clean
+      venv (no repo on path) runs `engage`/`plan`/`persona`/`selftest`.
+- [x] GitHub Actions (`.github/workflows/ci.yml`): ruff + pytest + `selftest` on push/PR across
+      Linux + Windows × py3.11/3.13, plus an isolated wheel-install smoke job.
+- [x] Bonus fix (found via the install test): `yhwach` now forces UTF-8 stdout, so persona/report
+      output no longer crashes on a legacy Windows console (cp1252) over `→`/`—`/`·`.
+- [x] Lint debt cleared: ruff is green (E501 delegated to the formatter; modernizations applied).
 
 ### Phase 3 — Test gap + MCP parity
 - [ ] `test_cli.py` (CliRunner) across the command surface + error/exit paths.
@@ -78,7 +83,6 @@ building RANK/CRAFT/INTERPRET calls, contract validation, or persona/rules hashi
 - [ ] Report v2: event-log timeline + inline screenshots + verbatim repro commands.
 - [ ] Enforce FSM entry-predicates (`scanned→enumerated`, …) + `high_ev_leads` auto-P0 + OPSEC invariants.
 - [ ] Structured logging / config / configurable timeouts; scope validation on `engage`/`enum`.
-- [ ] Clear the E501 lint debt.
 
 The original phased plan below is kept for reference; the numbering predates the
 build order above.

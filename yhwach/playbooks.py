@@ -166,5 +166,9 @@ def _build_rule(entry: dict, *, source_file: str) -> Rule:
 
 
 def default_playbook_dir() -> Path:
-    """Repo-relative playbooks dir (source checkout / editable install)."""
+    """Playbook dir: packaged `_playbooks` for an installed wheel, else the repo
+    `playbooks/` for a source checkout / editable install."""
+    pkg = Path(__file__).resolve().parent / "_playbooks"
+    if pkg.is_dir():
+        return pkg
     return Path(__file__).resolve().parent.parent / "playbooks"

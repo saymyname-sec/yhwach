@@ -60,6 +60,12 @@ def test_bloodhound_facts_incl_unknown_edge() -> None:
     assert "some_new_edge_type" in tags   # forward-compatible
 
 
+def test_ollama_version_fixture_is_vulnerable() -> None:
+    fs = interpret_all("probe_ollama_version", _read("ollama_version.json"),
+                       {"URL": "http://10.0.0.45:11434"})
+    assert fs and fs[0].tag == "ollama_probllama" and fs[0].cls == "CVE-2024-37032"
+
+
 def test_bloodhound_shadow_cred_target() -> None:
     fs = parse_bloodhound(_read("bloodhound_shadowcred.json"))
     sc = next(f for f in fs if f.tag == "shadow_cred_target")

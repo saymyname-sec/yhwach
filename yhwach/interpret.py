@@ -55,6 +55,30 @@ def _ollama_models(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _ollama_version(output: str, ctx: dict) -> ExtractedFinding | None:
+    """`/api/version` -> tag ollama_probllama when < 0.1.34 (CVE-2024-37032).
+
+    The rogue-registry arbitrary-file-write is version-gated, so fingerprinting
+    the version is what unlocks the exploit rule deterministically."""
+    data = _first_json(output)
+    if not isinstance(data, dict):
+        return None
+    ver = data.get("version")
+    if not isinstance(ver, str):
+        return None
+    try:
+        parts = tuple(int(x) for x in re.findall(r"\d+", ver)[:3])
+    except ValueError:
+        return None
+    if parts and parts < (0, 1, 34):   # fixed in 0.1.34
+        return ExtractedFinding(
+            "CVE-2024-37032", "Ollama vulnerable to Probllama (arbitrary file write)", "critical",
+            f"Ollama {ver} on {ctx.get('URL','?')} < 0.1.34 — rogue-registry manifest digest "
+            "path traversal writes files as the ollama process (often root)",
+            tag="ollama_probllama")
+    return None
+
+
 def _openai_models(output: str, ctx: dict) -> ExtractedFinding | None:
     data = _first_json(output)
     if isinstance(data, dict) and isinstance(data.get("data"), list) and data["data"]:
@@ -202,6 +226,7 @@ _Extractor = Callable[[str, dict], "ExtractedFinding | list[ExtractedFinding] | 
 _EXTRACTORS: dict[str, _Extractor] = {
     "sqli_error_probe": _sqli_error,
     "probe_ollama_models": _ollama_models,
+    "probe_ollama_version": _ollama_version,
     "enumerate_models": _openai_models,
     "mcp_tools_list": _mcp_tools,
     "jenkins_auth_check": _jenkins_api,

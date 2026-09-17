@@ -16,12 +16,30 @@
   time_cost: fast
   emits:
     - action: probe_ollama_models
+    - action: probe_ollama_version
     - action: try_direct_generate
   maps: [LLM06]
   points: 15
   risk: read_only
   routes: /osai-mcp-attack
   source: 'osai/07 . README:AI-ports'
+  authorized_only: true
+
+# Version fingerprint (probe_ollama_version) tagged the host ollama_probllama
+# (< 0.1.34) -> rogue OCI registry arbitrary file write -> RCE as ollama (root).
+- id: ollama_probllama_rce
+  when: { surface: ollama, findings_include: ollama_probllama }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: ollama_probllama_exploit
+  maps: [LLM03, CVE-2024-37032]
+  points: 15
+  risk: propose
+  routes: /osai-owasp
+  source: 'probllama . CVE-2024-37032 rogue OCI registry manifest digest path traversal -> file write as ollama'
+  technique: ollama_probllama
   authorized_only: true
 
 - id: openai_compat_models

@@ -142,6 +142,23 @@ def test_vault_gated_rule_needs_credentials(tmp_db: Path) -> None:
     assert "kerberoast_with_creds" in ids              # creds present
 
 
+def test_ollama_probllama_chain(tmp_db: Path) -> None:
+    """A version fingerprint tagging `ollama_probllama` unlocks the CVE-2024-37032
+    rogue-registry RCE rule on the ollama surface."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="ollama")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "ollama_probllama_rce" not in ids   # not vulnerable until fingerprinted
+    _add_finding(tmp_db, eng, "ollama_probllama")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "ollama_probllama_rce" in ids
+
+
 def test_shadow_credential_chain(tmp_db: Path) -> None:
     """A `shadow_cred_target` bloodhound fact unlocks the shadow_credential_abuse
     rule (GenericWrite on a DA member -> PKINIT -> NT hash -> PtH)."""

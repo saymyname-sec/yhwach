@@ -185,6 +185,18 @@ def _kerberos_roast(output: str, ctx: dict) -> list[ExtractedFinding]:
     return out
 
 
+def _langflow_exec(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Unauth Langflow PythonComponent exec endpoint -> tag langflow_exec.
+
+    Fires on the probe's FOUND marker or on an exec response echoing `result`."""
+    if re.search(r"FOUND\s+\S*langflow/components/exec", output) or '"result"' in output:
+        return ExtractedFinding(
+            "LLM05", "Langflow PythonComponent exec endpoint unauthenticated", "critical",
+            f"{ctx.get('URL','?')}/api/v1/langflow/components/exec runs code unsandboxed (unauth RCE)",
+            tag="langflow_exec")
+    return None
+
+
 def _rag_upload(output: str, ctx: dict) -> ExtractedFinding | None:
     hits = re.findall(r"FOUND (\S+)", output)
     if hits:
@@ -235,6 +247,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "enum4linux_ng": _enum4linux,
     "smbmap_shares": _smb_null,
     "probe_rag_upload_paths": _rag_upload,
+    "probe_langflow_exec": _langflow_exec,
     # --- AD enumeration ---
     "netexec_ldap": _ldap_anon,
     "ldapsearch_anon": _ldap_anon,

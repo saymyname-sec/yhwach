@@ -49,6 +49,7 @@
   emits:
     - action: enumerate_models
     - action: attempt_completion_unauth
+    - action: probe_langflow_exec
   maps: [LLM02, LLM06]
   points: 15
   risk: read_only
@@ -119,11 +120,30 @@
   emits:
     - action: gradio_api_enumerate
     - action: gradio_file_component_probe
+    - action: probe_langflow_exec
   maps: [LLM06, LLM05]
   points: 15
   risk: read_only
   routes: /osai-ai-hunter
   source: 'osai/02 . model_fingerprint.sh'
+  authorized_only: true
+
+# The langflow-exec probe (wired into the openai_compat + gradio recon rules)
+# tagged the host langflow_exec -> unauth PythonComponent RCE. Host-scoped: once
+# the endpoint is confirmed un-gated, exploit it regardless of surface class.
+- id: langflow_component_exec_rce
+  when: { findings_include: langflow_exec }
+  class: ai
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: langflow_component_exec_rce
+  maps: [LLM05, CWE-94]
+  points: 15
+  risk: propose
+  routes: /osai-owasp
+  source: 'shadow fork . unauth Langflow PythonComponent exec -> arbitrary Python RCE'
+  technique: langflow_exec
   authorized_only: true
 
 - id: a2a_orchestrator_probe

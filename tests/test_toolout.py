@@ -60,6 +60,12 @@ def test_bloodhound_facts_incl_unknown_edge() -> None:
     assert "some_new_edge_type" in tags   # forward-compatible
 
 
+def test_langflow_exec_probe_tags_host() -> None:
+    fs = interpret_all("probe_langflow_exec", _read("langflow_exec_probe.txt"),
+                       {"URL": "http://10.0.0.30"})
+    assert fs and fs[0].tag == "langflow_exec" and fs[0].severity == "critical"
+
+
 def test_ollama_version_fixture_is_vulnerable() -> None:
     fs = interpret_all("probe_ollama_version", _read("ollama_version.json"),
                        {"URL": "http://10.0.0.45:11434"})

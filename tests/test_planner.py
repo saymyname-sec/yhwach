@@ -142,6 +142,18 @@ def test_vault_gated_rule_needs_credentials(tmp_db: Path) -> None:
     assert "kerberoast_with_creds" in ids              # creds present
 
 
+def test_langflow_exec_chain(tmp_db: Path) -> None:
+    """A `langflow_exec` finding unlocks the unauth PythonComponent RCE rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="openai_compat")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "langflow_exec")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "langflow_component_exec_rce" in ids
+
+
 def test_ollama_probllama_chain(tmp_db: Path) -> None:
     """A version fingerprint tagging `ollama_probllama` unlocks the CVE-2024-37032
     rogue-registry RCE rule on the ollama surface."""

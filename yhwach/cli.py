@@ -84,17 +84,19 @@ def engage(lab: str, scope: str, domain: str | None, dc_ip: str | None,
 @main.command()
 @click.argument("file", type=click.Path(exists=True, dir_okay=False))
 @click.option("--lab", required=True, help="Lab name (must exist).")
-@click.option("--kind", type=click.Choice(["nmap", "linpeas", "winpeas"]), default="nmap",
-              help="Parser kind.")
+@click.option("--kind", type=click.Choice(["nmap", "linpeas", "winpeas", "bloodhound"]),
+              default="nmap", help="Parser kind.")
 @click.option("--host", "host_ip", default=None,
-              help="Host IP (required for linpeas/winpeas — findings are host-scoped).")
+              help="Host IP (required for linpeas/winpeas/bloodhound — findings are host-scoped; "
+                   "for bloodhound use the DC).")
 @click.option("--db", "db_path", default=None, type=click.Path(),
               help="Override DB path.")
 def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | None) -> None:
     """Parse a tool output file and update the world model.
 
     nmap XML -> hosts + services. linpeas/winpeas -> privesc findings on --host
-    (also advances that host to 'enumerated').
+    (also advances it to 'enumerated'). bloodhound -> AD findings + chaining tags
+    on --host (the DC); does not change the host stage.
     """
     path = _db_path(db_path)
     if not path.exists():
@@ -113,7 +115,7 @@ def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | N
             click.echo(f"[+] Ingested nmap: {h} hosts, {s} services")
             return
 
-        # PEAS: host-scoped privesc findings
+        # Host-scoped findings (linpeas/winpeas privesc, bloodhound AD facts).
         if not host_ip:
             click.echo(f"[!] --host is required for {kind}.", err=True)
             sys.exit(2)
@@ -123,20 +125,25 @@ def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | N
             click.echo(f"[!] Host {host_ip} not found; ingest an nmap scan first.", err=True)
             sys.exit(2)
 
-        from yhwach.parsers.peas import parse_peas
-
         text = Path(file).read_text(encoding="utf-8", errors="replace")
-        found = parse_peas(text, kind)
+        if kind == "bloodhound":
+            from yhwach.parsers.bloodhound import parse_bloodhound
+            found = parse_bloodhound(text)
+            advanced_note = ""
+        else:
+            from yhwach.parsers.peas import parse_peas
+            found = parse_peas(text, kind)
+            yhdb.set_host_stage(conn, eng_id, host_ip, "enumerated")
+            advanced_note = "; host -> enumerated"
         for f in found:
             yhdb.add_finding(conn, hrow["id"], None, f.cls, f.title, f.severity, f.evidence,
                              tag=f.tag)
-        yhdb.set_host_stage(conn, eng_id, host_ip, "enumerated")
         yhdb.log_event(conn, eng_id, "ingest", {"kind": kind, "host": host_ip, "findings": len(found)})
 
-    click.echo(f"[+] Ingested {kind} on {host_ip}: {len(found)} privesc finding(s); "
-               "host -> enumerated")
+    click.echo(f"[+] Ingested {kind} on {host_ip}: {len(found)} finding(s){advanced_note}")
     for f in found:
-        click.echo(f"    [{f.severity.upper()}] {f.cls} {f.title}")
+        tag = f" [tag:{f.tag}]" if f.tag else ""
+        click.echo(f"    [{f.severity.upper()}] {f.cls} {f.title}{tag}")
 
 
 @main.command()

@@ -171,8 +171,9 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
     """Ingest a tool output FILE (on the operator host) into the world model.
 
     kind=nmap: nmap XML -> hosts + services. kind=linpeas|winpeas: privesc
-    findings on `host` (also advances the host to 'enumerated' and sets any
-    chaining tags the parser detects)."""
+    findings on `host` (advances it to 'enumerated'). kind=bloodhound: AD
+    findings + chaining tags on `host` (the DC); no stage change. All set the
+    `findings_include` chaining tags their parser detects."""
     from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml
 
     with yhdb.transaction(db_path) as conn:
@@ -181,25 +182,31 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             h, s = insert_hosts(conn, eid, parse_nmap_xml(file))
             yhdb.log_event(conn, eid, "ingest", {"kind": "nmap", "hosts": h, "services": s})
             return f"nmap ingested: {h} hosts, {s} services"
-        if kind not in ("linpeas", "winpeas"):
-            raise ValueError(f"unknown kind '{kind}' (use nmap|linpeas|winpeas)")
+        if kind not in ("linpeas", "winpeas", "bloodhound"):
+            raise ValueError(f"unknown kind '{kind}' (use nmap|linpeas|winpeas|bloodhound)")
         if not host:
             raise ValueError(f"host is required for {kind}")
         hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
                             (eid, host)).fetchone()
         if hrow is None:
             raise ValueError(f"host {host} not found — ingest an nmap scan first")
-        from yhwach.parsers.peas import parse_peas
-
-        found = parse_peas(Path(file).read_text(encoding="utf-8", errors="replace"), kind)
+        text = Path(file).read_text(encoding="utf-8", errors="replace")
+        note = ""
+        if kind == "bloodhound":
+            from yhwach.parsers.bloodhound import parse_bloodhound
+            found = parse_bloodhound(text)
+        else:
+            from yhwach.parsers.peas import parse_peas
+            found = parse_peas(text, kind)
+            yhdb.set_host_stage(conn, eid, host, "enumerated")
+            note = "; host -> enumerated"
         for f in found:
             yhdb.add_finding(conn, hrow["id"], None, f.cls, f.title, f.severity, f.evidence,
                              tag=f.tag)
-        yhdb.set_host_stage(conn, eid, host, "enumerated")
         yhdb.log_event(conn, eid, "ingest", {"kind": kind, "host": host, "findings": len(found)})
     tags = [f.tag for f in found if f.tag]
-    extra = f"; tags: {', '.join(tags)}" if tags else ""
-    return f"{kind} on {host}: {len(found)} finding(s); host -> enumerated{extra}"
+    extra = f"; tags: {', '.join(sorted(set(tags)))}" if tags else ""
+    return f"{kind} on {host}: {len(found)} finding(s){note}{extra}"
 
 
 def tool_enum(db_path: Path | str, lab: str, target: str, ports: str | None = None,

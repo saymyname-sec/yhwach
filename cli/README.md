@@ -21,11 +21,13 @@ Almost every command takes `--lab <name>` to select the engagement.
 
 Create the SQLite DB if needed and upsert the engagement row (scope, optional AD domain/DC).
 
-### `yhwach ingest <file> --lab <name> [--kind nmap|linpeas|winpeas] [--host <ip>]`
+### `yhwach ingest <file> --lab <name> [--kind nmap|linpeas|winpeas|bloodhound] [--host <ip>]`
 
 Parse a tool output file into the world model. `nmap` XML → hosts + services (idempotent).
 `linpeas`/`winpeas` → host-scoped privesc findings (requires `--host`) and advances that host
-to `enumerated`.
+to `enumerated`. `bloodhound` → AD findings + `findings_include` chaining tags (kerberoastable,
+dcsync, unconstrained_delegation, …) on `--host` (the DC); no stage change. Accepts the
+normalized AD-facts JSON a BloodHound MCP emits, or raw SharpHound collection files.
 
 ### `yhwach enum --lab <name> --target <ip/cidr> [--ports <spec>] [--hexstrike-url <url>]`
 

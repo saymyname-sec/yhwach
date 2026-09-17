@@ -85,3 +85,37 @@
   source: 'hacktricks . Kerberoasting (GetUserSPNs)'
   technique: kerberoast
   authorized_only: true
+
+# --- BloodHound-driven chains (tags set by the bloodhound ingest parser) ---
+
+# DCSync rights on a principal -> dump NTDS -> Domain Admin (host-scoped: the DC).
+- id: dcsync
+  when: { findings_include: dcsync }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: dcsync_secretsdump
+  maps: [T1003.006]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'bloodhound . DCSync (replication rights) -> secretsdump'
+  technique: dcsync
+  authorized_only: true
+
+# Unconstrained delegation host -> coerce the DC and capture its TGT.
+- id: unconstrained_delegation_abuse
+  when: { findings_include: unconstrained_delegation }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: unconstrained_delegation_capture
+  maps: [T1558]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'bloodhound . unconstrained delegation -> coerce + TGT capture'
+  technique: unconstrained_delegation
+  authorized_only: true

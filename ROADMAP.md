@@ -2,16 +2,16 @@
 
 ## Status
 
-**Done and validated on a live challenge lab — Iron Crown (241 tests):**
+**Done and validated on a live challenge lab — Iron Crown (246 tests):**
 - ✅ World model (SQLite, 12 tables) + nmap ingestion + host FSM
 - ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
 - ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
   message brokers)
-- ✅ Deterministic planner: 55 YAML technique rules → EV-ranked tasks, AI-first tiering
+- ✅ Deterministic planner: 57 YAML technique rules → EV-ranked tasks, AI-first tiering
       (AI, traditional, cloud/k8s, broker, supply-chain, post-exploit); matches surface / auth /
-      product / os / `findings_include` (post-foothold chaining — all 50 rules now supported)
+      product / os / `findings_include` (post-foothold chaining — every rule is matcher-supported)
 - ✅ Cross-cutting primitives: technique exhaustion + credential reuse + lore denylist
-- ✅ Actions layer: 103 registered actions (emits → concrete commands); read-only runs
+- ✅ Actions layer: 105 registered actions (emits → concrete commands); read-only runs
       (untrusted substituted values are shell-guarded), exploitation render-only
 - ✅ Deterministic finding extraction from action output (incl. error-based SQLi)
 - ✅ Operator handoff: `next --contract` (persona + state + candidates + commands)
@@ -92,16 +92,23 @@ HexStrike *runs* AD tools; Yhwach now *parses* their output and *chains* into AD
       (host-scoped) — with impacket/kerbrute/ntlmrelayx actions.
 - [x] Tests: extractors (multi-signal SMB, ldap_anon, roast hashes, domain_users) + planner chains
       (ldap_anon → ldap_anon_dump; kerberoastable → kerberoast). 241 green.
-- **Remaining (Phase 4b):**
-  - [ ] **BloodHound ingestion**: operator runs the BloodHound MCP; Yhwach parses path output
-        (shortest-path-to-DA, ACL abuse) into findings/tasks so the planner ranks the next AD move.
-  - [ ] **ADCS (certipy) ESC1–ESC16** rules + a `adcs_esc*` tag from a certipy parser.
-  - [ ] **Creds-aware kerberoast**: currently `kerberoast` is tag-gated; wire it to fire when the
-        vault has domain creds + an LDAP/kerberos surface, not only on a captured-hash tag.
+### Phase 4b — BloodHound ingestion + deeper AD chains ✅ (core done)
+- [x] **BloodHound ingestion** (`yhwach ingest --kind bloodhound`, parsers/bloodhound.py): parses
+      the normalized AD-facts JSON a BloodHound MCP/Cypher wrapper emits **and** raw SharpHound
+      users/computers collection files → findings + tags (`kerberoastable`, `asreproastable`,
+      `dcsync`, `unconstrained_delegation`, `acl_abuse`, …) attached to the DC. Forward-compatible:
+      unknown edge kinds still become tagged findings.
+- [x] **DCSync + unconstrained-delegation rules** (`playbooks/ad.yaml`): `dcsync` → secretsdump,
+      `unconstrained_delegation_abuse` → coerce + TGT capture. BloodHound tags also light up the
+      existing kerberoast / AS-REP rules. Tests: parser (facts + SharpHound) + ingest→attack chain.
+- **Remaining (Phase 4c):**
+  - [ ] **ADCS (certipy) ESC1–ESC16** rules + an `adcs_esc*` tag from a certipy parser.
+  - [ ] **Creds-aware kerberoast**: fire when the vault has domain creds + an LDAP/kerberos surface,
+        not only on a captured-hash tag.
   - [ ] **Deepen HexStrike helpers**: typed `netexec`/`ldapsearch` calls + recon capture so AD enum
-        flows through `yhwach enum`/`run` into the parsers above (today the commands render/run but
-        the operator wires the output back).
-  - [ ] **DCSync / secretsdump** post-ex chain + GPP-password tag.
+        output flows back through `yhwach enum`/`run` into the parsers automatically (today the
+        commands render/run and the operator wires the output back via `ingest`).
+  - [ ] **GPP-password tag** from the winPEAS/enum parser (rule already exists via the tag map).
 
 ### Phase 5 — Judgment layer: align docs to reality  ✅ DECIDED (align, don't build)
 The engine is a read-only context handoff; the operator (Claude Code) does the reasoning. We are NOT

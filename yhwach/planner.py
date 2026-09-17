@@ -32,6 +32,7 @@ class MatchReport:
     rules_skipped_unsupported: list[str] = field(default_factory=list)
     rules_skipped_consumed: list[str] = field(default_factory=list)
     surfaces_filtered_denylist: int = 0
+    rules_ev_decayed: list[str] = field(default_factory=list)
 
 
 def _now_utc() -> str:
@@ -56,9 +57,15 @@ def match_rules(
     Applies the cross-cutting primitives: consumed techniques are skipped, and
     surfaces on denylisted (dev-artifact) hosts are filtered out.
     """
+    from yhwach.memory import decayed_ev, failure_counts
+
     report = MatchReport()
     consumed = consumed_techniques(conn, engagement_id)
     denylisted = denylisted_host_ids(conn, engagement_id)
+    # Attempts the operator reported as fail/blocked decay that rule's EV on
+    # that host. Recomputed here every plan (never a persisted mutation), so the
+    # ranking stays a pure function of rules + world model + attempt ledger.
+    fails = failure_counts(conn, engagement_id)
 
     for rule in rules:
         unsupported = set(rule.when.keys()) - SUPPORTED_WHEN_KEYS
@@ -84,7 +91,11 @@ def match_rules(
         if kept:
             report.rules_matched += 1
         for surf in kept:
-            created, updated = _upsert_task(conn, engagement_id, rule, surf)
+            n = fails.get((rule.id, surf["host_id"]), 0)
+            ev = decayed_ev(rule.ev_score, n)
+            if n:
+                report.rules_ev_decayed.append(f"{rule.id}({n})")
+            created, updated = _upsert_task(conn, engagement_id, rule, surf, ev_score=ev)
             report.tasks_created += created
             report.tasks_updated += updated
 
@@ -174,8 +185,12 @@ def _upsert_task(
     engagement_id: int,
     rule: Rule,
     surf: sqlite3.Row,
+    *,
+    ev_score: float | None = None,
 ) -> tuple[int, int]:
     now = _now_utc()
+    if ev_score is None:
+        ev_score = rule.ev_score
     rationale = (f"rule {rule.id} matched {surf['kind']} surface" if surf["kind"]
                  else f"rule {rule.id} matched finding-gated host")
 
@@ -197,7 +212,7 @@ def _upsert_task(
             "UPDATE task SET ev_score = ?, rationale = ?, risk = ?, autonomy = ?, "
             "kind = ?, technique_class = ?, updated_at = ? WHERE id = ?",
             (
-                rule.ev_score,
+                ev_score,
                 rationale,
                 rule.risk,
                 rule.autonomy,
@@ -224,7 +239,7 @@ def _upsert_task(
             rationale,
             rule.risk,
             rule.autonomy,
-            rule.ev_score,
+            ev_score,
             now,
         ),
     )

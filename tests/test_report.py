@@ -60,3 +60,21 @@ def test_report_no_findings_message(tmp_db: Path) -> None:
         md = build_report(conn, eng)
     assert "_None recorded._" in md
     assert "_None captured._" in md
+
+
+def test_report_lists_attempts_with_reasons(tmp_db: Path) -> None:
+    """The ledger belongs in the write-up: dead ends are the methodology."""
+    from yhwach.memory import record_outcome
+
+    with yhdb.transaction(tmp_db) as conn:
+        eid = yhdb.upsert_engagement(conn, lab="rep-att", scope="10.0.0.0/24")
+        conn.execute("INSERT INTO host (engagement_id, ip, stage, first_seen) "
+                     "VALUES (?, '10.0.0.5', 'scanned', 't')", (eid,))
+        record_outcome(conn, eid, rule_id="kerberoast", host_ip="10.0.0.5",
+                       result="fail", reason="no SPN accounts")
+        record_outcome(conn, eid, rule_id="ollama_unauth_api", host_ip="10.0.0.5",
+                       result="success", reason="model list leaked a key")
+        md = build_report(conn, eid)
+    assert "## Attempts (2; 1 landed)" in md
+    assert "no SPN accounts" in md and "kerberoast" in md
+    assert "| attempt |" in md            # and the timeline carries them too

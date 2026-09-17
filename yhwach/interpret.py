@@ -185,6 +185,19 @@ def _kerberos_roast(output: str, ctx: dict) -> list[ExtractedFinding]:
     return out
 
 
+def _lfi_passwd(output: str, ctx: dict) -> ExtractedFinding | None:
+    """/etc/passwd leaking through an agent tool surface -> tag lfi_confirmed.
+
+    A `user:x:UID:GID:` line is the deterministic marker of a successful read
+    (path traversal or unsafe YAML !include)."""
+    if re.search(r"^\w[\w.\-]*:[^:]*:\d+:\d+:", output, re.M):
+        return ExtractedFinding(
+            "LLM06", "Arbitrary file read via agent tool surface", "high",
+            f"{ctx.get('URL','?')} leaked /etc/passwd (path traversal / unsafe YAML include)",
+            tag="lfi_confirmed")
+    return None
+
+
 def _ssti_reflection(output: str, ctx: dict) -> ExtractedFinding | None:
     """`X{{7*7}}X` -> `X49X` reflection = a server-side template renderer.
 
@@ -263,6 +276,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "probe_rag_upload_paths": _rag_upload,
     "probe_langflow_exec": _langflow_exec,
     "craft_ssti_probe": _ssti_reflection,
+    "probe_tool_lfi_traversal": _lfi_passwd,
     # --- AD enumeration ---
     "netexec_ldap": _ldap_anon,
     "ldapsearch_anon": _ldap_anon,

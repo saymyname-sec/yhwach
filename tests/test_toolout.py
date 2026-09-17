@@ -60,6 +60,12 @@ def test_bloodhound_facts_incl_unknown_edge() -> None:
     assert "some_new_edge_type" in tags   # forward-compatible
 
 
+def test_lfi_passwd_tags_confirmed() -> None:
+    fs = interpret_all("probe_tool_lfi_traversal", _read("lfi_passwd.txt"),
+                       {"URL": "http://10.0.0.90"})
+    assert fs and fs[0].tag == "lfi_confirmed" and fs[0].cls == "LLM06"
+
+
 def test_ssti_reflection_tags_jinja2() -> None:
     fs = interpret_all("craft_ssti_probe", _read("ssti_reflection.json"),
                        {"URL": "http://10.0.0.105"})

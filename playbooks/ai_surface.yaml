@@ -147,6 +147,22 @@
   technique: langflow_exec
   authorized_only: true
 
+- id: agent_tool_file_read
+  when: { surface: gradio }
+  class: ai
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: probe_tool_lfi_traversal
+    - action: craft_yaml_include_lfi
+  maps: [LLM06, CWE-22]
+  points: 15
+  risk: read_only
+  routes: /osai-ai-hunter
+  source: 'double_hellix . agent/tool console LFI — single-pass ....// bypass + unsafe YAML !include'
+  technique: agent_tool_lfi
+  authorized_only: true
+
 - id: a2a_orchestrator_probe
   when: { surface: a2a }
   likelihood: M

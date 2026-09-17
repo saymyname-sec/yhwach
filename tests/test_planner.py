@@ -142,6 +142,18 @@ def test_vault_gated_rule_needs_credentials(tmp_db: Path) -> None:
     assert "kerberoast_with_creds" in ids              # creds present
 
 
+def test_agent_tool_lfi_chain(tmp_db: Path) -> None:
+    """A gradio tool console surfaces the LFI recon rule (read_log traversal +
+    unsafe YAML include)."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="gradio")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "agent_tool_file_read" in ids
+
+
 def test_jinja2_ssti_rce_chain(tmp_db: Path) -> None:
     """A `jinja2_template` finding (from the 7*7 reflection probe) unlocks the
     direct polyglot SSTI RCE rule."""

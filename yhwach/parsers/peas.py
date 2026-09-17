@@ -78,6 +78,30 @@ def parse_linpeas(text: str) -> list[ExtractedFinding]:
             "CVE-2025-23266", "nvidia-container-toolkit present (GPU container escape)", "high",
             "LD_PRELOAD OCI-hook escape to host root if toolkit <= 1.17.7", tag="nvidia_toolkit"))
 
+    # GitLab PAT on disk / in env -> feeds the GitLab CI exfil rules.
+    if re.search(r"glpat-[A-Za-z0-9_\-]{20}", text):
+        out.append(ExtractedFinding(
+            "CWE-522", "GitLab personal access token on host", "high",
+            "glpat- token in a config / history / env — reuse against the GitLab API",
+            tag="gitlab_token"))
+
+    # A requirements.txt -> candidate for dependency-confusion / typosquat inspection.
+    if re.search(r"\brequirements\.txt\b", text):
+        out.append(ExtractedFinding(
+            "CWE-1104", "Python requirements file present", "low",
+            "audit requirements.txt for typosquats / unpinned internal packages",
+            tag="python_requirements"))
+
+    # A writable MCP client config -> CVE-2025-6514 mcp-remote OAuth RCE.
+    for line in text.splitlines():
+        if re.search(r"(?i)(?:\.mcp\.json|mcp\.json|claude_desktop_config\.json)", line) and \
+                re.search(r"(?i)writable|[0-7]?[2367]{2}\b|rwx|Users?:.*W", line):
+            out.append(ExtractedFinding(
+                "CVE-2025-6514", "Writable MCP client config", "high",
+                "poison the MCP server URL for OAuth command injection (mcp-remote)",
+                tag="mcp_config_writable"))
+            break
+
     return out
 
 

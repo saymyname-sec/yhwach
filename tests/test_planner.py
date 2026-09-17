@@ -251,6 +251,26 @@ def test_excessive_agency_chain(tmp_db: Path) -> None:
     assert "chatbot_excessive_agency" in ids
 
 
+def test_supply_chain_tag_chains(tmp_db: Path) -> None:
+    """gitlab_token (gitlab surface), python_requirements (web surface), and
+    mcp_config_writable (host-scoped) each unlock their supply-chain rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    rules = load_rules(default_playbook_dir())
+    eng = _seed_surface(tmp_db, kind="gitlab", ip="10.0.0.5")
+    with yhdb.transaction(tmp_db) as conn:  # add a web surface on the same host
+        hid = conn.execute("SELECT id FROM host WHERE engagement_id=?", (eng,)).fetchone()["id"]
+        sid = conn.execute("SELECT id FROM service WHERE host_id=?", (hid,)).fetchone()["id"]
+        yhdb.upsert_surface(conn, hid, sid, "web", "none", "{}")
+    for tag in ("gitlab_token", "python_requirements", "mcp_config_writable"):
+        _add_finding(tmp_db, eng, tag)
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 80)]
+    assert "gitlab_ci_variable_exfil" in ids
+    assert "pypi_supply_chain_inspect" in ids
+    assert "mcp_remote_oauth_exploitation" in ids
+
+
 def test_k8s_sa_token_chain(tmp_db: Path) -> None:
     """A mounted SA-token finding unlocks the K8s enumeration rule."""
     from yhwach.playbooks import default_playbook_dir, load_rules

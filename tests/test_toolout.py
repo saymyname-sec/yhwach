@@ -114,6 +114,11 @@ def test_winpeas_privesc_multi_tag() -> None:
     assert {"writable_scheduled_task", "lsa_defaultpassword", "dpapi_master_key"}.issubset(tags)
 
 
+def test_linpeas_supplychain_tags() -> None:
+    tags = {f.tag for f in parse_linpeas(_read("linpeas_supplychain.txt"))}
+    assert {"gitlab_token", "python_requirements", "mcp_config_writable"}.issubset(tags)
+
+
 def test_linpeas_cloud_tags() -> None:
     tags = {f.tag for f in parse_linpeas(_read("linpeas_cloud.txt"))}
     assert {"k8s_sa_token", "nvidia_toolkit"}.issubset(tags)

@@ -1,0 +1,9 @@
+╔══════════╣ Analyzing GitLab / CI files
+/home/dev/.python-gitlab.cfg
+    private_token = glpat-EXAMPLE-NOT-REAL
+
+╔══════════╣ Interesting python files
+-rw-r--r-- 1 dev dev 412 /opt/pipeline/requirements.txt
+
+╔══════════╣ Interesting config files (writable)
+-rwxrwxrwx 1 dev dev 210 /home/dev/.config/claude/claude_desktop_config.json  (writable)

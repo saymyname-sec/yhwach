@@ -446,13 +446,17 @@ def actions(risk: str | None) -> None:
 @click.option("--task", "task_id", required=True, type=int, help="Task id (from `yhwach next`).")
 @click.option("--go", is_flag=True, default=False,
               help="Execute read-only actions and capture output to loot/ (default: render only).")
+@click.option("--hexstrike-url", default=None,
+              help="Run read-only actions through HexStrike (delegated) instead of locally; "
+                   f"e.g. {_HEXSTRIKE_DEFAULT}. Only used with --go.")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
+def run(lab: str, task_id: int, go: bool, hexstrike_url: str | None, db_path: str | None) -> None:
     """Render (and with --go, execute read-only) the actions for a task.
 
     Proposal-tier and render-only actions are printed for the operator to run,
     never auto-executed — Yhwach proposes, the operator exploits. Shares the
     execution core with the `yhwach_run` MCP tool (see engine.execute_task).
+    With --hexstrike-url, read-only actions run through HexStrike.
     """
     path = _db_path(db_path)
     if not path.exists():
@@ -465,7 +469,7 @@ def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
             click.echo(f"[!] Unknown lab '{lab}'.", err=True)
             sys.exit(2)
 
-    lines, ok = execute_task(path, eng_id, task_id, go=go)
+    lines, ok = execute_task(path, eng_id, task_id, go=go, hexstrike_url=hexstrike_url)
     for ln in lines:
         click.echo(ln)
     if not ok:

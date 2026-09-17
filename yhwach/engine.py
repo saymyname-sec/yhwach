@@ -57,6 +57,7 @@ def execute_task(
     task_id: int,
     *,
     go: bool = False,
+    hexstrike_url: str | None = None,
 ) -> tuple[list[str], bool]:
     """Render (and with `go`, execute read-only) a task's actions.
 
@@ -64,10 +65,19 @@ def execute_task(
     resolved. With go=True, read-only/runnable actions execute (output captured
     to loot/), findings are extracted and persisted, and lore-denylist artifacts
     are recorded. Proposal/render-only actions are only rendered — never run.
+
+    With `hexstrike_url`, read-only actions run through HexStrike (delegated
+    execution) instead of a local subprocess; the extracted findings/tags are
+    identical, so AD enum output flows straight into the parsers.
     """
     path = Path(db_path)
     rules = {r.id: r for r in load_rules(default_playbook_dir())}
     denylist = load_denylist(default_playbook_dir())
+
+    hexstrike = None
+    if hexstrike_url:
+        from yhwach.hexstrike import HexStrikeClient
+        hexstrike = HexStrikeClient(hexstrike_url)
 
     with yhdb.transaction(path) as conn:
         row = conn.execute(
@@ -94,7 +104,8 @@ def execute_task(
     ctx = context_from_surface(row["ip"], row["port"] or "PORT", meta)
     loot_dir = artifact_dir(path, "loot")
 
-    out = [f"== Task {task_id}: {row['rule_id']} @ {row['ip']} =="]
+    via = "  (via HexStrike)" if hexstrike else ""
+    out = [f"== Task {task_id}: {row['rule_id']} @ {row['ip']} =={via}"]
     for emit in rule.emits:
         action = get_action(emit.get("action", ""))
         if action is None:
@@ -104,7 +115,7 @@ def execute_task(
         for cmd in render_action(action, ctx):
             out.append(f"  $ {cmd}" + ("" if can_run else f"   [{action.risk}, render-only]"))
         if go and can_run:
-            for res in run_action(action, ctx, loot_dir=loot_dir):
+            for res in run_action(action, ctx, loot_dir=loot_dir, hexstrike=hexstrike):
                 head = "\n".join((res["output"] or "").splitlines()[:8])
                 out.append(f"    -> rc={res['returncode']}  loot={res.get('loot_file', '-')}")
                 if head.strip():

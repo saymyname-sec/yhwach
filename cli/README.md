@@ -56,11 +56,13 @@ Default: a compact EV-ranked list of pending tasks. With `--contract`: the full 
 block (persona + state + ranked candidates + commands) for Claude Code to reason over into an
 Autonomy Contract. Yhwach never calls a model itself.
 
-### `yhwach run --lab <name> --task <id> [--go]`
+### `yhwach run --lab <name> --task <id> [--go] [--hexstrike-url <url>]`
 
 Render the actions for a task. Read-only, self-contained actions run with `--go` (output captured
 to `loot/`, findings extracted deterministically, lore-denylist artifacts flagged); proposal/
-destructive/render-only actions are always printed for the operator to run.
+destructive/render-only actions are always printed for the operator to run. With `--hexstrike-url`
+the read-only actions execute through HexStrike (delegated) instead of a local subprocess — same
+extraction path, so AD enum output feeds the parsers automatically.
 
 ### `yhwach actions [--risk read_only|propose|destructive]`
 

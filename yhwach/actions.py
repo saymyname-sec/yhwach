@@ -794,12 +794,27 @@ def _tainted_context_values(context: dict[str, str]) -> dict[str, str]:
     return bad
 
 
+def _run_via_hexstrike(client, cmd: str, timeout: float) -> tuple[int | None, str]:
+    """Execute one command through a HexStrike client; normalise its result to
+    (returncode, output). Errors surface as output so the pipeline continues."""
+    try:
+        data = client.run_command(cmd, timeout=timeout)
+    except Exception as e:  # noqa: BLE001 — HexStrike transport error -> report, keep going
+        return None, f"[hexstrike error] {e}"
+    out = (data.get("stdout", "") or "")
+    if data.get("stderr"):
+        out += "\n[stderr]\n" + data["stderr"]
+    rc = data.get("return_code", data.get("returncode"))
+    return rc, out
+
+
 def run_action(
     action: Action,
     context: dict[str, str],
     *,
     loot_dir: Path | str | None = None,
     timeout: float = 60.0,
+    hexstrike=None,
 ) -> list[dict]:
     """Execute a runnable read-only action's commands, capturing output.
 
@@ -808,6 +823,10 @@ def run_action(
     substituted context value carries shell metacharacters (a hostile target
     could inject commands via, e.g., a crafted model name); such actions are
     left for the operator to review and run by hand.
+
+    With a `hexstrike` client, each command runs through HexStrike (delegated
+    execution) instead of a local subprocess — the output path is identical, so
+    the interpret extractors ingest it the same way.
     """
     if action.risk != "read_only" or not action.runnable:
         raise PermissionError(
@@ -831,11 +850,17 @@ def run_action(
 
     results: list[dict] = []
     for idx, cmd in enumerate(render_action(action, context)):
-        proc = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=timeout
-        )
-        out = (proc.stdout or "") + (("\n[stderr]\n" + proc.stderr) if proc.stderr else "")
-        entry = {"cmd": cmd, "returncode": proc.returncode, "output": out}
+        if hexstrike is not None:
+            rc, out = _run_via_hexstrike(hexstrike, cmd, timeout)
+            via = "hexstrike"
+        else:
+            proc = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=timeout
+            )
+            out = (proc.stdout or "") + (("\n[stderr]\n" + proc.stderr) if proc.stderr else "")
+            rc = proc.returncode
+            via = "local"
+        entry = {"cmd": cmd, "returncode": rc, "output": out, "via": via}
         if loot_dir:
             loot_dir = Path(loot_dir)
             loot_dir.mkdir(parents=True, exist_ok=True)

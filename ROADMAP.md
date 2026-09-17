@@ -2,7 +2,7 @@
 
 ## Status
 
-**Done and validated on a live challenge lab — Iron Crown (252 tests):**
+**Done and validated on a live challenge lab — Iron Crown (255 tests):**
 - ✅ World model (SQLite, 12 tables) + nmap ingestion + host FSM
 - ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
 - ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
@@ -110,10 +110,15 @@ HexStrike *runs* AD tools; Yhwach now *parses* their output and *chains* into AD
       creds, complementing the tag-gated `kerberoast`.
 - [x] **GPP-password tag**: the winPEAS parser now tags `gpp_password` → the `gpp_decrypt` rule.
 - [x] Tests: certipy parser + ingest→adcs_esc_abuse chain; vault-gated rule needs creds; gpp chain.
-- **Remaining (Phase 4d, optional):** deepen HexStrike helpers — typed `netexec`/`ldapsearch`
-      calls + recon capture so AD enum output flows back through `yhwach enum`/`run` into the
-      parsers automatically (today the commands render/run via `yhwach run --go` locally, or the
-      operator wires HexStrike output back via `ingest`).
+
+### Phase 4d — HexStrike-delegated execution ✅ DONE
+- [x] `run_action` gained a `hexstrike` client path: read-only actions execute through HexStrike
+      (delegated) with an identical output/loot path, so the interpret extractors ingest the result
+      the same way — AD enum output flows straight into the parsers/tags.
+- [x] Threaded through `engine.execute_task(hexstrike_url=...)`, `yhwach run --hexstrike-url`, and
+      the `yhwach_run` MCP tool (`hexstrike_url`). HexStrike transport errors are captured, not fatal.
+- [x] Tests: run_action via a fake client (+ error path); execute_task through HexStrike extracts
+      `smb_signing_off` from delegated netexec output.
 
 ### Phase 5 — Judgment layer: align docs to reality  ✅ DECIDED (align, don't build)
 The engine is a read-only context handoff; the operator (Claude Code) does the reasoning. We are NOT

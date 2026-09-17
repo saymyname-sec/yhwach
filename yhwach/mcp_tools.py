@@ -286,17 +286,19 @@ def tool_probe(db_path: Path | str, lab: str, host: str | None = None,
     return head + ("\n" + "\n".join(lines) if lines else "")
 
 
-def tool_run(db_path: Path | str, lab: str, task_id: int, go: bool = False) -> str:
+def tool_run(db_path: Path | str, lab: str, task_id: int, go: bool = False,
+             hexstrike_url: str | None = None) -> str:
     """Render (and with go=True, execute read-only) a task's actions.
 
     Read-only/self-contained actions run and their output is captured + findings
-    extracted; proposal/render-only actions are printed for the operator. Shares
+    extracted; proposal/render-only actions are printed for the operator. With
+    hexstrike_url, read-only actions run through HexStrike. Shares
     engine.execute_task with the CLI `run` command."""
     from yhwach.engine import execute_task
 
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
-    lines, _ok = execute_task(db_path, eid, task_id, go=go)
+    lines, _ok = execute_task(db_path, eid, task_id, go=go, hexstrike_url=hexstrike_url)
     return "\n".join(lines)
 
 

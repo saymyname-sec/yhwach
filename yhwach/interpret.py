@@ -205,6 +205,24 @@ def _enum4linux(output: str, ctx: dict) -> list[ExtractedFinding]:
     return _smb_null(output, ctx) + _ad_users(output, ctx)
 
 
+def _desc_password(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A password parked in an AD user description / password attribute.
+
+    Matches a `pass/pwd/creds` keyword followed by a value — benign descriptions
+    (e.g. 'Built-in account for guest access') carry no such token and are
+    ignored. Tags desc_password (a credential lead worth spraying)."""
+    for line in output.splitlines():
+        if not re.search(r"(?i)\b(?:pass(?:word)?|pwd|creds?)\b\s*[:=]?\s*[^\s,;]{4,}", line):
+            continue
+        who = re.search(r"(?i)User:\s*(\S+)", line)
+        subject = who.group(1) if who else "(an AD object)"
+        return ExtractedFinding(
+            "CWE-522", "Password stored in an AD user description/attribute", "high",
+            f"{subject} on {ctx.get('IP','?')} exposes a credential in its description",
+            tag="desc_password")
+    return None
+
+
 def _maq(output: str, ctx: dict) -> ExtractedFinding | None:
     """ms-DS-MachineAccountQuota > 0 -> tag machine_account_quota (RBCD/noPac).
 
@@ -367,6 +385,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "netexec_rid_brute": _ad_users,
     "netexec_pass_pol": _pass_pol,
     "netexec_maq": _maq,
+    "netexec_get_desc_users": _desc_password,
     "asreproast_users": _kerberos_roast,
     "kerberoast_getuserspns": _kerberos_roast,
 }

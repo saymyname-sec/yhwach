@@ -34,6 +34,12 @@ def test_nxc_rid_brute_userlist() -> None:
     assert any(f.tag == "domain_users" for f in fs)
 
 
+def test_nxc_desc_users_finds_password() -> None:
+    fs = interpret_all("netexec_get_desc_users", _read("nxc_desc_users.txt"), {"IP": "10.0.2.11"})
+    assert fs and fs[0].tag == "desc_password"
+    assert "svc_backup" in fs[0].evidence   # not Guest/krbtgt (benign descriptions)
+
+
 def test_nxc_maq_positive_quota_tagged() -> None:
     fs = interpret_all("netexec_maq", _read("nxc_maq.txt"), {"IP": "10.10.10.10"})
     assert fs and fs[0].tag == "machine_account_quota" and "MachineAccountQuota=10" in fs[0].evidence

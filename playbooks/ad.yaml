@@ -204,6 +204,23 @@
   technique: shadow_credential
   authorized_only: true
 
+# We hold a domain cred -> hunt for passwords parked in user description /
+# userPassword / unixUserPassword / unicodePwd attributes.
+- id: ldap_user_descriptions
+  when: { surface: ldap, vault: nonempty }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: netexec_get_desc_users
+    - action: bloodyad_password_fields
+  maps: [T1552.001]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . passwords in AD user descriptions (get-desc-users)'
+  authorized_only: true
+
 # We hold a domain cred -> read MachineAccountQuota (enumeration). >0 unlocks RBCD.
 - id: ldap_machineaccountquota
   when: { surface: ldap, vault: nonempty }

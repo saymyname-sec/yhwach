@@ -290,6 +290,12 @@ ACTION_REGISTRY: dict[str, Action] = {
 
     # --- Traditional: SMB / LDAP ---
     "netexec_smb_null": _a("netexec_smb_null", ["nxc smb $IP -u '' -p ''"], outputs="raw"),
+    "netexec_pass_pol": _a("netexec_pass_pol",
+        ["nxc smb $IP -u '' -p '' --pass-pol",
+         "# with creds if null fails: nxc smb $IP -u <USER> -p '<PASS>' --pass-pol"],
+        outputs="raw",
+        note="Read the domain password policy (esp. Account Lockout Threshold) BEFORE spraying — "
+             "a wrong throttle locks accounts and burns the engagement."),
     "netexec_rid_brute": _a("netexec_rid_brute",
         ["nxc smb $IP -u guest -p '' --rid-brute 10000",
          "# fallback if guest is disabled: nxc smb $IP -u '' -p '' --rid-brute 10000",

@@ -34,6 +34,12 @@ def test_nxc_rid_brute_userlist() -> None:
     assert any(f.tag == "domain_users" for f in fs)
 
 
+def test_nxc_pass_pol_no_lockout() -> None:
+    fs = interpret_all("netexec_pass_pol", _read("nxc_pass_pol.txt"), {"IP": "10.10.10.10"})
+    assert fs and fs[0].tag == "password_policy"
+    assert "spray freely" in fs[0].evidence   # Threshold: None
+
+
 def test_kerbrute_userlist() -> None:
     fs = interpret_all("kerbrute_userenum", _read("kerbrute_users.txt"), {"IP": "10.10.10.20"})
     assert any(f.tag == "domain_users" for f in fs)

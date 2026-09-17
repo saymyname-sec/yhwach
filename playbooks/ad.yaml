@@ -23,6 +23,22 @@
   source: 'internalallthethings . kerberos user enumeration (kerbrute)'
   authorized_only: true
 
+# Read the password policy (lockout threshold) before any spraying. Enumeration
+# only, but doctrine-critical: a wrong throttle locks accounts.
+- id: smb_password_policy
+  when: { surface: smb }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: netexec_pass_pol
+  maps: [T1201]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . pwd-spraying: check Account Lockout Threshold first'
+  authorized_only: true
+
 # SMB null/guest session -> RID cycling resolves SIDs to usernames when anon
 # LDAP is closed. First-contact user enumeration; feeds domain_users.
 - id: smb_rid_cycling

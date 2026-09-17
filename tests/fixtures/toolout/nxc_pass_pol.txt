@@ -1,0 +1,8 @@
+SMB         10.10.10.10     445    DC01             [*] Windows Server 2019 Build 17763 (name:DC01) (domain:corp.local)
+SMB         10.10.10.10     445    DC01             [+] Dumping password info for domain: CORP
+SMB         10.10.10.10     445    DC01             Minimum password length: 7
+SMB         10.10.10.10     445    DC01             Password history length: 24
+SMB         10.10.10.10     445    DC01             Maximum password age: 41 days 23 hours 53 minutes
+SMB         10.10.10.10     445    DC01             Password Complexity Flags: 000001
+SMB         10.10.10.10     445    DC01             Account Lockout Threshold: None
+SMB         10.10.10.10     445    DC01             Forced Log off Time: Not Set

@@ -100,6 +100,17 @@ def test_findings_include_gates_surface_rule(tmp_db: Path) -> None:
     assert tasks[0]["playbook_rule_id"] == "rag_adv"
 
 
+def test_smb_password_policy_chain(tmp_db: Path) -> None:
+    """An SMB surface offers password-policy enumeration (pre-spray)."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="smb")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "smb_password_policy" in ids
+
+
 def test_smb_rid_cycling_chain(tmp_db: Path) -> None:
     """An SMB surface offers RID cycling for first-contact user enumeration."""
     from yhwach.playbooks import default_playbook_dir, load_rules

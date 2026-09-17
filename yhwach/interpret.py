@@ -205,6 +205,23 @@ def _enum4linux(output: str, ctx: dict) -> list[ExtractedFinding]:
     return _smb_null(output, ctx) + _ad_users(output, ctx)
 
 
+def _pass_pol(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Domain password policy dumped -> tag password_policy (safe-spray gate).
+
+    Surfaces the lockout threshold: 'None'/0 means spray freely; a number means
+    throttle below it. The tag records that the policy is known before spraying."""
+    m = re.search(r"Account Lockout Threshold:\s*(\S+)", output, re.I)
+    if not m:
+        return None
+    thr = m.group(1)
+    safe = thr.lower() in ("none", "0")
+    note = "no lockout — spray freely" if safe else f"lockout at {thr} — throttle below it"
+    return ExtractedFinding(
+        "CWE-521", "Domain password policy enumerated", "low",
+        f"{ctx.get('IP','?')} Account Lockout Threshold: {thr} ({note})",
+        tag="password_policy")
+
+
 def _kerberos_roast(output: str, ctx: dict) -> list[ExtractedFinding]:
     """Kerberoast / AS-REP roast hashes captured -> tag for the crack follow-up."""
     out: list[ExtractedFinding] = []
@@ -332,6 +349,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "ldap_anon_dump": _ad_users,
     "kerbrute_userenum": _ad_users,
     "netexec_rid_brute": _ad_users,
+    "netexec_pass_pol": _pass_pol,
     "asreproast_users": _kerberos_roast,
     "kerberoast_getuserspns": _kerberos_roast,
 }

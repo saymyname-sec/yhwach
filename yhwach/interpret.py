@@ -257,6 +257,16 @@ def _desc_password(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _constrained_deleg(output: str, ctx: dict) -> ExtractedFinding | None:
+    """An account with msDS-AllowedToDelegateTo set -> tag constrained_delegation."""
+    if re.search(r"(?i)msds?-?allowedtodelegateto\s*[:=]\s*\S+", output):
+        return ExtractedFinding(
+            "T1558.003", "Account trusted for constrained delegation", "high",
+            f"{ctx.get('IP','?')} has an account with msDS-AllowedToDelegateTo (S4U abuse)",
+            tag="constrained_delegation")
+    return None
+
+
 def _maq(output: str, ctx: dict) -> ExtractedFinding | None:
     """ms-DS-MachineAccountQuota > 0 -> tag machine_account_quota (RBCD/noPac).
 
@@ -475,6 +485,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "netexec_rid_brute": _ad_users,
     "netexec_pass_pol": _pass_pol,
     "netexec_maq": _maq,
+    "ldap_find_constrained_delegation": _constrained_deleg,
     "netexec_get_desc_users": _desc_password,
     "netexec_laps": _laps,
     "asreproast_users": _kerberos_roast,

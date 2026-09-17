@@ -56,6 +56,12 @@ def test_nxc_desc_users_finds_password() -> None:
     assert "svc_backup" in fs[0].evidence   # not Guest/krbtgt (benign descriptions)
 
 
+def test_constrained_delegation_tag() -> None:
+    fs = interpret_all("ldap_find_constrained_delegation",
+                       _read("bloodyad_constrained_deleg.txt"), {"IP": "10.10.10.10"})
+    assert fs and fs[0].tag == "constrained_delegation"
+
+
 def test_nxc_maq_positive_quota_tagged() -> None:
     fs = interpret_all("netexec_maq", _read("nxc_maq.txt"), {"IP": "10.10.10.10"})
     assert fs and fs[0].tag == "machine_account_quota" and "MachineAccountQuota=10" in fs[0].evidence

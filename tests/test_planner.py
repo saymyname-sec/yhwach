@@ -452,6 +452,23 @@ def test_ldap_user_descriptions_chain(tmp_db: Path) -> None:
     assert "ldap_user_descriptions" in ids
 
 
+def test_constrained_delegation_chain(tmp_db: Path) -> None:
+    """LDAP+cred offers the constrained-deleg enum; the tag unlocks S4U abuse."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="ldap")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        yhdb.add_credential(conn, eng, "svc", "P@ss", "password", "dump")
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 60)]
+    assert "ldap_constrained_delegation_enum" in ids
+    _add_finding(tmp_db, eng, "constrained_delegation")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 60)]
+    assert "constrained_delegation_abuse" in ids
+
+
 def test_machineaccountquota_and_rbcd_chain(tmp_db: Path) -> None:
     """With a vault cred, LDAP offers MAQ enumeration; a positive quota finding
     then unlocks the RBCD abuse rule."""

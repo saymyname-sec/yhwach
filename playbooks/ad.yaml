@@ -219,6 +219,38 @@
   technique: dcsync
   authorized_only: true
 
+# We hold a domain cred -> find accounts trusted for constrained delegation.
+- id: ldap_constrained_delegation_enum
+  when: { surface: ldap, vault: nonempty }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: ldap_find_constrained_delegation
+  maps: [T1087.002]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . find TRUSTED_TO_AUTH_FOR_DELEGATION (UAC 16777216)'
+  authorized_only: true
+
+# Constrained-delegation account (from BloodHound or the LDAP enum) -> S4U2self/
+# S4U2proxy to impersonate a DA to the target service (altservice trick).
+- id: constrained_delegation_abuse
+  when: { findings_include: constrained_delegation }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: constrained_delegation_s4u
+  maps: [T1558.003]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'internalallthethings . constrained delegation S4U (getST -impersonate, altservice)'
+  technique: constrained_delegation
+  authorized_only: true
+
 # Unconstrained delegation host -> coerce the DC and capture its TGT.
 - id: unconstrained_delegation_abuse
   when: { findings_include: unconstrained_delegation }

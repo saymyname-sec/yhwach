@@ -1,0 +1,4 @@
+distinguishedName: CN=SQL01,OU=Servers,DC=corp,DC=local
+sAMAccountName: SQL01$
+msDS-AllowedToDelegateTo: HOST/dc01.corp.local
+msDS-AllowedToDelegateTo: time/dc01.corp.local

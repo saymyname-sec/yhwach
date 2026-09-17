@@ -1,0 +1,7 @@
+SMB         10.10.10.20     445    DC01             [*] Windows Server 2022 Build 20348 x64 (name:DC01) (domain:corp.local) (signing:False) (SMBv1:False)
+SMB         10.10.10.20     445    DC01             [+] corp.local\svc_backup:Summer2024! (Pwn3d!)
+SMB         10.10.10.20     445    DC01             [*] Enumerated shares
+SMB         10.10.10.20     445    DC01             Share           Permissions     Remark
+SMB         10.10.10.20     445    DC01             -----           -----------     ------
+SMB         10.10.10.20     445    DC01             ADMIN$          READ,WRITE      Remote Admin
+SMB         10.10.10.20     445    DC01             SYSVOL          READ            Logon server share

@@ -125,3 +125,16 @@ def test_first_json_skips_non_json_brace() -> None:
 def test_first_json_large_input_fast() -> None:
     big = '{"models": [1,2,3]}' + "x" * 500_000
     assert _first_json(big) == {"models": [1, 2, 3]}
+
+
+def test_finding_scoped_to_engagement(tmp_db: Path) -> None:
+    """A host-derived finding is scoped to its engagement; a second lab sees none."""
+    with yhdb.transaction(tmp_db) as conn:
+        e1 = yhdb.upsert_engagement(conn, lab="lab_a", scope="10.0.0.0/24")
+        e2 = yhdb.upsert_engagement(conn, lab="lab_b", scope="10.0.0.0/24")
+        h1 = conn.execute("INSERT INTO host (engagement_id, ip, stage, first_seen) "
+                          "VALUES (?, '10.0.0.1', 'scanned', 't')", (e1,)).lastrowid
+        yhdb.add_finding(conn, int(h1), None, "CWE-89", "sqli", "critical", "ev")
+        n1 = conn.execute("SELECT COUNT(*) n FROM finding WHERE engagement_id=?", (e1,)).fetchone()["n"]
+        n2 = conn.execute("SELECT COUNT(*) n FROM finding WHERE engagement_id=?", (e2,)).fetchone()["n"]
+    assert n1 == 1 and n2 == 0

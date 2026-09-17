@@ -1,0 +1,8 @@
+ =========================================( Users on 10.10.10.20 )=========================================
+'administrator':
+  username: administrator
+  name: Administrator
+'svc_sql':
+  username: svc_sql
+'guest':
+  username: guest

@@ -123,15 +123,28 @@ def _ldap_anon(output: str, ctx: dict) -> list[ExtractedFinding]:
 
 
 def _ad_users(output: str, ctx: dict) -> list[ExtractedFinding]:
-    """A domain user list was enumerated (netexec --users / enum4linux / kerbrute)
-    -> tag domain_users, which unlocks AS-REP roast and spraying."""
-    users = set(re.findall(r"(?:VALID USERNAME:|\[\+\] Valid user:)\s*(\S+)", output))
-    users |= set(re.findall(r"user:\s*(\S+)", output, re.I))
+    """A domain user list was enumerated (netexec --users / enum4linux-ng / kerbrute)
+    -> tag domain_users, which unlocks AS-REP roast and spraying.
+
+    Handles the real formats: kerbrute `VALID USERNAME: user@DOMAIN`, netexec
+    `DOMAIN\\user` columns, and enum4linux-ng `username: user`."""
+    users: set[str] = set()
+    users |= {u for u in re.findall(r"valid user(?:name)?:\s*([^\s@]+)", output, re.I)}
+    users |= {u for u in re.findall(r"^\s*username:\s*(\S+)", output, re.M | re.I)}
+    # DOMAIN\user (netexec --users / --rid-brute), excluding machine accounts ($).
+    users |= {u for u in re.findall(r"[A-Za-z0-9.\-]+\\([A-Za-z0-9._-]+)(?!\$)", output)
+              if not u.endswith("$")}
+    users.discard("")
     if len(users) >= 2:
         return [ExtractedFinding(
             "CWE-200", "Domain user list enumerated", "medium",
             f"{len(users)} domain users on {ctx.get('IP','?')}", tag="domain_users")]
     return []
+
+
+def _enum4linux(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """enum4linux-ng reports both SMB posture and a user list — extract both."""
+    return _smb_null(output, ctx) + _ad_users(output, ctx)
 
 
 def _kerberos_roast(output: str, ctx: dict) -> list[ExtractedFinding]:
@@ -194,7 +207,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "jenkins_auth_check": _jenkins_api,
     "netexec_smb_null": _smb_null,
     "probe_writable_smb_share": _smb_null,
-    "enum4linux_ng": _smb_null,
+    "enum4linux_ng": _enum4linux,
     "smbmap_shares": _smb_null,
     "probe_rag_upload_paths": _rag_upload,
     # --- AD enumeration ---

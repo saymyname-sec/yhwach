@@ -2,7 +2,7 @@
 
 ## Status
 
-**Done and validated on a live challenge lab — Iron Crown (265 tests):**
+**Done and validated on a live challenge lab — Iron Crown (274 tests):**
 - ✅ World model (SQLite, 12 tables) + nmap ingestion + host FSM
 - ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
 - ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
@@ -155,6 +155,26 @@ say so.
   churn without operator value.
 - Inline report screenshots + per-finding verbatim repro: the Obsidian Attack Chain note already
   carries reproduction detail + evidence images; the Markdown report links the proof paths.
+
+### Phase 7 — Hardening pass (A-grade) ✅ DONE
+Closes the in-repo weaknesses from the assessment; the only remaining A-blocker is a live-lab run.
+- [x] **Engagement-scoped findings**: `finding.engagement_id` (derived from the host) + every
+      finding query scoped to it — host-less findings no longer leak across labs.
+- [x] **Parser hardening + real-output fixtures** (`tests/fixtures/toolout/`, `tests/test_toolout.py`):
+      parsers run against realistic netexec / kerbrute / enum4linux-ng / ldapsearch / certipy /
+      SharpHound output. `_ad_users` now handles the real formats (`VALID USERNAME:`, `DOMAIN\user`,
+      `username:`); `enum4linux_ng` yields both SMB posture and a user list.
+- [x] **`$DOMAIN` auto-fill**: the engagement's AD domain fills AD action commands
+      (kerberoast/AS-REP/DCSync/certipy); creds stay operator-supplied so secrets never render.
+- [x] Regression caught + fixed by the injection-guard test (the `<DOMAIN>` placeholder must be
+      exempt from the shell-metachar taint check — it's engagement config, not target-controlled).
+
+**Still open — needs the live lab (not fixable in-repo):**
+- [ ] **Field validation**: run a full engagement end-to-end against real HexStrike + netexec +
+      BloodHound + certipy, then capture their *actual* output as `tests/fixtures/toolout/` fixtures
+      (the `snapshot` self-learning loop). This is the last step to a clean "A".
+- [ ] Native BloodHound **CE graph JSON** ingestion (today: the normalized-facts contract + raw
+      SharpHound collection files).
 
 The engine is feature-complete against the plan. The original phased scaffold below predates this
 build order and is kept for reference.

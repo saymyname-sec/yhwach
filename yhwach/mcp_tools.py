@@ -76,7 +76,7 @@ def tool_findings(db_path: Path | str, lab: str) -> str:
         rows = conn.execute(
             "SELECT f.class, f.title, f.severity, h.ip ip FROM finding f "
             "LEFT JOIN host h ON h.id=f.host_id "
-            "WHERE (h.engagement_id=? OR f.host_id IS NULL) AND f.status='open' "
+            "WHERE f.engagement_id=? AND f.status='open' "
             f"ORDER BY {order}, f.id", (eid,)).fetchall()
     if not rows:
         return "no findings"

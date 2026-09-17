@@ -74,3 +74,12 @@ def test_execute_task_via_hexstrike_extracts_tags(tmp_db: Path, monkeypatch) -> 
         tags = {r["tag"] for r in conn.execute(
             "SELECT tag FROM finding WHERE tag IS NOT NULL").fetchall()}
     assert "smb_signing_off" in tags
+
+
+def test_domain_var_fills_ad_commands() -> None:
+    from yhwach.actions import context_from_surface, get_action, render_action
+    ctx = context_from_surface("10.0.0.1", 445, {})
+    assert ctx["DOMAIN"] == "<DOMAIN>"                 # placeholder until known
+    ctx["DOMAIN"] = "corp.local"
+    cmd = render_action(get_action("kerberoast_getuserspns"), ctx)[0]
+    assert "corp.local/" in cmd and "-dc-ip 10.0.0.1" in cmd

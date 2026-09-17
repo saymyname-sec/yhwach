@@ -83,8 +83,9 @@ def execute_task(
         row = conn.execute(
             "SELECT t.playbook_rule_id AS rule_id, t.target_host_id AS host_id, "
             "t.target_surface_id AS surface_id, h.ip AS ip, s.meta_json AS meta, "
-            "svc.port AS port "
+            "svc.port AS port, e.domain AS domain "
             "FROM task t JOIN host h ON h.id = t.target_host_id "
+            "JOIN engagement e ON e.id = t.engagement_id "
             "LEFT JOIN surface s ON s.id = t.target_surface_id "
             "LEFT JOIN service svc ON svc.id = s.service_id "
             "WHERE t.id = ? AND t.engagement_id = ?",
@@ -102,6 +103,8 @@ def execute_task(
     except (ValueError, TypeError):
         meta = {}
     ctx = context_from_surface(row["ip"], row["port"] or "PORT", meta)
+    if row["domain"]:
+        ctx["DOMAIN"] = row["domain"]
     loot_dir = artifact_dir(path, "loot")
 
     via = "  (via HexStrike)" if hexstrike else ""

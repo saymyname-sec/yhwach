@@ -34,11 +34,8 @@ def _engagement_summary(conn: sqlite3.Connection, engagement_id: int) -> dict:
         "SELECT COUNT(*) AS n FROM credential WHERE engagement_id = ?",
         (engagement_id,),
     ).fetchone()["n"]
-    # Match report.py / mcp_tools counting: include engagement hosts' findings
-    # plus unscoped (host_id IS NULL) ones, via a LEFT JOIN so counts agree.
     findings = conn.execute(
-        "SELECT COUNT(*) AS n FROM finding f LEFT JOIN host h ON h.id = f.host_id "
-        "WHERE h.engagement_id = ? OR f.host_id IS NULL",
+        "SELECT COUNT(*) AS n FROM finding WHERE engagement_id = ?",
         (engagement_id,),
     ).fetchone()["n"]
     return {
@@ -158,6 +155,8 @@ def build_context(
             except (ValueError, TypeError):
                 meta = {}
             ctx = context_from_surface(t["host_ip"], t["surface_port"] or "PORT", meta)
+            if eng["domain"]:
+                ctx["DOMAIN"] = eng["domain"]
 
             emits = rule.emits if rule else []
             for emit in emits:

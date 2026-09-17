@@ -372,17 +372,23 @@ def add_finding(
     evidence: str,
     playbook_rule_id: str | None = None,
     tag: str | None = None,
+    engagement_id: int | None = None,
 ) -> tuple[int, bool]:
-    """Insert or update a finding, deduped by (host_id, class, title).
+    """Insert or update a finding, deduped by (engagement, host_id, class, title).
 
-    `tag` is the chaining key a rule's `findings_include` matches on; on update
-    it is only (re)set when a non-null tag is supplied, so a later untagged
-    re-detection never clears an existing tag.
+    `engagement_id` scopes the finding so host-less findings never leak across
+    labs; when omitted it is derived from `host_id`. `tag` is the chaining key a
+    rule's `findings_include` matches on; on update it is only (re)set when a
+    non-null tag is supplied, so a later untagged re-detection never clears it.
     """
     now = _now_utc()
+    if engagement_id is None and host_id is not None:
+        hrow = conn.execute("SELECT engagement_id FROM host WHERE id = ?", (host_id,)).fetchone()
+        engagement_id = hrow["engagement_id"] if hrow else None
     existing = conn.execute(
-        "SELECT id FROM finding WHERE host_id IS ? AND class = ? AND title = ?",
-        (host_id, cls, title),
+        "SELECT id FROM finding WHERE engagement_id IS ? AND host_id IS ? "
+        "AND class = ? AND title = ?",
+        (engagement_id, host_id, cls, title),
     ).fetchone()
     if existing is not None:
         if tag is not None:
@@ -397,10 +403,11 @@ def add_finding(
             )
         return int(existing["id"]), False
     cur = conn.execute(
-        "INSERT INTO finding (host_id, surface_id, class, title, severity, evidence, "
-        "tag, playbook_rule_id, status, discovered_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
-        (host_id, surface_id, cls, title, severity, evidence, tag, playbook_rule_id, now),
+        "INSERT INTO finding (engagement_id, host_id, surface_id, class, title, severity, "
+        "evidence, tag, playbook_rule_id, status, discovered_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+        (engagement_id, host_id, surface_id, cls, title, severity, evidence, tag,
+         playbook_rule_id, now),
     )
     return int(cur.lastrowid), True
 

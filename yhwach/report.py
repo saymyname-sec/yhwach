@@ -71,9 +71,8 @@ def build_report(conn: sqlite3.Connection, engagement_id: int) -> str:
         (engagement_id,),
     ).fetchall()
     sev_counts = conn.execute(
-        "SELECT severity, COUNT(*) AS n FROM finding f "
-        "JOIN host h ON h.id = f.host_id WHERE h.engagement_id = ? AND f.status = 'open' "
-        "GROUP BY severity",
+        "SELECT severity, COUNT(*) AS n FROM finding "
+        "WHERE engagement_id = ? AND status = 'open' GROUP BY severity",
         (engagement_id,),
     ).fetchall()
     sev_map = {r["severity"]: r["n"] for r in sev_counts}
@@ -96,7 +95,7 @@ def build_report(conn: sqlite3.Connection, engagement_id: int) -> str:
     findings = conn.execute(
         "SELECT f.class, f.title, f.severity, f.evidence, h.ip AS ip "
         "FROM finding f LEFT JOIN host h ON h.id = f.host_id "
-        "WHERE (h.engagement_id = ? OR f.host_id IS NULL) AND f.status = 'open' "
+        "WHERE f.engagement_id = ? AND f.status = 'open' "
         f"ORDER BY {_SEV_ORDER}, f.id",
         (engagement_id,),
     ).fetchall()

@@ -162,7 +162,7 @@ def p0_leads(conn: sqlite3.Connection, engagement_id: int) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT f.tag AS tag, f.title AS title, f.severity AS severity, h.ip AS ip "
         "FROM finding f LEFT JOIN host h ON h.id = f.host_id "
-        "WHERE (h.engagement_id = ? OR f.host_id IS NULL) AND f.status = 'open' "
+        "WHERE f.engagement_id = ? AND f.status = 'open' "
         f"AND f.tag IN ({placeholders}) ORDER BY {order}, f.id",
         (engagement_id, *tags),
     ).fetchall()

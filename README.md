@@ -26,7 +26,7 @@ The persona travels with the engine. Whatever CLI, host, or client executes the 
 **Working end-to-end, through post-exploitation.** The deterministic engine runs from an
 nmap scan to a persona-framed, doctrine-ranked operator brief with concrete commands, then
 carries the engagement through foothold, loot, and pivot — and has been validated against a
-live challenge lab (Iron Crown). 265 tests, green on Linux and Windows.
+live challenge lab (Iron Crown). 274 tests, green on Linux and Windows.
 
 What works today:
 
@@ -90,7 +90,7 @@ Not for unauthorized targets. Contributors: submit rules only for authorized-tar
 git clone https://github.com/saymyname-sec/yhwach ~/yhwach && cd ~/yhwach
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q            # 265 tests
+pytest -q            # 274 tests
 yhwach selftest      # golden fixtures
 
 # Drive an engagement (authorized targets only):

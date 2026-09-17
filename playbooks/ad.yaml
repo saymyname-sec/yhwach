@@ -204,6 +204,22 @@
   technique: shadow_credential
   authorized_only: true
 
+# We hold a domain cred -> try to read LAPS (ms-Mcs-AdmPwd). A hit is instant
+# local admin on that machine.
+- id: ldap_laps_read
+  when: { surface: ldap, vault: nonempty }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: netexec_laps
+  maps: [T1552.001]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . read LAPS ms-Mcs-AdmPwd (netexec -M laps / bloodyAD)'
+  authorized_only: true
+
 # We hold a domain cred -> hunt for passwords parked in user description /
 # userPassword / unixUserPassword / unicodePwd attributes.
 - id: ldap_user_descriptions

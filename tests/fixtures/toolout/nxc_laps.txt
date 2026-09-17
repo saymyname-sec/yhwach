@@ -1,0 +1,5 @@
+LDAP        10.10.10.10     389    DC01             [+] corp.local\laps_reader:Passw0rd
+LAPS        10.10.10.10     389    DC01             Computer: WS01$          User: Administrator     Password: dbZu7;vGaI)Y6w1L
+distinguishedName: CN=WS01,OU=Workstations,DC=corp,DC=local
+ms-Mcs-AdmPwd: dbZu7;vGaI)Y6w1L
+ms-mcs-admpwdexpirationtime: 133445566778899000

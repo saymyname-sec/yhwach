@@ -34,6 +34,16 @@ def test_nxc_rid_brute_userlist() -> None:
     assert any(f.tag == "domain_users" for f in fs)
 
 
+def test_nxc_laps_password_tagged() -> None:
+    fs = interpret_all("netexec_laps", _read("nxc_laps.txt"), {"IP": "10.10.10.10"})
+    assert fs and fs[0].tag == "laps_password" and fs[0].severity == "critical"
+
+
+def test_nxc_laps_expiration_only_not_tagged() -> None:
+    # A bare expiration timestamp (no ms-Mcs-AdmPwd value) must not tag.
+    assert not interpret_all("netexec_laps", "ms-mcs-admpwdexpirationtime: 13344556677", {"IP": "x"})
+
+
 def test_nxc_desc_users_finds_password() -> None:
     fs = interpret_all("netexec_get_desc_users", _read("nxc_desc_users.txt"), {"IP": "10.0.2.11"})
     assert fs and fs[0].tag == "desc_password"

@@ -205,6 +205,19 @@ def _enum4linux(output: str, ctx: dict) -> list[ExtractedFinding]:
     return _smb_null(output, ctx) + _ad_users(output, ctx)
 
 
+def _laps(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A readable ms-Mcs-AdmPwd (clear-text LAPS password) -> tag laps_password.
+
+    The negative lookahead skips ms-mcs-admpwd*expirationtime* (a timestamp, not
+    the secret)."""
+    if re.search(r"(?i)ms-?mcs-?admpwd(?!expiration)\b\s*[:=]\s*\S+", output):
+        return ExtractedFinding(
+            "CWE-522", "Readable LAPS password (ms-Mcs-AdmPwd)", "critical",
+            f"{ctx.get('IP','?')} exposes a clear-text LAPS local-admin password",
+            tag="laps_password")
+    return None
+
+
 def _desc_password(output: str, ctx: dict) -> ExtractedFinding | None:
     """A password parked in an AD user description / password attribute.
 
@@ -386,6 +399,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "netexec_pass_pol": _pass_pol,
     "netexec_maq": _maq,
     "netexec_get_desc_users": _desc_password,
+    "netexec_laps": _laps,
     "asreproast_users": _kerberos_roast,
     "kerberoast_getuserspns": _kerberos_roast,
 }

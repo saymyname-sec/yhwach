@@ -461,6 +461,129 @@ def _rag_upload(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# AI / ML supply-chain surfaces
+# ---------------------------------------------------------------------------
+# These tags gated rules that shipped with no detector at all: the rule, the
+# action and the payload existed, but nothing in the engine could ever set the
+# tag, so the planner could never fire them (5 rules, all on the scored AI
+# surface). The needles below are deliberately narrow — a bare "checkpoint" or
+# "scanner" does NOT qualify. A false tag costs the operator a wasted
+# exploitation turn, which is worse than staying silent.
+
+# Anything that unpickles attacker-reachable bytes. `torch.load` is here as well
+# as under checkpoints: it IS pickle deserialization.
+_PICKLE_RE = re.compile(
+    r"(?i)\b(?:c?pickle\.loads?|_pickle|unpickl\w*|joblib\.load|dill\.loads?|"
+    r"marshal\.loads?|sympify|torch\.load)\b"
+    r"|yaml\.load\s*\((?![^)]*Safe)"          # yaml.load without a Safe loader
+    r"|[\w./-]+\.(?:pkl|pickle)\b"
+    r"|/(?:unpickle|deserialize|load[_-]model)\b")
+
+# A .pt/.pth/.ckpt checkpoint is a pickle archive; .safetensors deliberately is
+# not, so it is never a signal here.
+_CHECKPOINT_RE = re.compile(
+    r"(?i)\b(?:torch\.load|load_state_dict|from_pretrained)\b"
+    r"|pytorch_model\.bin"
+    r"|[\w./-]+\.(?:ckpt|pth)\b")
+
+_TRAINING_RE = re.compile(
+    r"(?i)\bfine[_-]?tun\w*|/v1/fine_tuning|adapter_config\.json|adapter_model"
+    r"|\bpeft\b|trainer_state\.json|training_args|/train(?:ing)?\b")
+
+
+def _ml_supply_chain(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """Tag the three ML supply-chain footholds visible in AI recon output.
+
+    Runs over tool lists, OpenAPI specs and model listings: the places where a
+    deserialization path, a loadable checkpoint or a training pipeline shows
+    itself by name. Each hit is an independent chain, so several may fire."""
+    text = output or ""
+    where = ctx.get("URL") or ctx.get("IP") or "?"
+    out: list[ExtractedFinding] = []
+
+    m = _PICKLE_RE.search(text)
+    if m:
+        out.append(ExtractedFinding(
+            "CWE-502", "Pickle deserialization surface exposed", "high",
+            f"{where} exposes an unpickling path ('{m.group(0)[:48]}') — crafted bytes "
+            "execute on load",
+            tag="pickle_endpoint"))
+
+    m = _CHECKPOINT_RE.search(text)
+    if m:
+        out.append(ExtractedFinding(
+            "CWE-502", "Model checkpoint loaded from disk (torch.load)", "high",
+            f"{where} loads a pickle-backed checkpoint ('{m.group(0)[:48]}') — poison the "
+            "file and the model server executes it",
+            tag="model_checkpoint_load"))
+
+    m = _TRAINING_RE.search(text)
+    if m:
+        out.append(ExtractedFinding(
+            "LLM03", "Training / fine-tuning pipeline reachable", "medium",
+            f"{where} exposes a training path ('{m.group(0)[:48]}') — dataset, LoRA adapter "
+            "or tokenizer poisoning",
+            tag="training_pipeline"))
+    return out
+
+
+# GitLab AI review / scanning pipeline. Both tags come out of the same recon
+# output (project + CI + runner listings), so one extractor emits either or both.
+_CODE_SCANNER_RE = re.compile(
+    r"(?i)\bpre-?receive\b|\bsemgrep\b|\bbandit\b|\bsast\b|secret[_-]detection"
+    r"|\bgitleaks\b|\btrufflehog\b|code[_-]quality|ai[_-]?scanner")
+
+_AI_REVIEW_RE = re.compile(
+    r"(?i)ai[_-]?(?:code[_-]?)?review|llm[_-]?review|gitlab[_ -]?duo|duo[_-]code[_-]review"
+    r"|review(?:er)?[_-]bot|\bcopilot[_-]review\b")
+
+
+def _gitlab_ai_pipeline(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """GitLab recon -> an AI code reviewer and/or an automated scanner gate.
+
+    Both are *guards*, and each has a documented bypass: a scanner that string-
+    matches is evaded by a direct API commit, an AI reviewer by zero-width
+    Unicode. Naming the guard is what unlocks those rules."""
+    text = output or ""
+    where = ctx.get("URL") or ctx.get("IP") or "?"
+    out: list[ExtractedFinding] = []
+
+    m = _CODE_SCANNER_RE.search(text)
+    if m:
+        out.append(ExtractedFinding(
+            "LLM05", "GitLab automated code scanner in the merge path", "medium",
+            f"{where} runs a scanner gate ('{m.group(0)[:40]}') — string-matching gates are "
+            "bypassed by a direct API commit",
+            tag="code_scanner"))
+
+    m = _AI_REVIEW_RE.search(text)
+    if m:
+        out.append(ExtractedFinding(
+            "LLM01", "GitLab AI code review in the merge path", "medium",
+            f"{where} routes merges through an AI reviewer ('{m.group(0)[:40]}') — an LLM "
+            "reviewer reads what the diff renders, not what it executes",
+            tag="ai_code_review"))
+    return out
+
+
+def _chain(*fns: _Extractor) -> _Extractor:
+    """Compose extractors so one action can feed several independent detectors.
+
+    `interpret_all` dispatches a single extractor per action id, so registering
+    a second detector for an action that already has one would silently replace
+    it. This composes instead."""
+    def run(output: str, ctx: dict) -> list[ExtractedFinding]:
+        found: list[ExtractedFinding] = []
+        for fn in fns:
+            res = fn(output, ctx)
+            if res is None:
+                continue
+            found.extend(res if isinstance(res, list) else [res])
+        return found
+    return run
+
+
 _SQL_ERROR_SIGNATURES = (
     "unrecognized token", "sql error", "sqlite3.", "sqlite_error",            # sqlite
     "you have an error in your sql syntax", "mysql_fetch", "mysqlsyntaxerror",  # mysql
@@ -492,8 +615,8 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "sqli_error_probe": _sqli_error,
     "probe_ollama_models": _ollama_models,
     "probe_ollama_version": _ollama_version,
-    "enumerate_models": _openai_models,
-    "mcp_tools_list": _mcp_tools,
+    "enumerate_models": _chain(_openai_models, _ml_supply_chain),
+    "mcp_tools_list": _chain(_mcp_tools, _ml_supply_chain),
     "jenkins_auth_check": _jenkins_api,
     "jenkins_oauth2proxy_bypass": _jenkins_proxy_bypass,
     "craft_tool_agency_abuse": _tool_call_success,
@@ -503,6 +626,14 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "enum4linux_ng": _enum4linux,
     "smbmap_shares": _smb_null,
     "probe_rag_upload_paths": _rag_upload,
+    # --- AI / ML supply chain (tool lists, API specs, GitLab recon) ---
+    "craft_tool_enumeration": _ml_supply_chain,
+    "probe_openapi_spec": _ml_supply_chain,
+    "gradio_api_enumerate": _ml_supply_chain,
+    "try_direct_generate": _ml_supply_chain,
+    "gitlab_public_repos": _gitlab_ai_pipeline,
+    "gitlab_version_cve": _gitlab_ai_pipeline,
+    "gitlab_runner_enum": _gitlab_ai_pipeline,
     "probe_imds_v1": _imds_creds,
     "enumerate_aws_ml": _imds_creds,
     "aws_iam_role_chain": _sagemaker_passrole,

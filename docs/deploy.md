@@ -1,6 +1,9 @@
 # Deploy — wiring Yhwach to Claude Code on Kali
 
-Yhwach is host-agnostic. It ships a strict operator persona and a JSON Autonomy Contract; whatever LLM host runs the judgment call, Yhwach dictates the reasoning frame. Two integration paths, from strongest to simplest.
+Yhwach is host-agnostic. It ships a strict operator persona and an Autonomy-Contract format the
+operator writes back in; Yhwach itself never calls a model — it emits the persona-framed handoff and
+the host LLM (Claude Code on Kali) does the reasoning. Whatever host runs it, Yhwach's frame shapes
+the judgment. Two integration paths, from strongest to simplest.
 
 ## Path A — Yhwach as an MCP server (recommended)
 

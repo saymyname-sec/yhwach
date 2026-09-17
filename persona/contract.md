@@ -1,6 +1,10 @@
 # Autonomy Contract — output schema reference
 
-Two representations, same content: the human-readable form the operator writes, and the JSON the engine parses. The engine tolerates the human form and extracts fields; the JSON form is what tests compare against.
+The shape the **operator** writes its judgment in — two representations, same content: a
+human-readable form and a JSON form. This is the operator's own discipline, not a format Yhwach
+parses or validates: the engine emits the `yhwach next --contract` handoff and reads results back
+through its typed CLI/MCP tools (`run`, `ingest`, `advance`, `proof`, `cred`, …). Keep the contract
+tight because *you* are the check on it.
 
 ## Human form
 
@@ -45,16 +49,17 @@ AUTONOMY:     proceed | propose | ask
 }
 ```
 
-## Validation
+## Self-check (operator discipline — not engine-enforced)
 
-- All fields required (except in CRAFT / INTERPRET variants below).
-- `hypotheses`: minimum 1 for CRAFT, minimum 2 for RANK.
-- `playbook_rule_id`: must match an entry in `playbooks/**/*.yaml`.
-- `autonomy`: enum-strict.
+- All fields present (except in the CRAFT / INTERPRET variants below).
+- `hypotheses`: at least 1 for CRAFT, at least 2 for RANK.
+- Every `playbook_rule_id` matches a real rule in `playbooks/**/*.yaml` — `yhwach next` lists the
+  candidate rule ids, so cite from those.
+- `autonomy` is one of proceed | propose | ask.
 
 ## CRAFT variant
 
-For a CRAFT call the response is minimal: `recommended.autonomous[0]` carries the payload (fenced or escaped). Other fields may be `""` / `[]`. Tests verify `recommended.autonomous[0]` non-empty and shape-appropriate for the target surface.
+For a CRAFT response the output is minimal: `recommended.autonomous[0]` carries the payload (fenced or escaped). Other fields may be `""` / `[]`.
 
 ## INTERPRET variant
 

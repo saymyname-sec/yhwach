@@ -120,12 +120,18 @@ HexStrike *runs* AD tools; Yhwach now *parses* their output and *chains* into AD
 - [x] Tests: run_action via a fake client (+ error path); execute_task through HexStrike extracts
       `smb_signing_off` from delegated netexec output.
 
-### Phase 5 — Judgment layer: align docs to reality  ✅ DECIDED (align, don't build)
-The engine is a read-only context handoff; the operator (Claude Code) does the reasoning. We are NOT
-building RANK/CRAFT/INTERPRET calls, contract validation, or persona/rules hashing.
-- [ ] Rewrite ARCHITECTURE / persona/contract / deploy so they describe the handoff that ships.
-- [ ] Drop or clearly mark the unused `event.persona_hash` / `rules_hash` columns and the
-      RANK/CRAFT/INTERPRET framing as "operator-side, not engine calls".
+### Phase 5 — Judgment layer: align docs to reality ✅ DONE (aligned, not built)
+The engine is a read-only context handoff; the operator (Claude Code) does the reasoning. We did
+NOT build RANK/CRAFT/INTERPRET calls, contract validation, or persona/rules hashing — the docs now
+say so.
+- [x] ARCHITECTURE: layers show a **Handoff** + operator-side Judgment (not engine LLM calls);
+      FSM section splits enforced predicates (looted/pivoted) from aspirational ones; the loop is
+      the real operator cycle; "Judgment shapes" are framed as operator discipline (with the one
+      deterministic INTERPRET half that is code); determinism section drops the unbuilt hashing/replay.
+- [x] persona/contract.md: reframed as the operator's own format + self-check, not engine-validated.
+- [x] docs/deploy.md: "Yhwach never calls a model" is stated up front.
+- [x] schema: `event.persona_hash`/`rules_hash` marked **reserved (not populated)**; the event
+      comment lists the kinds actually written.
 
 ### Phase 6 — Polish
 - [ ] Report v2: event-log timeline + inline screenshots + verbatim repro commands.

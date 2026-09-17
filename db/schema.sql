@@ -197,15 +197,18 @@ CREATE INDEX IF NOT EXISTS idx_tunnel_host ON tunnel(via_host_id);
 -- write-ups (attack chains, PoCs, evidence).
 
 -- ---------------------------------------------------------------------------
--- Event — append-only audit log. Drives the report and the replay/regression tests.
+-- Event — append-only audit log for the report/timeline. Kinds actually written
+-- today: ingest | enum | probe | stage | credential | proof | tunnel | note.
+-- (`persona_hash` / `rules_hash` are RESERVED for a future replay/regression
+-- story; the engine does not populate them yet — see ROADMAP Phase 6.)
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS event (
     id             INTEGER PRIMARY KEY,
     engagement_id  INTEGER NOT NULL REFERENCES engagement(id),
     ts             TEXT    NOT NULL,
-    kind           TEXT    NOT NULL,      -- ingest | next | craft | interpret | action_run | finding | proof | heartbeat | override
-    persona_hash   TEXT,                  -- content hash of persona at call time (for LLM events)
-    rules_hash     TEXT,                  -- content hash of playbooks at call time
+    kind           TEXT    NOT NULL,
+    persona_hash   TEXT,                  -- reserved (not populated yet)
+    rules_hash     TEXT,                  -- reserved (not populated yet)
     payload_json   TEXT    NOT NULL
 );
 

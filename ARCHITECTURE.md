@@ -7,24 +7,28 @@ Prose can't be queried. Yhwach makes the engagement queryable: a SQLite world mo
 ## Layers
 
 ```
-+-------------------------------------------------------------+
++-------------------------------------------------------------------+
 | Presentation    report . MCP server . status  (notebook -> Obsidian, operator) |
-+-------------------------------------------------------------+
-| Orchestration   the loop . autonomy gates (proceed/propose/ask) |
-+-------------------------------------------------------------+
-| Planning        rule engine . playbooks . EV ranker         |
-+-------------------------------------------------------------+
-| Judgment        LLM calls (RANK / CRAFT / INTERPRET)        |
-+-------------------------------------------------------------+
-| Execution       tool adapters (nmap, HexStrike MCP, msf MCP)|
-+-------------------------------------------------------------+
-| Ingestion       parsers -> typed observations               |
-+-------------------------------------------------------------+
-| Domain          SQLite world model + strict schemas         |
-+-------------------------------------------------------------+
++-------------------------------------------------------------------+
+| Handoff         context block (persona + state + candidates + commands) |
++-------------------------------------------------------------------+
+| Planning        rule engine . playbooks . EV ranker . autonomy tier |
++-------------------------------------------------------------------+
+| Judgment        the operator (host LLM) reasons over the handoff  |
++-------------------------------------------------------------------+
+| Execution       nmap . HexStrike (REST) . local subprocess        |
++-------------------------------------------------------------------+
+| Ingestion       parsers -> typed observations + chaining tags     |
++-------------------------------------------------------------------+
+| Domain          SQLite world model + strict schemas               |
++-------------------------------------------------------------------+
 ```
 
-Each layer is unit-testable in isolation.
+Each engine layer is unit-testable in isolation. **The Judgment layer is not
+Yhwach code** — Yhwach never calls a model. It emits the handoff (`yhwach next
+--contract`) and the operator (Claude Code on Kali) reasons over it and acts
+back through the CLI / MCP tools. The persona travels in the handoff so the
+reasoning frame is Yhwach's, not the host CLI's.
 
 ## Host state machine
 
@@ -32,46 +36,55 @@ Each layer is unit-testable in isolation.
 undiscovered -> scanned -> enumerated -> foothold -> looted -> pivoted -> done
 ```
 
-Each transition has an **entry predicate** (a SQL check) and an **exit action**. The engine refuses to advance a host until its predicate is met.
+Stage order is **monotonic** — the engine refuses to move a host backwards
+(except to `blocked`, and `advance --force` overrides). Two transitions carry an
+**enforced entry predicate** today:
 
-Examples:
+- `foothold -> looted`: refused without a `proof` row that has a screenshot
+  (`yhwach proof`).
+- `looted -> pivoted`: refused without a `tunnel` / reachable subnet via that
+  host (`yhwach pivot`).
+
+Other transitions are operator-driven (`yhwach advance`) — the richer predicates
+below are the design target, not yet enforced (Phase 6):
 
 - `scanned -> enumerated`: `has_full_tcp AND has_versions AND udp_top100_done`.
-- `foothold -> looted`: `screenshot_exists FOR host.proof_row AND creds_dumped_to_vault`.
-- `looted -> pivoted`: `ligolo_tunnel_up OR new_subnet_reachable`.
 
-Under-enumeration — the top failure mode in OSAI engagements — becomes a data invariant, not a habit.
+Under-enumeration — the top failure mode in OSAI engagements — is the invariant
+these predicates are meant to make structural.
 
-## The loop
+## The operator loop
 
-```python
-while engine.has_open_tasks():
-    task = planner.next()                    # deterministic EV rank from state
-    if task.autonomy == "proceed":           # read-only, recon
-        result = executor.run(task)
-    elif task.autonomy == "propose":         # exploitation
-        result = propose_and_run(task)       # emits Autonomy Contract, acts on go
-    else:                                    # ask
-        result = ask_operator(task)          # scope edges, destructive
-    observations = ingest(result)            # parsers -> typed rows
-    engine.apply(observations)               # world model advances
-    render.sync()                            # Obsidian + report
+Yhwach is not a headless runner; the operator drives it turn by turn. Each cycle:
+
+```text
+yhwach next --contract      # engine: emit the handoff (persona + state + candidates + commands)
+   -> operator (host LLM) reasons over it, picks the move
+yhwach run --task N --go    # engine: run read-only actions, extract findings + chaining tags
+   -> operator runs proposal/exploit steps by hand, writes the Obsidian note
+yhwach ingest / probe / advance / proof / pivot / cred   # feed results back
+yhwach plan                 # re-rank from the advanced world model
 ```
 
-## LLM call shapes
+Read-only recon runs itself; exploitation is render-only (Yhwach proposes, the
+operator executes). The `autonomy` tier on each task (proceed / propose / ask)
+tells the operator which is which.
 
-Three, and only three:
+## Judgment shapes (operator-side, not engine calls)
 
-- **RANK(state_slice, hypotheses) -> ordered_list_with_rationale**
-- **CRAFT(target_context, technique) -> structured_payload**
-- **INTERPRET(raw_output, expected_signals) -> typed_finding_or_null**
+The operator's reasoning takes three shapes, described by `persona/operator.md`
+and `persona/contract.md`:
 
-Every call:
+- **RANK(state slice, candidates) -> ordered list with rationale**
+- **CRAFT(target, technique) -> a concrete payload**
+- **INTERPRET(raw output, expected signals) -> a typed finding, or none**
 
-- receives Yhwach's persona as system prompt (see `persona/operator.md`)
-- receives only the SQL-selected slice of state relevant to the call
-- must return output matching the JSON contract (see `persona/contract.md`)
-- is logged to `event` with input hash + output for replay and regression testing
+These are the *operator's* contract, not typed calls Yhwach makes — Yhwach emits
+the handoff and reads back structured results through its CLI/MCP tools. The one
+piece that runs in the engine is the **deterministic half of INTERPRET**:
+`interpret.py` turns unambiguous tool output (an Ollama model list, a Kerberoast
+hash, `signing:False`) into `finding` rows + chaining tags with no model
+involved. Ambiguous judgment stays the operator's.
 
 ## Rules — playbooks as data
 
@@ -94,16 +107,17 @@ Knowledge is declarative YAML, not prose. Adding a technique = adding a rule.
 
 - **`technique_exhaustion`** — a technique that succeeds is marked consumed for the engagement; the ranker won't resurface it (OSAI labs do not reuse infra flaws twice).
 - **`credential_reuse`** — the one thing that is *never* exhausted; every recovered credential stays in play against every host in scope.
-- **`high_ev_leads`** — Chrome DPAPI, KeePass, unattend.xml, PS history: seen -> auto-P0.
 - **`lore_denylist`** — known OffSec dev artifacts (cloudbase-init and friends) tagged and filtered from ranker output.
+- **`findings_include` chaining** — a finding carries a `tag` (set by the interpret extractors / ingest parsers); a rule with `findings_include: <tag>` fires only once a host carries it. This is how post-foothold + AD chains (kerberoast, DCSync, ADCS, chrome/DPAPI loot) light up.
+- (Declared in `_primitives.yaml`, not yet code: `high_ev_leads` auto-P0 for Chrome DPAPI / KeePass / unattend.xml, and the OPSEC invariants — Phase 6.)
 - **`engagement_notebook`** — reaching an objective always takes a note (Kapi's rule). The notebook is an **Obsidian vault**, written by the operator through the Obsidian MCP in full detail (commands, payloads, evidence), and it is the single source of truth for write-ups. Yhwach's DB is the queryable world model and never stores notes; `advance`/`cred` print a reminder, the persona (`persona/notebook.md`) carries the structure. See [persona/notebook.md](persona/notebook.md).
 
 ## Independence from host CLI
 
-Yhwach's persona is a strict system prompt bundled with the engine (`persona/operator.md`). Whatever CLI, host, or client executes the LLM call, Yhwach's frame overrides the host's own personality. The operator persona is the deterministic contract; the host is just a shell.
+Yhwach's persona is a strict system prompt bundled with the engine (`persona/operator.md`) and travels inside the `yhwach next --contract` handoff. Whatever CLI, host, or client the operator runs on, Yhwach's frame is what shapes the reasoning — the host is just a shell.
 
-Determinism knobs:
+Determinism:
 
-- Persona file is content-hashed. A persona change flags all determinism tests for rebaseline.
-- Playbook rules are content-hashed. Changing a rule flags dependent fixtures.
-- LLM call inputs are hashed. Same-hash call may replay from cache during test runs.
+- `yhwach persona` prints the exact persona in effect plus its SHA-256 — proof of which frame shaped a judgment.
+- The planner is fully deterministic (no model): the golden fixtures (`yhwach selftest`) lock its ranking. Change a rule or the persona and rebaseline the fixtures by hand.
+- Note: the `event` table reserves `persona_hash` / `rules_hash` columns and a replay/regression story, but the engine does not populate or replay them today — that's a future item, not a shipped guarantee.

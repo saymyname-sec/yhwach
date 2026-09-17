@@ -2,16 +2,16 @@
 
 ## Status
 
-**Done and validated on a live challenge lab — Iron Crown (234 tests):**
+**Done and validated on a live challenge lab — Iron Crown (241 tests):**
 - ✅ World model (SQLite, 12 tables) + nmap ingestion + host FSM
 - ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
 - ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
   message brokers)
-- ✅ Deterministic planner: 50 YAML technique rules → EV-ranked tasks, AI-first tiering
+- ✅ Deterministic planner: 55 YAML technique rules → EV-ranked tasks, AI-first tiering
       (AI, traditional, cloud/k8s, broker, supply-chain, post-exploit); matches surface / auth /
       product / os / `findings_include` (post-foothold chaining — all 50 rules now supported)
 - ✅ Cross-cutting primitives: technique exhaustion + credential reuse + lore denylist
-- ✅ Actions layer: 98 registered actions (emits → concrete commands); read-only runs
+- ✅ Actions layer: 103 registered actions (emits → concrete commands); read-only runs
       (untrusted substituted values are shell-guarded), exploitation render-only
 - ✅ Deterministic finding extraction from action output (incl. error-based SQLi)
 - ✅ Operator handoff: `next --contract` (persona + state + candidates + commands)
@@ -82,23 +82,26 @@ ingestion + rules, which moves to **Phase 4a** (AD) and a later msf follow-up.
       Phase 4a), **msfconsole MCP** exploit/session hand-off, richer HexStrike tool ingestion
       (see Phase 4a).
 
-### Phase 4a — AD enumeration & chaining (the real enumeration gap)
-HexStrike can *run* AD tools (netexec / enum4linux-ng / ldapsearch / smbmap / impacket) and the
-playbooks already emit some, but Yhwach has no **parsers** for their output and no **AD attack
-rules**, so nothing chains. BloodHound provides the path *reasoning* HexStrike structurally can't.
-- [ ] **AD output parsers** (like the PEAS parser): netexec / ldapsearch / enum4linux / smbmap →
-      `finding` + `credential` rows with chaining tags (`kerberoastable`, `asreproastable`,
-      `smb_signing_off`, `ldap_anon`, `null_session`, `gpp_password`, `adcs_esc1`, …).
-- [ ] **AD attack playbook rules** gated via `findings_include`: kerberoast, AS-REP roast,
-      password spray, ADCS ESC1–ESC16 (certipy), unconstrained/constrained delegation, DCSync /
-      secretsdump, `kerberos:88` surface rule (currently detected but no rule acts on it).
-- [ ] **BloodHound ingestion**: operator runs BloodHound MCP collection/queries; Yhwach parses the
-      path output (e.g. shortest-path-to-DA, ACL abuse) into findings/tasks so the planner ranks the
-      next AD move. This is where "BloodHound MCP collaboration" actually lands.
-- [ ] **Deepen HexStrike helpers**: typed `netexec`/`nuclei`/`ldapsearch` calls + recon-dir capture,
-      so AD enum runs through `yhwach enum`/`run` and feeds the parsers above.
-- **Done when:** an SMB/LDAP/kerberos enumeration ingest tags the host, and the planner then ranks a
-      concrete AD attack (e.g. kerberoast) — the same findings_include chain we shipped, applied to AD.
+### Phase 4a — AD enumeration & chaining ✅ tracks 1–2 DONE
+HexStrike *runs* AD tools; Yhwach now *parses* their output and *chains* into AD attacks.
+- [x] **AD output parsers** (interpret.py, multi-finding via `interpret_all`): netexec/ldapsearch/
+      enum4linux/smbmap → findings with chaining tags `smb_signing_off`, `null_session`,
+      `ldap_anon`, `domain_users`, `kerberoastable`, `asreproastable`.
+- [x] **AD attack rules** (`playbooks/ad.yaml`) gated via `findings_include`: `kerberos_user_enum`
+      (fills the port-88 gap), `ldap_anon_dump`, `asrep_roast`, `smb_ntlm_relay`, `kerberoast`
+      (host-scoped) — with impacket/kerbrute/ntlmrelayx actions.
+- [x] Tests: extractors (multi-signal SMB, ldap_anon, roast hashes, domain_users) + planner chains
+      (ldap_anon → ldap_anon_dump; kerberoastable → kerberoast). 241 green.
+- **Remaining (Phase 4b):**
+  - [ ] **BloodHound ingestion**: operator runs the BloodHound MCP; Yhwach parses path output
+        (shortest-path-to-DA, ACL abuse) into findings/tasks so the planner ranks the next AD move.
+  - [ ] **ADCS (certipy) ESC1–ESC16** rules + a `adcs_esc*` tag from a certipy parser.
+  - [ ] **Creds-aware kerberoast**: currently `kerberoast` is tag-gated; wire it to fire when the
+        vault has domain creds + an LDAP/kerberos surface, not only on a captured-hash tag.
+  - [ ] **Deepen HexStrike helpers**: typed `netexec`/`ldapsearch` calls + recon capture so AD enum
+        flows through `yhwach enum`/`run` into the parsers above (today the commands render/run but
+        the operator wires the output back).
+  - [ ] **DCSync / secretsdump** post-ex chain + GPP-password tag.
 
 ### Phase 5 — Judgment layer: align docs to reality  ✅ DECIDED (align, don't build)
 The engine is a read-only context handoff; the operator (Claude Code) does the reasoning. We are NOT

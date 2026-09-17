@@ -1,0 +1,87 @@
+# Yhwach — Active Directory playbook. Post-enumeration attack chains that fire
+# off findings tagged by the AD parsers (interpret.py): ldap_anon, null_session,
+# smb_signing_off, domain_users, asreproastable, kerberoastable.
+#
+# All class:traditional (below AI hosts by doctrine). The enumeration that SETS
+# these tags is in playbooks/traditional.yaml (smb/ldap rules); these rules are
+# the follow-on attacks the planner ranks once the tag exists.
+
+# Kerberos on a DC (port 88) — first-contact user enumeration. Detected by the
+# probe but nothing acted on it before; kerbrute validates a user list with no
+# creds, which then unlocks AS-REP roast (domain_users).
+- id: kerberos_user_enum
+  when: { surface: kerberos }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: kerbrute_userenum
+  maps: [T1589.002]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . kerberos user enumeration (kerbrute)'
+  authorized_only: true
+
+# Anonymous LDAP bind confirmed -> dump users/groups (feeds domain_users).
+- id: ldap_anon_dump
+  when: { surface: ldap, findings_include: ldap_anon }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: ldap_anon_dump
+  maps: [T1087.002]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . anonymous LDAP -> users/groups'
+  authorized_only: true
+
+# A domain user list exists -> AS-REP roast (needs no creds).
+- id: asrep_roast
+  when: { surface: kerberos, findings_include: domain_users }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: asreproast_users
+  maps: [T1558.004]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'hacktricks . AS-REP roasting (GetNPUsers, no preauth)'
+  technique: asrep_roast
+  authorized_only: true
+
+# SMB signing not required -> NTLM relay (pair with a coercion).
+- id: smb_ntlm_relay
+  when: { surface: smb, findings_include: smb_signing_off }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: ntlmrelay_setup
+  maps: [T1557.001]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'hacktricks . NTLM relay to SMB (signing disabled)'
+  technique: ntlm_relay
+  authorized_only: true
+
+# Kerberoastable SPN captured -> crack the TGS (host-scoped: no surface needed).
+- id: kerberoast
+  when: { findings_include: kerberoastable }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: kerberoast_getuserspns
+  maps: [T1558.003]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'hacktricks . Kerberoasting (GetUserSPNs)'
+  technique: kerberoast
+  authorized_only: true

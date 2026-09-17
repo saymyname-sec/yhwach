@@ -100,6 +100,30 @@ def test_findings_include_gates_surface_rule(tmp_db: Path) -> None:
     assert tasks[0]["playbook_rule_id"] == "rag_adv"
 
 
+def test_ad_ldap_anon_chain(tmp_db: Path) -> None:
+    """An `ldap_anon` finding unlocks the ldap_anon_dump attack rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="ldap")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "ldap_anon")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "ldap_anon_dump" in ids
+
+
+def test_ad_kerberoast_host_scoped(tmp_db: Path) -> None:
+    """`kerberoastable` (no surface) fires the host-scoped kerberoast rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="smb")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "kerberoastable")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "kerberoast" in ids
+
+
 def test_findings_include_only_rule_is_host_scoped(tmp_db: Path) -> None:
     """A findings_include-only rule (no surface) fires on the host, surface-less."""
     eng_id = _seed_surface(tmp_db, kind="chatbot")

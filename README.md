@@ -26,7 +26,7 @@ The persona travels with the engine. Whatever CLI, host, or client executes the 
 **Working end-to-end, through post-exploitation.** The deterministic engine runs from an
 nmap scan to a persona-framed, doctrine-ranked operator brief with concrete commands, then
 carries the engagement through foothold, loot, and pivot — and has been validated against a
-live challenge lab (Iron Crown). 234 tests, green on Linux and Windows.
+live challenge lab (Iron Crown). 241 tests, green on Linux and Windows.
 
 What works today:
 
@@ -40,13 +40,14 @@ What works today:
 - **Surface detection** — AI (Ollama, OpenAI-compat, chatbot, MCP, Gradio, A2A, vector DB) **and**
   traditional (Jenkins, GitLab, SMB, LDAP, MSSQL, WinRM, SSH, web portal, message brokers), via
   live probes
-- **Planner** — 50 declarative YAML technique rules across AI, traditional, cloud/k8s,
-  message-broker, supply-chain, and post-exploit surfaces, matched and EV-ranked with
-  **AI-first tiering**; supports surface, auth, product, os, and **`findings_include`**
-  chaining (a rule fires once the host carries the required finding tag)
+- **Planner** — 55 declarative YAML technique rules across AI, traditional, cloud/k8s,
+  message-broker, supply-chain, post-exploit, and **Active Directory** (kerberoast / AS-REP /
+  NTLM-relay / LDAP) surfaces, matched and EV-ranked with **AI-first tiering**; supports surface,
+  auth, product, os, and **`findings_include`** chaining (a rule fires once the host carries the
+  required finding tag)
 - **Primitives** — technique exhaustion (no repeats), credential reuse (never exhausted), lore
   denylist (OffSec dev-artifact filtering)
-- **Actions layer** — 98 registered actions (`yhwach actions`) turn every playbook step into a
+- **Actions layer** — 103 registered actions (`yhwach actions`) turn every playbook step into a
   concrete command; read-only recon runs itself (with untrusted values shell-guarded),
   exploitation is render-only for the operator
 - **Findings** — deterministic extraction from action output (unambiguous only; the rest is
@@ -87,7 +88,7 @@ Not for unauthorized targets. Contributors: submit rules only for authorized-tar
 git clone https://github.com/saymyname-sec/yhwach ~/yhwach && cd ~/yhwach
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q            # 234 tests
+pytest -q            # 241 tests
 yhwach selftest      # golden fixtures
 
 # Drive an engagement (authorized targets only):

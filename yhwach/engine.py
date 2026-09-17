@@ -11,7 +11,7 @@ from pathlib import Path
 
 from yhwach import db as yhdb
 from yhwach.actions import context_from_surface, get_action, render_action, run_action
-from yhwach.interpret import interpret_output
+from yhwach.interpret import interpret_all
 from yhwach.playbooks import default_playbook_dir, load_rules
 from yhwach.primitives import check_denylist, load_denylist, record_denylist_hit
 
@@ -109,17 +109,17 @@ def execute_task(
                 out.append(f"    -> rc={res['returncode']}  loot={res.get('loot_file', '-')}")
                 if head.strip():
                     out.append("    | " + head.replace("\n", "\n    | "))
-                found = interpret_output(action.id, res.get("output", ""), ctx)
-                if found is not None:
+                for found in interpret_all(action.id, res.get("output", ""), ctx):
                     with yhdb.transaction(path) as c2:
                         _, created = yhdb.add_finding(
                             c2, row["host_id"], row["surface_id"], found.cls,
                             found.title, found.severity, found.evidence, row["rule_id"],
                             tag=found.tag,
                         )
+                    tagnote = f" [tag:{found.tag}]" if found.tag else ""
                     out.append(
                         f"    [finding] {found.severity.upper()} {found.cls} "
-                        f"{found.title} ({'new' if created else 'updated'})"
+                        f"{found.title}{tagnote} ({'new' if created else 'updated'})"
                     )
                 artifact = check_denylist(res.get("output", ""), denylist)
                 if artifact is not None:

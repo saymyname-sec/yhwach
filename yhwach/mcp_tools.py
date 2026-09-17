@@ -182,8 +182,9 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             h, s = insert_hosts(conn, eid, parse_nmap_xml(file))
             yhdb.log_event(conn, eid, "ingest", {"kind": "nmap", "hosts": h, "services": s})
             return f"nmap ingested: {h} hosts, {s} services"
-        if kind not in ("linpeas", "winpeas", "bloodhound"):
-            raise ValueError(f"unknown kind '{kind}' (use nmap|linpeas|winpeas|bloodhound)")
+        if kind not in ("linpeas", "winpeas", "bloodhound", "certipy"):
+            raise ValueError(
+                f"unknown kind '{kind}' (use nmap|linpeas|winpeas|bloodhound|certipy)")
         if not host:
             raise ValueError(f"host is required for {kind}")
         hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
@@ -195,6 +196,9 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
         if kind == "bloodhound":
             from yhwach.parsers.bloodhound import parse_bloodhound
             found = parse_bloodhound(text)
+        elif kind == "certipy":
+            from yhwach.parsers.adcs import parse_certipy
+            found = parse_certipy(text)
         else:
             from yhwach.parsers.peas import parse_peas
             found = parse_peas(text, kind)

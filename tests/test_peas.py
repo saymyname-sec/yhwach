@@ -63,7 +63,9 @@ def test_winpeas_unquoted_service() -> None:
 
 def test_winpeas_gpp_cpassword() -> None:
     text = "Found Groups.xml with cpassword=abcdef"
-    assert "GPP cpassword recoverable" in _titles(parse_winpeas(text))
+    f = parse_winpeas(text)
+    assert "GPP cpassword recoverable" in _titles(f)
+    assert _tag_for(f, "GPP cpassword") == "gpp_password"
 
 
 def _tag_for(findings, title_prefix):

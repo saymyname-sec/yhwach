@@ -84,11 +84,12 @@ def engage(lab: str, scope: str, domain: str | None, dc_ip: str | None,
 @main.command()
 @click.argument("file", type=click.Path(exists=True, dir_okay=False))
 @click.option("--lab", required=True, help="Lab name (must exist).")
-@click.option("--kind", type=click.Choice(["nmap", "linpeas", "winpeas", "bloodhound"]),
+@click.option("--kind",
+              type=click.Choice(["nmap", "linpeas", "winpeas", "bloodhound", "certipy"]),
               default="nmap", help="Parser kind.")
 @click.option("--host", "host_ip", default=None,
-              help="Host IP (required for linpeas/winpeas/bloodhound — findings are host-scoped; "
-                   "for bloodhound use the DC).")
+              help="Host IP (required for linpeas/winpeas/bloodhound/certipy — findings are "
+                   "host-scoped; for bloodhound/certipy use the DC or CA).")
 @click.option("--db", "db_path", default=None, type=click.Path(),
               help="Override DB path.")
 def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | None) -> None:
@@ -129,6 +130,10 @@ def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | N
         if kind == "bloodhound":
             from yhwach.parsers.bloodhound import parse_bloodhound
             found = parse_bloodhound(text)
+            advanced_note = ""
+        elif kind == "certipy":
+            from yhwach.parsers.adcs import parse_certipy
+            found = parse_certipy(text)
             advanced_note = ""
         else:
             from yhwach.parsers.peas import parse_peas

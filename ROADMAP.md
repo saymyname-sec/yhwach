@@ -2,16 +2,16 @@
 
 ## Status
 
-**Done and validated on a live challenge lab — Iron Crown (246 tests):**
+**Done and validated on a live challenge lab — Iron Crown (252 tests):**
 - ✅ World model (SQLite, 12 tables) + nmap ingestion + host FSM
 - ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
 - ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
   message brokers)
-- ✅ Deterministic planner: 57 YAML technique rules → EV-ranked tasks, AI-first tiering
+- ✅ Deterministic planner: 60 YAML technique rules → EV-ranked tasks, AI-first tiering
       (AI, traditional, cloud/k8s, broker, supply-chain, post-exploit); matches surface / auth /
       product / os / `findings_include` (post-foothold chaining — every rule is matcher-supported)
 - ✅ Cross-cutting primitives: technique exhaustion + credential reuse + lore denylist
-- ✅ Actions layer: 105 registered actions (emits → concrete commands); read-only runs
+- ✅ Actions layer: 107 registered actions (emits → concrete commands); read-only runs
       (untrusted substituted values are shell-guarded), exploitation render-only
 - ✅ Deterministic finding extraction from action output (incl. error-based SQLi)
 - ✅ Operator handoff: `next --contract` (persona + state + candidates + commands)
@@ -101,14 +101,19 @@ HexStrike *runs* AD tools; Yhwach now *parses* their output and *chains* into AD
 - [x] **DCSync + unconstrained-delegation rules** (`playbooks/ad.yaml`): `dcsync` → secretsdump,
       `unconstrained_delegation_abuse` → coerce + TGT capture. BloodHound tags also light up the
       existing kerberoast / AS-REP rules. Tests: parser (facts + SharpHound) + ingest→attack chain.
-- **Remaining (Phase 4c):**
-  - [ ] **ADCS (certipy) ESC1–ESC16** rules + an `adcs_esc*` tag from a certipy parser.
-  - [ ] **Creds-aware kerberoast**: fire when the vault has domain creds + an LDAP/kerberos surface,
-        not only on a captured-hash tag.
-  - [ ] **Deepen HexStrike helpers**: typed `netexec`/`ldapsearch` calls + recon capture so AD enum
-        output flows back through `yhwach enum`/`run` into the parsers automatically (today the
-        commands render/run and the operator wires the output back via `ingest`).
-  - [ ] **GPP-password tag** from the winPEAS/enum parser (rule already exists via the tag map).
+### Phase 4c — ADCS + creds-aware chaining ✅ DONE
+- [x] **ADCS (certipy)**: `yhwach ingest --kind certipy` + parsers/adcs.py reads certipy's
+      `-vulnerable -json` report → `adcs_vuln` tag; the `adcs_esc_abuse` rule chains to a certipy
+      request. High-impact ESCs (1/3/4/6/8/9/11/15) rank critical.
+- [x] **Creds-aware kerberoast**: new planner `vault` when-key (`vault: nonempty` matches once the
+      engagement has credentials); `kerberoast_with_creds` (surface: ldap + vault) fires from held
+      creds, complementing the tag-gated `kerberoast`.
+- [x] **GPP-password tag**: the winPEAS parser now tags `gpp_password` → the `gpp_decrypt` rule.
+- [x] Tests: certipy parser + ingest→adcs_esc_abuse chain; vault-gated rule needs creds; gpp chain.
+- **Remaining (Phase 4d, optional):** deepen HexStrike helpers — typed `netexec`/`ldapsearch`
+      calls + recon capture so AD enum output flows back through `yhwach enum`/`run` into the
+      parsers automatically (today the commands render/run via `yhwach run --go` locally, or the
+      operator wires HexStrike output back via `ingest`).
 
 ### Phase 5 — Judgment layer: align docs to reality  ✅ DECIDED (align, don't build)
 The engine is a read-only context handoff; the operator (Claude Code) does the reasoning. We are NOT

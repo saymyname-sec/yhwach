@@ -89,7 +89,7 @@ def parse_winpeas(text: str) -> list[ExtractedFinding]:
     if re.search(r"cpassword", text, re.I):
         out.append(ExtractedFinding(
             "CWE-256", "GPP cpassword recoverable", "high",
-            "decrypt with gpp-decrypt for domain creds"))
+            "decrypt with gpp-decrypt for domain creds", tag="gpp_password"))
 
     if re.search(r"DefaultPassword\s*:\s*\S+|AutoLogon", text):
         out.append(ExtractedFinding(

@@ -124,6 +124,35 @@ def test_ad_kerberoast_host_scoped(tmp_db: Path) -> None:
     assert "kerberoast" in ids
 
 
+def test_vault_gated_rule_needs_credentials(tmp_db: Path) -> None:
+    """`kerberoast_with_creds` (surface: ldap, vault: nonempty) fires only once the
+    vault holds a credential."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="ldap")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "kerberoast_with_creds" not in ids          # empty vault
+
+    with yhdb.transaction(tmp_db) as conn:
+        yhdb.add_credential(conn, eng, "admin", "P@ss", "password", "dump")
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "kerberoast_with_creds" in ids              # creds present
+
+
+def test_gpp_password_chain(tmp_db: Path) -> None:
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="smb")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "gpp_password")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "gpp_decrypt" in ids
+
+
 def test_findings_include_only_rule_is_host_scoped(tmp_db: Path) -> None:
     """A findings_include-only rule (no surface) fires on the host, surface-less."""
     eng_id = _seed_surface(tmp_db, kind="chatbot")

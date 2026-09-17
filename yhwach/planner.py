@@ -1,15 +1,16 @@
 """Deterministic planner: match playbook rules against the world model and
 populate the task queue with EV-scored candidate actions. No LLM in this layer.
 
-Supported `when` keys: surface, auth, product, os, findings_include. A rule that
-names a `surface` produces surface-scoped tasks; a rule with only
+Supported `when` keys: surface, auth, product, os, findings_include, vault. A rule
+that names a `surface` produces surface-scoped tasks; a rule with only
 `findings_include` (no surface) produces finding-gated, host-scoped tasks. Any
 other key is unsupported: the rule is skipped and reported so forward-compatible
 rules can live in the playbooks without breaking the matcher.
 
 `findings_include: <tag>` matches only when the target host has an open finding
 carrying that `tag` (set by the interpret extractors / ingest) — this is the
-post-foothold chaining mechanism.
+post-foothold chaining mechanism. `vault: nonempty` matches only when the
+engagement has recovered credentials (creds-aware rules, e.g. kerberoast).
 """
 from __future__ import annotations
 
@@ -20,7 +21,7 @@ from datetime import UTC, datetime
 from yhwach.playbooks import Rule
 from yhwach.primitives import consumed_techniques, denylisted_host_ids
 
-SUPPORTED_WHEN_KEYS = {"surface", "auth", "product", "os", "findings_include"}
+SUPPORTED_WHEN_KEYS = {"surface", "auth", "product", "os", "findings_include", "vault"}
 
 
 @dataclass
@@ -128,6 +129,8 @@ def _matching_surfaces(
             "AND f.tag = ? AND f.status = 'open')"
         )
         params.append(when["findings_include"])
+    if "vault" in when:  # `vault: nonempty` — the engagement has recovered credentials
+        clauses.append("EXISTS (SELECT 1 FROM credential c WHERE c.engagement_id = h.engagement_id)")
 
     sql = (
         "SELECT s.id AS surface_id, s.host_id AS host_id, s.kind AS kind "
@@ -159,6 +162,8 @@ def _matching_hosts(
         "AND f.tag = ? AND f.status = 'open')"
     )
     params.append(when["findings_include"])
+    if "vault" in when:
+        clauses.append("EXISTS (SELECT 1 FROM credential c WHERE c.engagement_id = h.engagement_id)")
     sql = f"SELECT h.id AS host_id FROM host h WHERE {' AND '.join(clauses)}"
     return [{"surface_id": None, "host_id": r["host_id"], "kind": None}
             for r in conn.execute(sql, params).fetchall()]

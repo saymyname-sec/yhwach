@@ -119,3 +119,53 @@
   source: 'bloodhound . unconstrained delegation -> coerce + TGT capture'
   technique: unconstrained_delegation
   authorized_only: true
+
+# --- Phase 4c: ADCS, GPP, creds-aware kerberoast ---
+
+# certipy flagged a vulnerable template (adcs_vuln) -> request a priv cert (host-scoped: the CA/DC).
+- id: adcs_esc_abuse
+  when: { findings_include: adcs_vuln }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: certipy_request
+  maps: [T1649]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'certipy . ADCS ESC template abuse -> cert as a privileged UPN'
+  technique: adcs_abuse
+  authorized_only: true
+
+# GPP cpassword recovered (SYSVOL Groups.xml) -> decrypt with the public AES key.
+- id: gpp_decrypt
+  when: { findings_include: gpp_password }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: gpp_decrypt
+  maps: [T1552.006]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'hacktricks . GPP cpassword (public AES key)'
+  authorized_only: true
+
+# We hold domain creds and there is an LDAP/DC surface -> kerberoast with creds
+# (no captured-hash tag required; complements the tag-gated `kerberoast` rule).
+- id: kerberoast_with_creds
+  when: { surface: ldap, vault: nonempty }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: kerberoast_getuserspns
+  maps: [T1558.003]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'hacktricks . Kerberoasting with valid domain creds (GetUserSPNs)'
+  technique: kerberoast
+  authorized_only: true

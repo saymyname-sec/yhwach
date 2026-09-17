@@ -65,6 +65,7 @@
     - action: craft_system_prompt_leak
     - action: craft_tool_enumeration
     - action: craft_debug_mode_bypass
+    - action: craft_ssti_probe
   maps: [LLM01, LLM07]
   points: 15
   risk: read_only
@@ -219,6 +220,25 @@
   routes: /osai-mcp-attack
   source: 'osai/07 . MCP tool descriptions are prompt-injection vectors for consuming LLMs'
   technique: mcp_attack
+  authorized_only: true
+
+# The SSTI reflection probe (X{{7*7}}X -> X49X) tagged the host jinja2_template.
+# Direct polyglot RCE against a render/template field or an overwritable skill
+# template (Goose skills hub / GitLab-Duo workflows). Host-scoped — the renderer
+# is confirmed, so exploit regardless of how the surface was classified.
+- id: jinja2_ssti_rce
+  when: { findings_include: jinja2_template }
+  class: ai
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: craft_jinja2_ssti_rce
+  maps: [LLM01, CWE-1336]
+  points: 15
+  risk: propose
+  routes: /osai-owasp
+  source: 'double_hellix . cycler.__init__.__globals__.os.popen SSTI polyglot (Goose skills / GitLab Duo)'
+  technique: jinja2_ssti
   authorized_only: true
 
 - id: jinja2_ssti_ai_ticketing

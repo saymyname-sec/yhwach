@@ -60,6 +60,17 @@ def test_bloodhound_facts_incl_unknown_edge() -> None:
     assert "some_new_edge_type" in tags   # forward-compatible
 
 
+def test_ssti_reflection_tags_jinja2() -> None:
+    fs = interpret_all("craft_ssti_probe", _read("ssti_reflection.json"),
+                       {"URL": "http://10.0.0.105"})
+    assert fs and fs[0].tag == "jinja2_template" and fs[0].cls == "LLM01"
+
+
+def test_ssti_probe_literal_echo_is_no_finding() -> None:
+    # An app that echoes the payload without evaluating it must NOT be tagged.
+    assert not interpret_all("craft_ssti_probe", '{"rendered":"X{{7*7}}X"}', {})
+
+
 def test_langflow_exec_probe_tags_host() -> None:
     fs = interpret_all("probe_langflow_exec", _read("langflow_exec_probe.txt"),
                        {"URL": "http://10.0.0.30"})

@@ -70,6 +70,26 @@
   source: 'shadow-supply . Chain 4: direct API commits bypass pre-receive AI code scanner'
   authorized_only: true
 
+# A model server that auto-pulls checkpoints and torch.load()s them -> a poisoned
+# .pt checkpoint pickle-executes on load (Double_Hellix modelsvr01). The
+# model_checkpoint_load tag is set from the RAG "answer key" / recon that reveals
+# the refresh-from-registry pattern (like the pickle_endpoint / training_pipeline
+# tags, it is operator/context-set, not auto-extracted).
+- id: model_checkpoint_pickle_rce
+  when: { findings_include: model_checkpoint_load }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: craft_torch_checkpoint_pickle
+  maps: [LLM03, CWE-502]
+  points: 15
+  risk: propose
+  routes: /osai-supplychain
+  source: 'double_hellix . poisoned .pt checkpoint -> torch.load pickle RCE on the model server'
+  technique: model_pickle
+  authorized_only: true
+
 - id: training_pipeline_poisoning
   when: { surface: chatbot, findings_include: training_pipeline }
   class: ai

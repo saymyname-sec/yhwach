@@ -41,6 +41,8 @@ _KIND_MAP: dict[str, tuple[str, str, str]] = {
     "no_smb_signing": ("T1557.001", "medium", "SMB signing not required (relay target)"),
     # Domain/forest trust (map_domain_trusts) -> SID-history / inter-realm forge.
     "domain_trust": ("T1482", "high", "Domain/forest trust"),
+    # Write/link control over a GPO -> push a scheduled task / local-admin right.
+    "gpo_control": ("T1484.001", "high", "Controllable GPO (write / link edit)"),
 }
 
 

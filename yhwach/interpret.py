@@ -257,6 +257,17 @@ def _desc_password(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _gpo_control(output: str, ctx: dict) -> ExtractedFinding | None:
+    """gpohound flagging a writable/controllable GPO -> tag gpo_control."""
+    if re.search(r"(?i)\b(writegplink|writedacl|genericwrite|genericall|owns|writable)\b", output) \
+            and re.search(r"(?i)gpo|group policy", output):
+        return ExtractedFinding(
+            "T1484.001", "Controllable GPO", "high",
+            f"{ctx.get('IP','?')} has a GPO you can edit — push a task / local-admin right",
+            tag="gpo_control")
+    return None
+
+
 def _domain_trust(output: str, ctx: dict) -> ExtractedFinding | None:
     """A domain/forest trust in the enum output -> tag domain_trust."""
     if re.search(r"(?i)parent[\s_-]?child|tree[\s_-]?root|forest|external|bidirectional|<->", output):
@@ -512,6 +523,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "ldap_find_constrained_delegation": _constrained_deleg,
     "nxc_badsuccessor_check": _badsuccessor,
     "enumerate_domain_trusts": _domain_trust,
+    "gpohound_enum": _gpo_control,
     "netexec_get_desc_users": _desc_password,
     "netexec_laps": _laps,
     "asreproast_users": _kerberos_roast,

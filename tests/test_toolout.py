@@ -196,6 +196,11 @@ def test_ollama_version_fixture_is_vulnerable() -> None:
     assert fs and fs[0].tag == "ollama_probllama" and fs[0].cls == "CVE-2024-37032"
 
 
+def test_gpohound_control_tag() -> None:
+    fs = interpret_all("gpohound_enum", _read("gpohound_analysis.txt"), {"IP": "10.10.10.10"})
+    assert fs and fs[0].tag == "gpo_control"
+
+
 def test_enum_trusts_tag() -> None:
     fs = interpret_all("enumerate_domain_trusts", _read("nxc_enum_trusts.txt"), {"IP": "10.10.10.10"})
     assert fs and fs[0].tag == "domain_trust"

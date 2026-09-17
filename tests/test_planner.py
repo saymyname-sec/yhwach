@@ -548,6 +548,23 @@ def test_model_checkpoint_pickle_chain(tmp_db: Path) -> None:
     assert "model_checkpoint_pickle_rce" in ids
 
 
+def test_gpo_abuse_chain(tmp_db: Path) -> None:
+    """LDAP+cred offers GPO enumeration; a gpo_control finding unlocks GPO abuse."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="ldap")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        yhdb.add_credential(conn, eng, "svc", "P@ss", "password", "dump")
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 80)]
+    assert "ldap_gpo_enum" in ids
+    _add_finding(tmp_db, eng, "gpo_control")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 80)]
+    assert "gpo_abuse" in ids
+
+
 def test_gpp_password_chain(tmp_db: Path) -> None:
     from yhwach.playbooks import default_playbook_dir, load_rules
     eng = _seed_surface(tmp_db, kind="smb")

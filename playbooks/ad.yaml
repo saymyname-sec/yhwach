@@ -285,6 +285,38 @@
   technique: adcs_abuse
   authorized_only: true
 
+# We hold a domain cred -> inventory GPOs and flag editable ones.
+- id: ldap_gpo_enum
+  when: { surface: ldap, vault: nonempty }
+  class: traditional
+  likelihood: L
+  time_cost: med
+  emits:
+    - action: gpohound_enum
+  maps: [T1615]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . GPO enumeration (gpohound analysis --enrich)'
+  authorized_only: true
+
+# An editable GPO (from BloodHound or gpohound) -> push a scheduled task / user
+# right to linked computers -> SYSTEM / DA on those hosts.
+- id: gpo_abuse
+  when: { findings_include: gpo_control }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: gpo_abuse_task
+  maps: [T1484.001]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'internalallthethings . SharpGPOAbuse / pyGPOAbuse (task + user-rights push)'
+  technique: gpo_abuse
+  authorized_only: true
+
 # GPP cpassword recovered (SYSVOL Groups.xml) -> decrypt with the public AES key.
 - id: gpp_decrypt
   when: { findings_include: gpp_password }

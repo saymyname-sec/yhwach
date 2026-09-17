@@ -142,6 +142,19 @@ def test_vault_gated_rule_needs_credentials(tmp_db: Path) -> None:
     assert "kerberoast_with_creds" in ids              # creds present
 
 
+def test_shadow_credential_chain(tmp_db: Path) -> None:
+    """A `shadow_cred_target` bloodhound fact unlocks the shadow_credential_abuse
+    rule (GenericWrite on a DA member -> PKINIT -> NT hash -> PtH)."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="smb", os="windows")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "shadow_cred_target")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "shadow_credential_abuse" in ids
+
+
 def test_gpp_password_chain(tmp_db: Path) -> None:
     from yhwach.playbooks import default_playbook_dir, load_rules
     eng = _seed_surface(tmp_db, kind="smb")

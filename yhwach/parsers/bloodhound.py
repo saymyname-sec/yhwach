@@ -31,6 +31,9 @@ _KIND_MAP: dict[str, tuple[str, str, str]] = {
     "acl_abuse": ("T1222", "high", "Abusable ACL edge"),
     "da_path": ("T1078", "high", "Path to Domain Admins"),
     "gpp_password": ("T1552.006", "high", "GPP password"),
+    # GenericWrite / WriteDACL / AddKeyCredentialLink over a Tier-0 principal:
+    # write msDS-KeyCredentialLink -> PKINIT -> NT hash (shadow credential).
+    "shadow_cred_target": ("T1556", "critical", "Shadow-credential target (writable msDS-KeyCredentialLink)"),
 }
 
 

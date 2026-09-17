@@ -153,6 +153,25 @@
   source: 'hacktricks . GPP cpassword (public AES key)'
   authorized_only: true
 
+# A writable Tier-0 principal (GenericWrite/WriteDACL/AddKeyCredentialLink over a
+# Domain Admins member) -> shadow credential -> PKINIT -> NT hash -> PtH -> DA.
+# Tag set by the bloodhound ingest (fact kind shadow_cred_target). Host-scoped
+# (the DC/target); fires as soon as the fact lands, and it IS the DA path.
+- id: shadow_credential_abuse
+  when: { findings_include: shadow_cred_target }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: bloodyad_shadow_cred
+  maps: [T1556]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'bloodhound + bloodyAD . GenericWrite on a DA member -> msDS-KeyCredentialLink -> PKINIT -> NT hash -> PtH'
+  technique: shadow_credential
+  authorized_only: true
+
 # We hold domain creds and there is an LDAP/DC surface -> kerberoast with creds
 # (no captured-hash tag required; complements the tag-gated `kerberoast` rule).
 - id: kerberoast_with_creds

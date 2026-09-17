@@ -58,3 +58,10 @@ def test_bloodhound_facts_incl_unknown_edge() -> None:
     tags = {f.tag for f in parse_bloodhound(_read("bloodhound_facts.json"))}
     assert {"kerberoastable", "dcsync", "unconstrained_delegation"}.issubset(tags)
     assert "some_new_edge_type" in tags   # forward-compatible
+
+
+def test_bloodhound_shadow_cred_target() -> None:
+    fs = parse_bloodhound(_read("bloodhound_shadowcred.json"))
+    sc = next(f for f in fs if f.tag == "shadow_cred_target")
+    assert sc.severity == "critical" and sc.cls == "T1556"
+    assert "KeyCredentialLink" in sc.title

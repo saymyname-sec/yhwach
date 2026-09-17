@@ -1,0 +1,4 @@
+LDAP        10.10.10.10     389    DC01             [*] Windows Server 2019 Build 17763 (name:DC01) (domain:corp.local)
+LDAP        10.10.10.10     389    DC01             [+] corp.local\svc_user:Passw0rd
+MAQ         10.10.10.10     389    DC01             [*] Getting the MachineAccountQuota
+MAQ         10.10.10.10     389    DC01             MachineAccountQuota: 10

@@ -204,6 +204,37 @@
   technique: shadow_credential
   authorized_only: true
 
+# We hold a domain cred -> read MachineAccountQuota (enumeration). >0 unlocks RBCD.
+- id: ldap_machineaccountquota
+  when: { surface: ldap, vault: nonempty }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: netexec_maq
+  maps: [T1087.002]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . MachineAccountQuota enumeration (netexec -M maq)'
+  authorized_only: true
+
+# MachineAccountQuota > 0 -> add a computer, set RBCD, S4U as Administrator.
+- id: rbcd_machineaccountquota_abuse
+  when: { findings_include: machine_account_quota }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: rbcd_addcomputer_attack
+  maps: [T1078, T1558]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'internalallthethings . MachineAccountQuota abuse -> RBCD -> service ticket as admin'
+  technique: rbcd_maq
+  authorized_only: true
+
 # We hold domain creds and there is an LDAP/DC surface -> kerberoast with creds
 # (no captured-hash tag required; complements the tag-gated `kerberoast` rule).
 - id: kerberoast_with_creds

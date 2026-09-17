@@ -205,6 +205,22 @@ def _enum4linux(output: str, ctx: dict) -> list[ExtractedFinding]:
     return _smb_null(output, ctx) + _ad_users(output, ctx)
 
 
+def _maq(output: str, ctx: dict) -> ExtractedFinding | None:
+    """ms-DS-MachineAccountQuota > 0 -> tag machine_account_quota (RBCD/noPac).
+
+    A quota of 0 is not abusable, so it is (correctly) not tagged."""
+    m = re.search(r"MachineAccountQuota:\s*(\d+)", output, re.I)
+    if not m:
+        return None
+    quota = int(m.group(1))
+    if quota <= 0:
+        return None
+    return ExtractedFinding(
+        "T1078", "MachineAccountQuota allows computer-account creation", "medium",
+        f"{ctx.get('IP','?')} MachineAccountQuota={quota} — any user can add a machine (RBCD/noPac)",
+        tag="machine_account_quota")
+
+
 def _pass_pol(output: str, ctx: dict) -> ExtractedFinding | None:
     """Domain password policy dumped -> tag password_policy (safe-spray gate).
 
@@ -350,6 +366,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "kerbrute_userenum": _ad_users,
     "netexec_rid_brute": _ad_users,
     "netexec_pass_pol": _pass_pol,
+    "netexec_maq": _maq,
     "asreproast_users": _kerberos_roast,
     "kerberoast_getuserspns": _kerberos_roast,
 }

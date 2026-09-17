@@ -34,6 +34,15 @@ def test_nxc_rid_brute_userlist() -> None:
     assert any(f.tag == "domain_users" for f in fs)
 
 
+def test_nxc_maq_positive_quota_tagged() -> None:
+    fs = interpret_all("netexec_maq", _read("nxc_maq.txt"), {"IP": "10.10.10.10"})
+    assert fs and fs[0].tag == "machine_account_quota" and "MachineAccountQuota=10" in fs[0].evidence
+
+
+def test_nxc_maq_zero_quota_not_tagged() -> None:
+    assert not interpret_all("netexec_maq", "MAQ  DC01  MachineAccountQuota: 0", {"IP": "x"})
+
+
 def test_nxc_pass_pol_no_lockout() -> None:
     fs = interpret_all("netexec_pass_pol", _read("nxc_pass_pol.txt"), {"IP": "10.10.10.10"})
     assert fs and fs[0].tag == "password_policy"

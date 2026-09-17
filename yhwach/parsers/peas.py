@@ -79,7 +79,7 @@ def parse_linpeas(text: str) -> list[ExtractedFinding]:
             "LD_PRELOAD OCI-hook escape to host root if toolkit <= 1.17.7", tag="nvidia_toolkit"))
 
     # GitLab PAT on disk / in env -> feeds the GitLab CI exfil rules.
-    if re.search(r"glpat-[A-Za-z0-9_\-]{20}", text):
+    if re.search(r"glpat-[A-Za-z0-9_\-]{15,}", text):
         out.append(ExtractedFinding(
             "CWE-522", "GitLab personal access token on host", "high",
             "glpat- token in a config / history / env — reuse against the GitLab API",

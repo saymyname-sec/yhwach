@@ -55,6 +55,22 @@
   source: 'internalallthethings . RID cycling (netexec --rid-brute / lookupsid)'
   authorized_only: true
 
+# Kerberos/NTP on a DC -> timeroasting: MS-SNTP hands out RID-keyed computer/
+# trust account hashes with no auth. Pre-auth, no creds needed.
+- id: kerberos_timeroast
+  when: { surface: kerberos }
+  class: traditional
+  likelihood: L
+  time_cost: fast
+  emits:
+    - action: timeroast_ntp
+  maps: [T1558]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . timeroasting (MS-SNTP, hashcat -m 31300)'
+  authorized_only: true
+
 # Anonymous LDAP bind confirmed -> dump users/groups (feeds domain_users).
 - id: ldap_anon_dump
   when: { surface: ldap, findings_include: ldap_anon }

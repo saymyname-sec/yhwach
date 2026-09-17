@@ -394,6 +394,17 @@ def _sagemaker_passrole(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _timeroast(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Timeroast NTP hashes ($sntp-ms$) captured -> tag for offline cracking."""
+    if "$sntp-ms$" in output:
+        n = len(re.findall(r"\$sntp-ms\$", output))
+        return ExtractedFinding(
+            "T1558", "Timeroastable account hashes captured (MS-SNTP)", "medium",
+            f"{n} $sntp-ms$ hash(es) from {ctx.get('IP','?')} — crack offline (hashcat -m 31300)",
+            tag="timeroastable")
+    return None
+
+
 def _rag_upload(output: str, ctx: dict) -> ExtractedFinding | None:
     hits = re.findall(r"FOUND (\S+)", output)
     if hits:
@@ -468,6 +479,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "netexec_laps": _laps,
     "asreproast_users": _kerberos_roast,
     "kerberoast_getuserspns": _kerberos_roast,
+    "timeroast_ntp": _timeroast,
 }
 
 

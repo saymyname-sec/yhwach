@@ -71,6 +71,11 @@ def test_nxc_pass_pol_no_lockout() -> None:
     assert "spray freely" in fs[0].evidence   # Threshold: None
 
 
+def test_timeroast_hashes_tagged() -> None:
+    fs = interpret_all("timeroast_ntp", _read("timeroast_hashes.txt"), {"IP": "10.10.10.10"})
+    assert fs and fs[0].tag == "timeroastable" and "2 $sntp-ms$" in fs[0].evidence
+
+
 def test_kerbrute_userlist() -> None:
     fs = interpret_all("kerbrute_userenum", _read("kerbrute_users.txt"), {"IP": "10.10.10.20"})
     assert any(f.tag == "domain_users" for f in fs)

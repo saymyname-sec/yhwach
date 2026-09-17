@@ -70,11 +70,50 @@ def test_match_is_idempotent(tmp_db: Path) -> None:
 
 def test_unsupported_when_key_is_skipped(tmp_db: Path) -> None:
     eng_id = _seed_surface(tmp_db, kind="chatbot")
-    rule = _rule("aws_ssrf", {"surface": "web", "findings_include": "ssrf_confirmed"})
+    rule = _rule("future_rule", {"surface": "web", "banner_matches": "nginx/1.2"})
     with yhdb.transaction(tmp_db) as conn:
         report = match_rules(conn, eng_id, [rule])
-    assert "aws_ssrf" in report.rules_skipped_unsupported
+    assert "future_rule" in report.rules_skipped_unsupported
     assert report.tasks_created == 0
+
+
+def _add_finding(tmp_db: Path, eng_id: int, tag: str, ip: str = "10.0.0.5") -> None:
+    with yhdb.transaction(tmp_db) as conn:
+        hid = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                           (eng_id, ip)).fetchone()["id"]
+        yhdb.add_finding(conn, hid, None, "LLM04", f"finding {tag}", "high", "ev", tag=tag)
+
+
+def test_findings_include_gates_surface_rule(tmp_db: Path) -> None:
+    """A surface+findings_include rule fires only once the host carries the tag."""
+    eng_id = _seed_surface(tmp_db, kind="chatbot")
+    rule = _rule("rag_adv", {"surface": "chatbot", "findings_include": "rag_upload"})
+    with yhdb.transaction(tmp_db) as conn:
+        before = match_rules(conn, eng_id, [rule])
+    assert before.tasks_created == 0  # no rag_upload finding yet
+
+    _add_finding(tmp_db, eng_id, "rag_upload")
+    with yhdb.transaction(tmp_db) as conn:
+        after = match_rules(conn, eng_id, [rule])
+        tasks = top_tasks(conn, eng_id)
+    assert after.tasks_created == 1
+    assert tasks[0]["playbook_rule_id"] == "rag_adv"
+
+
+def test_findings_include_only_rule_is_host_scoped(tmp_db: Path) -> None:
+    """A findings_include-only rule (no surface) fires on the host, surface-less."""
+    eng_id = _seed_surface(tmp_db, kind="chatbot")
+    rule = _rule("dpapi", {"findings_include": "dpapi_master_key"})
+    _add_finding(tmp_db, eng_id, "dpapi_master_key")
+    with yhdb.transaction(tmp_db) as conn:
+        r1 = match_rules(conn, eng_id, [rule])
+        r2 = match_rules(conn, eng_id, [rule])  # idempotent
+        row = conn.execute("SELECT target_surface_id FROM task WHERE playbook_rule_id='dpapi'").fetchone()
+        n = conn.execute("SELECT COUNT(*) AS n FROM task WHERE playbook_rule_id='dpapi'").fetchone()["n"]
+    assert r1.tasks_created == 1
+    assert r2.tasks_created == 0 and r2.tasks_updated == 1
+    assert n == 1  # host-scoped task deduped across re-runs
+    assert row["target_surface_id"] is None
 
 
 def test_multiple_rules_on_one_surface_make_multiple_tasks(tmp_db: Path) -> None:

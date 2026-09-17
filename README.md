@@ -42,8 +42,8 @@ What works today:
   live probes
 - **Planner** — 50 declarative YAML technique rules across AI, traditional, cloud/k8s,
   message-broker, supply-chain, and post-exploit surfaces, matched and EV-ranked with
-  **AI-first tiering** (32 fire today; 18 chaining rules await `findings_include` planner
-  support — see [ROADMAP.md](ROADMAP.md))
+  **AI-first tiering**; supports surface, auth, product, os, and **`findings_include`**
+  chaining (a rule fires once the host carries the required finding tag)
 - **Primitives** — technique exhaustion (no repeats), credential reuse (never exhausted), lore
   denylist (OffSec dev-artifact filtering)
 - **Actions layer** — 96 registered actions (`yhwach actions`) turn every playbook step into a

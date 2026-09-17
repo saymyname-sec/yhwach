@@ -506,6 +506,7 @@ def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
                         _, created = yhdb.add_finding(
                             c2, row["host_id"], row["surface_id"], found.cls,
                             found.title, found.severity, found.evidence, row["rule_id"],
+                            tag=found.tag,
                         )
                     click.echo(
                         f"    [finding] {found.severity.upper()} {found.cls} "

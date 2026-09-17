@@ -1,9 +1,15 @@
 """Deterministic planner: match playbook rules against the world model and
 populate the task queue with EV-scored candidate actions. No LLM in this layer.
 
-Phase 1.3 supports a subset of `when` keys: surface, auth, product, os. Rules
-that use unsupported keys (e.g. findings_include) are skipped and reported, so
-forward-compatible rules can live in the playbooks without breaking the matcher.
+Supported `when` keys: surface, auth, product, os, findings_include. A rule that
+names a `surface` produces surface-scoped tasks; a rule with only
+`findings_include` (no surface) produces finding-gated, host-scoped tasks. Any
+other key is unsupported: the rule is skipped and reported so forward-compatible
+rules can live in the playbooks without breaking the matcher.
+
+`findings_include: <tag>` matches only when the target host has an open finding
+carrying that `tag` (set by the interpret extractors / ingest) — this is the
+post-foothold chaining mechanism.
 """
 from __future__ import annotations
 
@@ -14,7 +20,7 @@ from datetime import datetime, timezone
 from yhwach.playbooks import Rule
 from yhwach.primitives import consumed_techniques, denylisted_host_ids
 
-SUPPORTED_WHEN_KEYS = {"surface", "auth", "product", "os"}
+SUPPORTED_WHEN_KEYS = {"surface", "auth", "product", "os", "findings_include"}
 
 
 @dataclass
@@ -71,9 +77,9 @@ def match_rules(
             )
             continue
 
-        surfaces = _matching_surfaces(conn, engagement_id, rule)
-        kept = [s for s in surfaces if s["host_id"] not in denylisted]
-        report.surfaces_filtered_denylist += len(surfaces) - len(kept)
+        targets = _match_targets(conn, engagement_id, rule)
+        kept = [t for t in targets if t["host_id"] not in denylisted]
+        report.surfaces_filtered_denylist += len(targets) - len(kept)
         if kept:
             report.rules_matched += 1
         for surf in kept:
@@ -82,6 +88,17 @@ def match_rules(
             report.tasks_updated += updated
 
     return report
+
+
+def _match_targets(conn: sqlite3.Connection, engagement_id: int, rule: Rule) -> list:
+    """Rows to build tasks from: surface rows when the rule scopes a `surface`,
+    else finding-gated host rows (surface_id = None) for a `findings_include`-only
+    rule. Each row exposes host_id / surface_id / kind."""
+    if "surface" in rule.when:
+        return _matching_surfaces(conn, engagement_id, rule)
+    if "findings_include" in rule.when:
+        return _matching_hosts(conn, engagement_id, rule)
+    return []
 
 
 def _matching_surfaces(
@@ -105,6 +122,12 @@ def _matching_surfaces(
     if "product" in when:
         clauses.append("svc.product LIKE ?")
         params.append(f"%{when['product']}%")
+    if "findings_include" in when:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM finding f WHERE f.host_id = h.id "
+            "AND f.tag = ? AND f.status = 'open')"
+        )
+        params.append(when["findings_include"])
 
     sql = (
         "SELECT s.id AS surface_id, s.host_id AS host_id, s.kind AS kind "
@@ -116,6 +139,31 @@ def _matching_surfaces(
     return conn.execute(sql, params).fetchall()
 
 
+def _matching_hosts(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    rule: Rule,
+) -> list[dict]:
+    """Hosts that carry the rule's `findings_include` tag (surface-less rules).
+
+    Returns surface-shaped dicts with surface_id = None so the task upsert can
+    treat them uniformly with surface rows."""
+    when = rule.when
+    clauses = ["h.engagement_id = ?"]
+    params: list = [engagement_id]
+    if "os" in when:
+        clauses.append("h.os = ?")
+        params.append(when["os"])
+    clauses.append(
+        "EXISTS (SELECT 1 FROM finding f WHERE f.host_id = h.id "
+        "AND f.tag = ? AND f.status = 'open')"
+    )
+    params.append(when["findings_include"])
+    sql = f"SELECT h.id AS host_id FROM host h WHERE {' AND '.join(clauses)}"
+    return [{"surface_id": None, "host_id": r["host_id"], "kind": None}
+            for r in conn.execute(sql, params).fetchall()]
+
+
 def _upsert_task(
     conn: sqlite3.Connection,
     engagement_id: int,
@@ -123,12 +171,21 @@ def _upsert_task(
     surf: sqlite3.Row,
 ) -> tuple[int, int]:
     now = _now_utc()
-    rationale = f"rule {rule.id} matched {surf['kind']} surface"
+    rationale = (f"rule {rule.id} matched {surf['kind']} surface" if surf["kind"]
+                 else f"rule {rule.id} matched finding-gated host")
 
-    existing = conn.execute(
-        "SELECT id FROM task WHERE playbook_rule_id = ? AND target_surface_id = ?",
-        (rule.id, surf["surface_id"]),
-    ).fetchone()
+    if surf["surface_id"] is not None:
+        existing = conn.execute(
+            "SELECT id FROM task WHERE playbook_rule_id = ? AND target_surface_id = ?",
+            (rule.id, surf["surface_id"]),
+        ).fetchone()
+    else:
+        # Host-scoped task (findings_include-only rule): dedupe by (rule, host).
+        existing = conn.execute(
+            "SELECT id FROM task WHERE playbook_rule_id = ? AND target_host_id = ? "
+            "AND target_surface_id IS NULL",
+            (rule.id, surf["host_id"]),
+        ).fetchone()
 
     if existing is not None:
         conn.execute(

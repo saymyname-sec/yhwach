@@ -85,11 +85,14 @@ CREATE TABLE IF NOT EXISTS finding (
     title             TEXT    NOT NULL,
     severity          TEXT    NOT NULL,   -- critical | high | medium | low
     evidence          TEXT,                -- one-line summary; never a raw dump
+    tag               TEXT,                -- chaining key matched by a rule's `findings_include`
+                                           -- (e.g. rag_upload | chrome_login_data | gitlab_token)
     playbook_rule_id  TEXT,
     status            TEXT    NOT NULL DEFAULT 'open',   -- open | exploited | dead | duplicate
     discovered_at     TEXT    NOT NULL,
     updated_at        TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_finding_tag ON finding(tag);
 
 -- ---------------------------------------------------------------------------
 -- Credentials — the reusable primitive. NEVER exhausted per Kapi's rule.

@@ -331,23 +331,36 @@ def add_finding(
     severity: str,
     evidence: str,
     playbook_rule_id: str | None = None,
+    tag: str | None = None,
 ) -> tuple[int, bool]:
-    """Insert or update a finding, deduped by (host_id, class, title)."""
+    """Insert or update a finding, deduped by (host_id, class, title).
+
+    `tag` is the chaining key a rule's `findings_include` matches on; on update
+    it is only (re)set when a non-null tag is supplied, so a later untagged
+    re-detection never clears an existing tag.
+    """
     now = _now_utc()
     existing = conn.execute(
         "SELECT id FROM finding WHERE host_id IS ? AND class = ? AND title = ?",
         (host_id, cls, title),
     ).fetchone()
     if existing is not None:
-        conn.execute(
-            "UPDATE finding SET evidence = ?, updated_at = ? WHERE id = ?",
-            (evidence, now, existing["id"]),
-        )
+        if tag is not None:
+            conn.execute(
+                "UPDATE finding SET evidence = ?, tag = ?, updated_at = ? WHERE id = ?",
+                (evidence, tag, now, existing["id"]),
+            )
+        else:
+            conn.execute(
+                "UPDATE finding SET evidence = ?, updated_at = ? WHERE id = ?",
+                (evidence, now, existing["id"]),
+            )
         return int(existing["id"]), False
     cur = conn.execute(
         "INSERT INTO finding (host_id, surface_id, class, title, severity, evidence, "
-        "playbook_rule_id, status, discovered_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?)",
-        (host_id, surface_id, cls, title, severity, evidence, playbook_rule_id, now),
+        "tag, playbook_rule_id, status, discovered_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+        (host_id, surface_id, cls, title, severity, evidence, tag, playbook_rule_id, now),
     )
     return int(cur.lastrowid), True
 

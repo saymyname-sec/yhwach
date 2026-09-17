@@ -23,6 +23,7 @@ class ExtractedFinding:
     title: str
     severity: str   # critical | high | medium | low
     evidence: str
+    tag: str | None = None   # chaining key a rule's `findings_include` matches on
 
 
 def _first_json(output: str) -> Any:
@@ -105,6 +106,7 @@ def _rag_upload(output: str, ctx: dict) -> ExtractedFinding | None:
         return ExtractedFinding(
             "LLM04", "RAG/document upload endpoint discovered", "high",
             f"upload paths on {ctx.get('URL','?')}: {', '.join(hits)[:140]}",
+            tag="rag_upload",  # unlocks rag_kb_advanced_poisoning / embedding_collision_attack
         )
     return None
 

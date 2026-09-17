@@ -306,10 +306,9 @@
   source: 'shadow-supply . OPSEC: read detection_rules from Qdrant BEFORE acting'
   authorized_only: true
 
-# --- Forward-compatible rule: uses a `when` key the Phase 1.3 matcher does not
-# --- yet support (findings_include). It stays here as valid config and starts
-# --- matching once finding-based conditions land. The matcher reports it as
-# --- skipped rather than erroring.
+# --- Chained rule: fires once an SSRF finding tags the host `ssrf_confirmed`
+# --- (findings_include is matched by the planner; the tag is set by a future
+# --- SSRF extractor / manual finding).
 - id: aws_ml_infra_ssrf
   when: { surface: web, findings_include: ssrf_confirmed }
   likelihood: M

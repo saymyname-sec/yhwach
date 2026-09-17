@@ -8,8 +8,8 @@
 - ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
   message brokers)
 - ✅ Deterministic planner: 50 YAML technique rules → EV-ranked tasks, AI-first tiering
-      (AI, traditional, cloud/k8s, broker, supply-chain, post-exploit); 32 fire today, 18 await
-      `findings_include` support (see Remaining)
+      (AI, traditional, cloud/k8s, broker, supply-chain, post-exploit); matches surface / auth /
+      product / os / `findings_include` (post-foothold chaining — all 50 rules now supported)
 - ✅ Cross-cutting primitives: technique exhaustion + credential reuse + lore denylist
 - ✅ Actions layer: 96 registered actions (emits → concrete commands); read-only runs
       (untrusted substituted values are shell-guarded), exploitation render-only
@@ -26,35 +26,55 @@
 - ✅ Calibration harness: fixtures + golden runner + `snapshot`
 - ✅ Yhwach-as-MCP server for Claude Code (`yhwach mcp`; Path A in docs/deploy.md)
 
-**Remaining (bigger lifts / need design input):**
-- ⬜ **`findings_include` planner support** — the single highest-leverage gap: 18 of 50 rules
-      (all post-foothold chaining: supply-chain, cloud/k8s, RAG-advanced, privesc) gate on a
-      `findings_include` `when`-key the matcher does not implement (`planner.py` SUPPORTED_WHEN_KEYS),
-      so they never fire and ~30 of their actions are unreachable via `plan`/`next`. Needs a
-      finding-tag convention (a `tag` on `finding`, set by the interpret extractors) that the
-      matcher can query.
-- ⬜ **Packaging for non-editable installs** — `db/schema.sql`, `persona/*.md`, `playbooks/*.yaml`
-      live outside the package and aren't bundled; a `pip install` wheel (non-`-e`) ships without
-      them and `plan`/`next`/`engage` fail. Add `force-include` + installed-path fallbacks.
-- ⬜ **Doc-vs-reality: judgment layer** — ARCHITECTURE/persona/contract describe RANK/CRAFT/INTERPRET
-      LLM calls, JSON Autonomy Contract validation, and persona/rules content-hashing into `event`
-      (schema has `persona_hash`/`rules_hash` columns, never written). Today it's a read-only text
-      handoff. Either implement these or align the docs to what ships.
-- ⬜ **Test + CI coverage** — `cli.py` (largest module, entire user surface) and `mcp_server.py`
-      have no dedicated tests; no CI runs the suite / `selftest` on push.
-- ⬜ **MCP tool parity** — the MCP exposes status/plan/next/findings/report/spray/creds/advance but
-      not `ingest`/`enum`/`probe`/`run`/`proof`/`consume`, so an MCP-only operator can't advance the
-      world model without dropping to the CLI.
-- ⬜ MCP collaboration: drive **HexStrike**, **BloodHound**, and **msfconsole** as MCP servers
-      the operator (and Yhwach) coordinate — HexStrike is a REST client today (`yhwach enum`);
-      BloodHound feeds AD path reasoning; msfconsole handles exploit/session hand-off
-- ⬜ MCP LLM-delegation tools (`craft` / `interpret`): persona-wrapped model calls handed back
-      to the host CLI, not just the read-only context tools shipped today
-- ⬜ Report v2: full event-log timeline + inline screenshots + verbatim reproduction commands
-- ⬜ Ligolo tunnel state: subnet reachability graph feeding the `pivoted` predicate
-- ⬜ Pre-staged tooling actions: wire `~/osai/current/tools/` (`svcmon.exe` obfuscated Windows
-      Ligolo agent, `svc.exe`/`svc.bin` AMSI-bypass revshell) into the actions layer so the
-      planner emits them directly (persona already directs the operator to use them)
+## Plan — sequenced next tasks
+
+Ordered by leverage and dependency. Each phase has an acceptance bar; check items off as they land.
+
+### Phase 1 — Unlock the chaining engine (`findings_include`) ✅ DONE
+All 50 rules are now matcher-supported (was 18 silently dead). The 18 `findings_include` rules fire
+once the target host carries the required finding tag.
+- [x] Finding-tag convention: `finding.tag` column; `add_finding(..., tag=)`.
+- [x] Planner: `findings_include` in SUPPORTED_WHEN_KEYS; surface path gets an EXISTS clause,
+      surface-less rules get a host-scoped path (`_matching_hosts`), idempotent host-task upsert.
+- [x] First live chain wired: the RAG-upload extractor tags `rag_upload`, unlocking
+      `rag_kb_advanced_poisoning` / `embedding_collision_attack`.
+- [x] Tests: `findings_include` gates a surface rule; surface-less rule is host-scoped + idempotent.
+- **Follow-up (Phase 1b):** populate the remaining tags — extractors / ingest for `chrome_login_data`,
+      `dpapi_master_key`, `gitlab_token`, `aws_credentials`, `python_requirements`, `pickle_endpoint`,
+      `ssrf_confirmed`, etc. — so those chains light up from real detections, not just manual findings.
+
+### Phase 2 — Installable + CI
+- [ ] Packaging: `force-include` `db/`, `persona/`, `playbooks/`; installed-path fallbacks in
+      `__init__.py` / `playbooks.default_playbook_dir` / `fixtures.default_fixtures_dir`.
+- [ ] GitHub Actions: pytest + `selftest` + ruff on push/PR (Linux + Windows).
+- **Done when:** a non-editable `pip install` wheel runs `engage`/`plan`/`next`; CI is green.
+
+### Phase 3 — Test gap + MCP parity
+- [ ] `test_cli.py` (CliRunner) across the command surface + error/exit paths.
+- [ ] `test_mcp_server.py` for `build_server` / `_bind_signature` / `_load_fastmcp`.
+- [ ] Add MCP tools: `ingest`, `enum`, `probe`, `run`, `proof`, `consume` (CLI parity).
+- **Done when:** an MCP-only operator can drive ingest → probe → plan → next → run → proof.
+
+### Phase 4 — MCP collaboration (named backlog)
+- [ ] BloodHound MCP adapter → AD path reasoning into the planner.
+- [ ] msfconsole MCP → exploit/session hand-off from proposal-tier actions.
+- [ ] Formalize HexStrike-as-MCP (richer ingestion than raw nmap).
+- [ ] Ligolo tunnel-state graph → the `pivoted` predicate.
+- [ ] Wire pre-staged `~/osai/current/tools/` binaries (`svcmon.exe` Ligolo agent, `svc.exe`/`svc.bin`
+      revshell) into the actions layer so the planner emits them directly.
+
+### Phase 5 — Judgment layer: align docs to reality  ✅ DECIDED (align, don't build)
+The engine is a read-only context handoff; the operator (Claude Code) does the reasoning. We are NOT
+building RANK/CRAFT/INTERPRET calls, contract validation, or persona/rules hashing.
+- [ ] Rewrite ARCHITECTURE / persona/contract / deploy so they describe the handoff that ships.
+- [ ] Drop or clearly mark the unused `event.persona_hash` / `rules_hash` columns and the
+      RANK/CRAFT/INTERPRET framing as "operator-side, not engine calls".
+
+### Phase 6 — Polish
+- [ ] Report v2: event-log timeline + inline screenshots + verbatim repro commands.
+- [ ] Enforce FSM entry-predicates (`scanned→enumerated`, …) + `high_ev_leads` auto-P0 + OPSEC invariants.
+- [ ] Structured logging / config / configurable timeouts; scope validation on `engage`/`enum`.
+- [ ] Clear the E501 lint debt.
 
 The original phased plan below is kept for reference; the numbering predates the
 build order above.

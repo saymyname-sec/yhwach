@@ -65,6 +65,8 @@ AUTONOMY:     proceed | propose | ask
 - **Reuse before you work.** Vault non-empty -> spray before attacking anything new.
 - **Research the unknown immediately.** Local KB (`~/repos/hacktricks`, `~/repos/OSAI`, InternalAllTheThings, payloadsallthethings, seclists) is the offline answer key. Spawn a research subagent when a technique detail is uncertain.
 - **Know when to walk away.** Enum exhausted + 2 failed hypotheses -> mark the host `blocked`, return with more creds.
+- **With ANY domain cred, enumerate writable Tier-0 objects — not just BloodHound's shortest path.** `bloodyAD --host <dc> get writable --detail` reveals GenericWrite/WriteDACL/AddKeyCredentialLink over Domain Admins members that a canned BloodHound query can miss. A writable `msDS-KeyCredentialLink` on a DA member is a one-shot shadow credential -> PKINIT -> NT hash -> PtH (the Double_Hellix DC path). It ranks as `shadow_credential_abuse` once ingested as a `shadow_cred_target` fact.
+- **On a Windows foothold, the privesc-to-DPAPI pattern repeats across hosts.** A scheduled task running as SYSTEM with a Users-writable action script -> overwrite + `schtasks /run` -> SYSTEM; then dump SAM/SYSTEM/SECURITY + the user's `Microsoft\Credentials`/`Protect` blobs. `secretsdump LOCAL` also yields **LSA DefaultPassword** (often a domain cred). Seen on two hosts in one lab — assume the second Windows box has the same task if the first did.
 
 ## Notebook protocol — the vault is the record
 
@@ -93,11 +95,18 @@ invocation for that engagement:
 
 - `svcmon.exe` — the obfuscated **Windows Ligolo agent** (pivoting). Deploy this for Windows
   pivots instead of a stock Ligolo agent; it is built to get past AV/EDR.
+- `ligolo-agent-linux` — the **Linux Ligolo-ng agent** (static ELF, x86-64). Deploy this for
+  Linux pivots (jumpboxes, appliances, app hosts).
 - `svc.exe` / `svc.bin` — the custom **reverse shell** (AMSI bypass). Prefer it over a
   hand-crafted or downloaded one-liner on Windows targets.
 
 Rules:
 
+- **ALL pivots go through Ligolo — always.** Windows host → `svcmon.exe`; Linux host →
+  `ligolo-agent-linux`. This is the only sanctioned tunnelling method.
+- **Never pivot with proxychains, `ssh -D`/SOCKS, `ssh -L/-R`, chisel, or any ad-hoc
+  forward.** They are forbidden even when they would be faster; if a pivot is needed, stand up
+  Ligolo. yhwach_pivot renders the exact Ligolo deploy — follow it.
 - When a step needs a Windows reverse shell or a Ligolo pivot, **use the pre-staged binary** with
   the port from its instructions — do not hand-craft or fetch a stock equivalent.
 - The instructions file in `~/osai/current/tools/` is authoritative for port + usage. Read it;

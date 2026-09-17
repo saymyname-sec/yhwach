@@ -1,0 +1,136 @@
+name: double_hellix
+description: |
+  Calibration capture reconstructing the "Double_Hellix" engagement world model
+  (three zones: DMZ / DEV / RESEARCH, domain kethalis.corp). Synthetic IPs and
+  hostnames — the point is the RANKING, not the addresses.
+
+  This locks the AI-first kill path Yhwach learned from the engagement:
+    * an unauthenticated Ollama surface (CVE-2024-37032 host) is the unique
+      highest-EV AI move and must rank first, above every traditional surface —
+      even the DC. (You cannot pass OSAI without AI; the ranker enforces it.)
+    * every AI attack surface from the chains is represented and must appear:
+      RAG/text-to-SQL/excessive-agency chatbots, a Langflow/MLflow + LoRA gradio
+      console, a DevHub agent hub (file:// SSRF), an oauth2-proxy web front.
+    * the finding-GATED exploit rules (Probllama RCE, Langflow exec, Jinja2 SSTI
+      RCE, Jenkins-via-proxy console RCE, shadow-credential -> DA) must NOT be
+      ranked yet: they only unlock once their probe/ingest sets the chaining tag.
+      This is the guardrail against proposing exploitation before confirmation.
+world_model:
+  engagement:
+    lab: double_hellix
+    scope: [10.0.0.0/24]
+    domain: kethalis.corp
+    dc: 10.0.0.50
+  hosts:
+    # RESEARCH zone — the standalone AI + the Probllama pivot
+    - ip: 10.0.0.45
+      hostname: ollama01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 11434, proto: tcp, product: Ollama}
+      surfaces:
+        - {kind: ollama, auth: none, service_port: 11434, meta: {}}
+    - ip: 10.0.0.30
+      hostname: modelplat01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 80, proto: tcp, product: nginx}
+      surfaces:
+        - {kind: gradio, auth: unknown, service_port: 80, meta: {title: Research Platform}}
+    - ip: 10.0.0.90
+      hostname: lorahub01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 8080, proto: tcp, product: Gradio}
+      surfaces:
+        - {kind: gradio, auth: unknown, service_port: 8080, meta: {title: Helm Ops Console}}
+    - ip: 10.0.0.40
+      hostname: ragbot01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 80, proto: tcp, product: nginx}
+      surfaces:
+        - {kind: chatbot, auth: unknown, service_port: 80, meta: {endpoint: /api/chat}}
+    # DEV zone — Goose skills hub, text-to-SQL build agent
+    - ip: 10.0.0.105
+      hostname: skillhub01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 3000, proto: tcp, product: Goose}
+      surfaces:
+        - {kind: chatbot, auth: unknown, service_port: 3000, meta: {endpoint: /api/run}}
+    - ip: 10.0.0.20
+      hostname: buildbot01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 80, proto: tcp, product: Uvicorn}
+      surfaces:
+        - {kind: chatbot, auth: unknown, service_port: 80, meta: {endpoint: /api/ask}}
+    # DMZ zone — helpdesk (excessive agency), DevHub agent hub (SSRF), cicd proxy
+    - ip: 10.0.0.15
+      hostname: helpdesk01
+      os: windows
+      stage: scanned
+      services:
+        - {port: 443, proto: tcp, product: nginx}
+      surfaces:
+        - {kind: chatbot, auth: unknown, service_port: 443, meta: {endpoint: /api/chat}}
+    - ip: 10.0.0.10
+      hostname: devhub01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 80, proto: tcp, product: nginx}
+      surfaces:
+        - {kind: a2a, auth: unknown, service_port: 80, meta: {card: /.well-known/agent.json}}
+    - ip: 10.0.0.31
+      hostname: cicd01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 8443, proto: tcp, product: oauth2-proxy}
+      surfaces:
+        - {kind: web, auth: unknown, service_port: 8443, meta: {title: CI Login}}
+    # RESEARCH zone — the domain controller (lowest-value objective by doctrine)
+    - ip: 10.0.0.50
+      hostname: dc02
+      os: windows
+      stage: scanned
+      services:
+        - {port: 88, proto: tcp, product: Microsoft Windows Kerberos}
+        - {port: 389, proto: tcp, product: Microsoft Windows LDAP}
+        - {port: 445, proto: tcp, product: Microsoft-DS}
+      surfaces:
+        - {kind: kerberos, auth: unknown, service_port: 88, meta: {}}
+        - {kind: ldap, auth: unknown, service_port: 389, meta: {}}
+        - {kind: smb, auth: unknown, service_port: 445, meta: {}}
+expected:
+  # AI-first doctrine: the unauthenticated Ollama surface is the unique EV-15 AI
+  # move and outranks every traditional surface, including the DC.
+  autonomy: proceed
+  top_hypothesis: {playbook_rule_id: ollama_unauth_api}
+  must_include_hypotheses:
+    - ollama_unauth_api            # Probllama host recon (Chain 10)
+    - gradio_surface_recon         # Langflow/MLflow + LoRA console (Chains 4/5)
+    - agent_tool_file_read         # LoRA/Aider LFI (Chain 5)
+    - chatbot_direct_injection_probe
+    - chatbot_excessive_agency     # AI helpdesk (Chain 13)
+    - text_to_sql_guardrail_bypass # build agent (Chain 7a)
+    - rag_upload_discovery         # RAG (Chain 1)
+    - agent_egress_proxy_ssrf      # DevHub file:// SSRF (Chain 2)
+    - oauth2proxy_static_suffix_bypass  # cicd oauth2-proxy front (Chain 3)
+    - kerberos_user_enum           # DC (lowest-value objective)
+  must_not_include:
+    # finding-gated exploitation must not rank before its tag is set
+    - ollama_probllama_rce
+    - langflow_component_exec_rce
+    - jinja2_ssti_rce
+    - jenkins_unsecured_console_rce
+    - shadow_credential_abuse
+    - model_checkpoint_pickle_rce

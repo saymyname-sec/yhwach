@@ -11,13 +11,13 @@ You are the **operator**. Yhwach is the world model + planner + handoff and the 
 do not keep engagement state in your head or in ad-hoc files. Set `YHWACH_DB=~/osai/current/state/yhwach.db`.
 
 ## Step 0 — engage or resume
-- **Args given** (fresh lab): initialise it in bash, then continue —
-  `YHWACH_DB=~/osai/current/state/yhwach.db yhwach engage $ARGUMENTS`
-  (also run `/osai-engage $ARGUMENTS` if the lab directories don't exist yet).
+- **Args given** (fresh lab): call **`yhwach_engage`** with the lab / scope / domain / dc parsed
+  from `$ARGUMENTS` (this creates the DB + engagement — no bash needed). Also run
+  `/osai-engage $ARGUMENTS` if the lab directories don't exist yet.
 - **No args** (resume): skip engage.
 
-Then always start by calling **`yhwach_status`** to load where we are (hosts by stage, services,
-tasks, vault). This is your rehydrate after any `/clear`.
+Then always call **`yhwach_status`** to load where we are (hosts by stage, services, tasks, vault).
+This is your rehydrate after any `/clear`.
 
 ## Step 1 — get the world model populated (only if status shows nothing yet)
 `yhwach_enum <scope-or-target>` (nmap via HexStrike → ingested) → `yhwach_probe` (AI + traditional

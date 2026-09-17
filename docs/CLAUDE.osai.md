@@ -13,9 +13,10 @@ Yhwach is the source of truth (a SQLite world model), not ad-hoc files. It never
 it), the **P0 LEADS** (high-value cred/DA paths — do these first), and the **EV-ranked candidates**
 with concrete commands. That block *is* your Autonomy Contract frame — don't re-derive it.
 
-- Set the lab once via the env: `YHWACH_DB=~/osai/current/state/yhwach.db` (the `yhwach` MCP uses it).
-- Init a lab (bash, one-time): `yhwach engage --lab <n> --scope <cidr> [--domain <d> --dc <ip>]`.
-- Resume: `yhwach_status` rehydrates you (hosts by stage, services, tasks, vault) in a few hundred tokens.
+- The `yhwach` MCP resolves the DB from `YHWACH_DB=~/osai/current/state/yhwach.db` (set in the MCP env).
+- Start/resume entirely via MCP: **`yhwach_engage`** (lab + scope [+ domain/dc]) then `yhwach_status`.
+  Just tell Claude the lab + IPs in plain English — it calls the tools itself; no bash needed.
+  (CLI equivalent still works: `yhwach engage --lab <n> --scope <cidr> …`.)
 
 ## The loop (Yhwach-driven)
 ```

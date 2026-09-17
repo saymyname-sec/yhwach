@@ -25,6 +25,27 @@ def _eng(conn, lab: str) -> int:
     return eid
 
 
+def tool_engage(db_path: Path | str, lab: str, scope: str,
+                domain: str | None = None, dc: str | None = None) -> str:
+    """Initialise an engagement: create the DB if needed and upsert the engagement row.
+
+    `scope` is a comma-separated list of IPs/CIDRs (validated). This is the entry
+    point — call it before the other tools; they all resolve the same DB from the
+    server's $YHWACH_DB."""
+    from yhwach.scope import validate_scope
+
+    bad = validate_scope(scope)
+    if bad:
+        raise ValueError(f"invalid scope token(s): {', '.join(bad)} — use IPs/CIDRs")
+    path = Path(db_path)
+    if not path.exists():
+        yhdb.init(path)
+    with yhdb.transaction(path) as conn:
+        eid = yhdb.upsert_engagement(conn, lab=lab, scope=scope, domain=domain, dc_ip=dc)
+    dom = f", domain {domain}" if domain else ""
+    return f"engagement '{lab}' ready (id={eid}); scope {scope}{dom}"
+
+
 def tool_status(db_path: Path | str, lab: str) -> str:
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
@@ -382,6 +403,9 @@ def tool_consume(db_path: Path | str, lab: str, technique: str,
 
 # Registry of (name, fn, description) for the server to expose.
 TOOL_SPECS = [
+    ("yhwach_engage", tool_engage,
+     "Initialise/resume a lab: create the DB and upsert the engagement (lab + scope "
+     "[+ domain/dc]). Call this first; scope is validated as IPs/CIDRs."),
     ("yhwach_status", tool_status, "Engagement scoreboard: hosts by stage, services, tasks, vault."),
     ("yhwach_plan", tool_plan, "Match playbooks against the world model; populate the task queue."),
     ("yhwach_next", tool_next, "The operator context block (persona + state + ranked candidates + commands)."),

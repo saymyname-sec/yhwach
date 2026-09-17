@@ -15,8 +15,9 @@ and the mcp>=2 rename. Each tool resolves the engagement DB from `$YHWACH_DB` (d
 Tools exposed today (all take `lab`; read-only unless noted) — at parity with the CLI, so an
 MCP-only operator can drive a whole engagement:
 
+- `yhwach_engage`    — initialise/resume a lab (scope + optional domain/dc); call this first
 - `yhwach_status`    — engagement scoreboard (hosts by stage, services, tasks, vault)
-- `yhwach_ingest`    — ingest an nmap XML / linPEAS / winPEAS file into the world model
+- `yhwach_ingest`    — ingest an nmap XML / linPEAS / winPEAS / bloodhound / certipy file
 - `yhwach_enum`      — run nmap through HexStrike and ingest the result (delegated enumeration)
 - `yhwach_probe`     — probe scanned hosts for AI + traditional surfaces
 - `yhwach_plan`      — match playbooks against the world model; populate the task queue

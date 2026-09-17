@@ -43,6 +43,22 @@ def test_status(tmp_db: Path) -> None:
     assert "scanned: 1" in out
 
 
+def test_engage_creates_and_status_works(tmp_path: Path) -> None:
+    from yhwach.mcp_tools import tool_engage
+    db = tmp_path / "fresh.db"          # does not exist yet
+    out = tool_engage(str(db), "z", "10.0.0.0/24", domain="corp.local")
+    assert "ready" in out and db.exists()
+    assert "Engagement 'z'" in tool_status(str(db), "z")
+
+
+def test_engage_rejects_bad_scope(tmp_path: Path) -> None:
+    import pytest
+
+    from yhwach.mcp_tools import tool_engage
+    with pytest.raises(ValueError):
+        tool_engage(str(tmp_path / "x.db"), "z", "not-a-cidr")
+
+
 def test_plan_and_next(tmp_db: Path) -> None:
     _seed(tmp_db)
     assert "rules matched" in tool_plan(tmp_db, "m")

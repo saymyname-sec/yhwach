@@ -164,6 +164,9 @@ Or edit the config file directly:
 Confirm inside Claude Code that the `yhwach_*` tools are listed (status/plan/next/run/ingest/…).
 Full tool list + rationale: [deploy.md](deploy.md).
 
+**Router config:** copy [CLAUDE.osai.md](CLAUDE.osai.md) to `~/.claude/CLAUDE.md` — it makes Yhwach the
+loop's spine and carries the OSAI methodology (scoring, foothold sequence, skill map, capture rules).
+
 ## 7. Pre-staged operator tooling
 
 Before each challenge, drop your custom binaries in `~/osai/current/tools/` with an instructions

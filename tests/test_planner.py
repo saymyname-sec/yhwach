@@ -251,6 +251,30 @@ def test_excessive_agency_chain(tmp_db: Path) -> None:
     assert "chatbot_excessive_agency" in ids
 
 
+def test_aws_credentials_iam_chain(tmp_db: Path) -> None:
+    """IMDS-leaked AWS creds (tag aws_credentials) unlock the IAM role-chain rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="web")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "aws_credentials")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "aws_iam_role_chain_escalation" in ids
+
+
+def test_sagemaker_notebook_privesc_chain(tmp_db: Path) -> None:
+    """sagemaker_create_notebook unlocks the SageMaker notebook privesc rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="web")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "sagemaker_create_notebook")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "aws_sagemaker_notebook_privesc" in ids
+
+
 def test_agent_ssrf_and_imds_chain(tmp_db: Path) -> None:
     """An a2a agent hub offers the egress-proxy SSRF recon; a confirmed SSRF then
     unlocks the pre-existing IMDS/cloud-metadata rule."""

@@ -114,6 +114,16 @@ def test_winpeas_privesc_multi_tag() -> None:
     assert {"writable_scheduled_task", "lsa_defaultpassword", "dpapi_master_key"}.issubset(tags)
 
 
+def test_imds_creds_tags_aws() -> None:
+    fs = interpret_all("probe_imds_v1", _read("imds_creds.json"), {"URL": "http://10.0.0.10"})
+    assert fs and fs[0].tag == "aws_credentials" and fs[0].severity == "critical"
+
+
+def test_sagemaker_passrole_tag() -> None:
+    fs = interpret_all("aws_iam_role_chain", _read("aws_iam_perms.txt"), {})
+    assert fs and fs[0].tag == "sagemaker_create_notebook"
+
+
 def test_ssrf_egress_proxy_tags_confirmed() -> None:
     fs = interpret_all("probe_ssrf_egress_proxy", _read("ssrf_file_passwd.txt"),
                        {"URL": "http://10.0.0.10"})

@@ -1,0 +1,7 @@
+EvaluationResults:
+- EvalActionName: sagemaker:CreateNotebookInstance
+  EvalDecision: allowed
+- EvalActionName: iam:PassRole
+  EvalDecision: allowed
+- EvalActionName: sagemaker:CreatePresignedNotebookInstanceUrl
+  EvalDecision: allowed

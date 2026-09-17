@@ -355,6 +355,32 @@ def _langflow_exec(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _imds_creds(output: str, ctx: dict) -> ExtractedFinding | None:
+    """SSRF-reached IMDS role credentials -> tag aws_credentials.
+
+    The instance-profile response carries AccessKeyId + SecretAccessKey (+ Token);
+    that tag unlocks the IAM role-chain escalation rule."""
+    data = _first_json(output)
+    if isinstance(data, dict) and data.get("AccessKeyId") and data.get("SecretAccessKey"):
+        return ExtractedFinding(
+            "LLM06", "AWS role credentials exposed via SSRF->IMDS", "critical",
+            f"{ctx.get('URL','?')} leaked instance-profile keys ({data.get('AccessKeyId','?')[:10]}...)",
+            tag="aws_credentials")
+    return None
+
+
+def _sagemaker_passrole(output: str, ctx: dict) -> ExtractedFinding | None:
+    """IAM perms allowing sagemaker:CreateNotebookInstance + iam:PassRole ->
+    tag sagemaker_create_notebook (a PassRole privesc that bypasses AssumeRole)."""
+    low = output.lower()
+    if "createnotebookinstance" in low and "passrole" in low:
+        return ExtractedFinding(
+            "CWE-269", "SageMaker CreateNotebookInstance + PassRole privesc", "high",
+            "CreateNotebookInstance + iam:PassRole grants a role you cannot sts:AssumeRole into",
+            tag="sagemaker_create_notebook")
+    return None
+
+
 def _rag_upload(output: str, ctx: dict) -> ExtractedFinding | None:
     hits = re.findall(r"FOUND (\S+)", output)
     if hits:
@@ -408,6 +434,10 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "enum4linux_ng": _enum4linux,
     "smbmap_shares": _smb_null,
     "probe_rag_upload_paths": _rag_upload,
+    "probe_imds_v1": _imds_creds,
+    "enumerate_aws_ml": _imds_creds,
+    "aws_iam_role_chain": _sagemaker_passrole,
+    "aws_sagemaker_enum": _sagemaker_passrole,
     "probe_langflow_exec": _langflow_exec,
     "craft_ssti_probe": _ssti_reflection,
     "probe_tool_lfi_traversal": _lfi_passwd,

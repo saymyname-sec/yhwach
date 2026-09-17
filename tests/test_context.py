@@ -93,3 +93,21 @@ def test_context_is_deterministic(tmp_db: Path) -> None:
         b1 = build_context(conn, eng_id, rules=rules)
         b2 = build_context(conn, eng_id, rules=rules)
     assert b1 == b2
+
+
+def test_dead_ends_appear_in_the_handoff(tmp_db: Path) -> None:
+    """A move the operator reported as failed must be named in the block.
+
+    Without it, a context that has been compacted re-proposes the move it
+    already burned — the failure mode the attempt ledger exists to prevent."""
+    from yhwach.memory import record_outcome
+
+    eng_id, rules = _seed(tmp_db)
+    with yhdb.transaction(tmp_db) as conn:
+        tid = int(conn.execute("SELECT id FROM task LIMIT 1").fetchone()["id"])
+        record_outcome(conn, eng_id, task_id=tid, result="fail",
+                       reason="no SPN accounts", rules=rules)
+        block = build_context(conn, eng_id, rules=rules)
+    assert "DEAD ENDS" in block
+    assert "no SPN accounts" in block
+    assert "do NOT re-propose" in block

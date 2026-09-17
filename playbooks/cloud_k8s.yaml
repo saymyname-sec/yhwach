@@ -5,8 +5,11 @@
 # cross-namespace secret exfil, SageMaker notebook privesc, SSM/CloudWatch
 # credential hunting, and GPU container escape.
 
+# A mounted service-account token (found post-foothold inside a pod) is the
+# entry point — no network "kubernetes surface" is ever probed, so gate on the
+# finding the linpeas parser sets.
 - id: k8s_sa_token_and_secrets
-  when: { surface: kubernetes }
+  when: { findings_include: k8s_sa_token }
   class: ai
   likelihood: H
   time_cost: med
@@ -21,7 +24,7 @@
   authorized_only: true
 
 - id: k8s_privileged_escape
-  when: { surface: kubernetes, findings_include: pod_create_permission }
+  when: { findings_include: pod_create_permission }
   class: ai
   likelihood: H
   time_cost: med
@@ -67,7 +70,7 @@
   authorized_only: true
 
 - id: gpu_container_escape
-  when: { surface: kubernetes, findings_include: nvidia_toolkit }
+  when: { findings_include: nvidia_toolkit }
   class: ai
   likelihood: M
   time_cost: slow

@@ -251,6 +251,33 @@ def test_excessive_agency_chain(tmp_db: Path) -> None:
     assert "chatbot_excessive_agency" in ids
 
 
+def test_k8s_sa_token_chain(tmp_db: Path) -> None:
+    """A mounted SA-token finding unlocks the K8s enumeration rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="ssh")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "k8s_sa_token")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "k8s_sa_token_and_secrets" in ids
+
+
+def test_k8s_privileged_and_gpu_chains(tmp_db: Path) -> None:
+    """pod_create_permission and nvidia_toolkit each unlock their escape rule
+    (now that the never-emitted kubernetes surface no longer gates them)."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="ssh")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "pod_create_permission")
+    _add_finding(tmp_db, eng, "nvidia_toolkit")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "k8s_privileged_escape" in ids
+    assert "gpu_container_escape" in ids
+
+
 def test_aws_credentials_iam_chain(tmp_db: Path) -> None:
     """IMDS-leaked AWS creds (tag aws_credentials) unlock the IAM role-chain rule."""
     from yhwach.playbooks import default_playbook_dir, load_rules

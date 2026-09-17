@@ -355,6 +355,19 @@ def _langflow_exec(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _k8s_can_create_pods(output: str, ctx: dict) -> ExtractedFinding | None:
+    """SelfSubjectRulesReview granting create over pods (or *) -> tag
+    pod_create_permission (privileged-pod / node-escape path)."""
+    res_pods = re.search(r'"resources":\s*\[[^\]]*"(?:pods|\*)"', output)
+    verb_create = re.search(r'"verbs":\s*\[[^\]]*"(?:create|\*)"', output)
+    if res_pods and verb_create:
+        return ExtractedFinding(
+            "CWE-250", "Kubernetes SA can create pods", "high",
+            f"{ctx.get('IP','pod')} SA may create pods — hostPID/privileged pod -> node root",
+            tag="pod_create_permission")
+    return None
+
+
 def _imds_creds(output: str, ctx: dict) -> ExtractedFinding | None:
     """SSRF-reached IMDS role credentials -> tag aws_credentials.
 
@@ -438,6 +451,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "enumerate_aws_ml": _imds_creds,
     "aws_iam_role_chain": _sagemaker_passrole,
     "aws_sagemaker_enum": _sagemaker_passrole,
+    "k8s_sa_token_enum": _k8s_can_create_pods,
     "probe_langflow_exec": _langflow_exec,
     "craft_ssti_probe": _ssti_reflection,
     "probe_tool_lfi_traversal": _lfi_passwd,

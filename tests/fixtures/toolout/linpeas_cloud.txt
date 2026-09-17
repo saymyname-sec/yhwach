@@ -1,0 +1,13 @@
+╔══════════╣ Environment
+═══════════════════════════════════
+KUBERNETES_SERVICE_HOST=10.96.0.1
+KUBERNETES_SERVICE_PORT=443
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin
+
+╔══════════╣ Interesting files
+-rw-r--r-- 1 root root 1042 /var/run/secrets/kubernetes.io/serviceaccount/token
+-rw-r--r-- 1 root root  570 /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+
+╔══════════╣ Container runtime
+/usr/bin/nvidia-container-cli
+nvidia-container-toolkit 1.17.5

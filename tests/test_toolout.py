@@ -12,7 +12,7 @@ from pathlib import Path
 from yhwach.interpret import interpret_all
 from yhwach.parsers.adcs import parse_certipy
 from yhwach.parsers.bloodhound import parse_bloodhound
-from yhwach.parsers.peas import parse_winpeas
+from yhwach.parsers.peas import parse_linpeas, parse_winpeas
 
 _DIR = Path(__file__).parent / "fixtures" / "toolout"
 
@@ -112,6 +112,16 @@ def test_excessive_agency_toolcall_success() -> None:
 def test_winpeas_privesc_multi_tag() -> None:
     tags = {f.tag for f in parse_winpeas(_read("winpeas_privesc.txt"))}
     assert {"writable_scheduled_task", "lsa_defaultpassword", "dpapi_master_key"}.issubset(tags)
+
+
+def test_linpeas_cloud_tags() -> None:
+    tags = {f.tag for f in parse_linpeas(_read("linpeas_cloud.txt"))}
+    assert {"k8s_sa_token", "nvidia_toolkit"}.issubset(tags)
+
+
+def test_k8s_can_create_pods() -> None:
+    fs = interpret_all("k8s_sa_token_enum", _read("k8s_selfsubjectrules.json"), {"IP": "pod"})
+    assert fs and fs[0].tag == "pod_create_permission"
 
 
 def test_imds_creds_tags_aws() -> None:

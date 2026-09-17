@@ -65,6 +65,19 @@ def parse_linpeas(text: str) -> list[ExtractedFinding]:
             "CWE-522", "AWS credentials on host", "high",
             "IAM keys in ~/.aws/credentials or env", tag="aws_credentials"))
 
+    # Inside a Kubernetes pod: a mounted service-account token is the entry to
+    # the K8s attack chain (enumerate perms -> secret sweep -> privileged pod).
+    if re.search(r"/var/run/secrets/kubernetes\.io/serviceaccount|KUBERNETES_SERVICE_HOST", text):
+        out.append(ExtractedFinding(
+            "CWE-522", "Kubernetes service-account token mounted in pod", "high",
+            "read the SA token and enumerate cluster permissions", tag="k8s_sa_token"))
+
+    # GPU node with a vulnerable nvidia-container-toolkit -> LD_PRELOAD escape.
+    if re.search(r"nvidia-container-(toolkit|cli|runtime)", text, re.I):
+        out.append(ExtractedFinding(
+            "CVE-2025-23266", "nvidia-container-toolkit present (GPU container escape)", "high",
+            "LD_PRELOAD OCI-hook escape to host root if toolkit <= 1.17.7", tag="nvidia_toolkit"))
+
     return out
 
 

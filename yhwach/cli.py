@@ -23,6 +23,8 @@ import click
 
 from yhwach import __version__
 from yhwach import db as yhdb
+from yhwach.engine import artifact_dir as _artifact_dir
+from yhwach.engine import execute_task
 from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml
 from yhwach.probes import PROBES_BY_PORT, new_session, run_probes
 
@@ -34,17 +36,6 @@ _HEXSTRIKE_DEFAULT = "http://127.0.0.1:8888"
 def _db_path(override: str | None = None) -> Path:
     raw = override or os.environ.get(DEFAULT_DB_ENV) or DEFAULT_DB_FALLBACK
     return Path(os.path.expanduser(raw))
-
-
-def _artifact_dir(path: Path, name: str) -> Path:
-    """Locate an engagement artifact dir (recon/loot/...) relative to the DB.
-
-    For the canonical layout (<lab>/state/yhwach.db) this is <lab>/<name>; for a
-    flat DB path it is <db_dir>/<name>, so a bare /tmp/x.db never resolves to /.
-    """
-    if path.parent.name == "state":
-        return path.parent.parent / name
-    return path.parent / name
 
 
 def _force_utf8_output() -> None:
@@ -448,94 +439,25 @@ def run(lab: str, task_id: int, go: bool, db_path: str | None) -> None:
     """Render (and with --go, execute read-only) the actions for a task.
 
     Proposal-tier and render-only actions are printed for the operator to run,
-    never auto-executed — Yhwach proposes, the operator exploits.
+    never auto-executed — Yhwach proposes, the operator exploits. Shares the
+    execution core with the `yhwach_run` MCP tool (see engine.execute_task).
     """
-    import json as _json
-
-    from yhwach.actions import context_from_surface, get_action, render_action, run_action
-    from yhwach.playbooks import default_playbook_dir, load_rules
-    from yhwach.primitives import check_denylist, load_denylist, record_denylist_hit
-
     path = _db_path(db_path)
     if not path.exists():
         click.echo(f"[!] DB not found at {path}.", err=True)
         sys.exit(2)
-
-    rules = {r.id: r for r in load_rules(default_playbook_dir())}
-    _denylist = load_denylist(default_playbook_dir())
 
     with yhdb.transaction(path) as conn:
         eng_id = yhdb.engagement_id_for(conn, lab)
         if eng_id is None:
             click.echo(f"[!] Unknown lab '{lab}'.", err=True)
             sys.exit(2)
-        row = conn.execute(
-            "SELECT t.playbook_rule_id AS rule_id, t.target_host_id AS host_id, "
-            "t.target_surface_id AS surface_id, h.ip AS ip, s.meta_json AS meta, "
-            "svc.port AS port "
-            "FROM task t JOIN host h ON h.id = t.target_host_id "
-            "LEFT JOIN surface s ON s.id = t.target_surface_id "
-            "LEFT JOIN service svc ON svc.id = s.service_id "
-            "WHERE t.id = ? AND t.engagement_id = ?",
-            (task_id, eng_id),
-        ).fetchone()
 
-    if row is None:
-        click.echo(f"[!] Task {task_id} not found in lab '{lab}'.", err=True)
+    lines, ok = execute_task(path, eng_id, task_id, go=go)
+    for ln in lines:
+        click.echo(ln)
+    if not ok:
         sys.exit(2)
-
-    rule = rules.get(row["rule_id"])
-    if rule is None:
-        click.echo(f"[!] Rule '{row['rule_id']}' not found in playbooks.", err=True)
-        sys.exit(2)
-
-    try:
-        meta = _json.loads(row["meta"]) if row["meta"] else {}
-    except (ValueError, TypeError):
-        meta = {}
-    ctx = context_from_surface(row["ip"], row["port"] or "PORT", meta)
-    loot_dir = _artifact_dir(path, "loot")
-
-    click.echo(f"== Task {task_id}: {row['rule_id']} @ {row['ip']} ==")
-    for emit in rule.emits:
-        action = get_action(emit.get("action", ""))
-        if action is None:
-            click.echo(f"[-] {emit.get('action', '?')}: no command mapped")
-            continue
-        rendered = render_action(action, ctx)
-        can_run = action.risk == "read_only" and action.runnable
-        for cmd in rendered:
-            click.echo(f"  $ {cmd}" + ("" if can_run else f"   [{action.risk}, render-only]"))
-        if go and can_run:
-            from yhwach.interpret import interpret_output
-
-            for res in run_action(action, ctx, loot_dir=loot_dir):
-                head = "\n".join((res["output"] or "").splitlines()[:8])
-                click.echo(f"    -> rc={res['returncode']}  loot={res.get('loot_file','-')}")
-                if head.strip():
-                    click.echo("    | " + head.replace("\n", "\n    | "))
-                # Deterministic finding extraction.
-                found = interpret_output(action.id, res.get("output", ""), ctx)
-                if found is not None:
-                    with yhdb.transaction(path) as c2:
-                        _, created = yhdb.add_finding(
-                            c2, row["host_id"], row["surface_id"], found.cls,
-                            found.title, found.severity, found.evidence, row["rule_id"],
-                            tag=found.tag,
-                        )
-                    click.echo(
-                        f"    [finding] {found.severity.upper()} {found.cls} "
-                        f"{found.title} ({'new' if created else 'updated'})"
-                    )
-                # Lore denylist: flag OffSec dev artifacts in the output.
-                artifact = check_denylist(res.get("output", ""), _denylist)
-                if artifact is not None:
-                    with yhdb.transaction(path) as c3:
-                        if record_denylist_hit(c3, eng_id, row["host_id"], artifact):
-                            click.echo(f"    [denylist] '{artifact}' — host tagged "
-                                       "dev_artifact, will be filtered from ranking")
-        elif go and not can_run:
-            click.echo(f"    (skipped --go: {action.risk}/render-only — operator runs this)")
 
 
 @main.command()

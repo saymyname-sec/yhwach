@@ -58,11 +58,13 @@ once the target host carries the required finding tag.
       output no longer crashes on a legacy Windows console (cp1252) over `→`/`—`/`·`.
 - [x] Lint debt cleared: ruff is green (E501 delegated to the formatter; modernizations applied).
 
-### Phase 3 — Test gap + MCP parity
-- [ ] `test_cli.py` (CliRunner) across the command surface + error/exit paths.
-- [ ] `test_mcp_server.py` for `build_server` / `_bind_signature` / `_load_fastmcp`.
-- [ ] Add MCP tools: `ingest`, `enum`, `probe`, `run`, `proof`, `consume` (CLI parity).
-- **Done when:** an MCP-only operator can drive ingest → probe → plan → next → run → proof.
+### Phase 3 — Test gap + MCP parity ✅ DONE
+- [x] `test_cli.py` (CliRunner): command surface + error/exit paths (~19 tests).
+- [x] `test_mcp_server.py`: `_bind_signature`, `_load_fastmcp`, `build_server` (registers all tools).
+- [x] MCP tools added: `ingest`, `enum`, `probe`, `run`, `proof`, `consume` — the MCP surface is
+      now 15 tools, at parity with the CLI. `run` shares `engine.execute_task` with the CLI (no drift).
+- [x] Extracted `engine.py` (shared task-execution core) so CLI `run` and `yhwach_run` are one path.
+- **Done:** an MCP-only operator can drive ingest → probe → plan → next → run → proof. 228 tests green.
 
 ### Phase 4 — MCP collaboration (named backlog)
 - [ ] BloodHound MCP adapter → AD path reasoning into the planner.

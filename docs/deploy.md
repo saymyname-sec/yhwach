@@ -9,16 +9,23 @@ to Claude Code on Kali. It supports both the mcp<2 `FastMCP` API (what Kali's OS
 and the mcp>=2 rename. Each tool resolves the engagement DB from `$YHWACH_DB` (default
 `~/osai/current/state/yhwach.db`), so you set the lab once via the environment.
 
-Tools exposed today (all take `lab`; read-only unless noted):
+Tools exposed today (all take `lab`; read-only unless noted) — at parity with the CLI, so an
+MCP-only operator can drive a whole engagement:
 
 - `yhwach_status`    — engagement scoreboard (hosts by stage, services, tasks, vault)
+- `yhwach_ingest`    — ingest an nmap XML / linPEAS / winPEAS file into the world model
+- `yhwach_enum`      — run nmap through HexStrike and ingest the result (delegated enumeration)
+- `yhwach_probe`     — probe scanned hosts for AI + traditional surfaces
 - `yhwach_plan`      — match playbooks against the world model; populate the task queue
 - `yhwach_next`      — the operator context block (persona + state + ranked candidates + commands)
+- `yhwach_run`       — render a task's actions; with `go=true`, execute read-only ones + extract findings
 - `yhwach_findings`  — recorded findings, most severe first
-- `yhwach_report`    — full Markdown engagement report
-- `yhwach_spray`     — credential-spray commands (vault creds × sprayable surfaces)
-- `yhwach_add_cred`  — add a credential to the vault
+- `yhwach_proof`     — bind a flag + screenshot to a host and advance `foothold → looted`
 - `yhwach_advance`   — advance a host's FSM stage
+- `yhwach_consume`   — mark a technique consumed (planner stops proposing it)
+- `yhwach_add_cred` / `yhwach_creds` — add to / read the credential vault
+- `yhwach_spray`     — credential-spray commands (vault creds × sprayable surfaces)
+- `yhwach_report`    — full Markdown engagement report
 
 **Yhwach never calls a model here.** `yhwach_next` returns the persona-framed context block for
 the host (Claude Code) to reason over into an Autonomy Contract — the reasoning frame travels

@@ -8,11 +8,15 @@ from yhwach.mcp_tools import (
     TOOL_SPECS,
     tool_add_cred,
     tool_advance,
+    tool_consume,
     tool_creds,
     tool_findings,
+    tool_ingest,
     tool_next,
     tool_plan,
+    tool_proof,
     tool_report,
+    tool_run,
     tool_spray,
     tool_status,
 )
@@ -118,6 +122,53 @@ def test_status_shows_vault_ids(tmp_db: Path) -> None:
     tool_add_cred(tmp_db, "m", "svc_portal", "P0rt@l!Svc#2025", source="dump")
     out = tool_status(tmp_db, "m")
     assert "vault_ids: svc_portal(password)" in out
+
+
+def test_ingest_nmap(tmp_db: Path, sample_nmap_xml: Path) -> None:
+    with yhdb.transaction(tmp_db) as conn:
+        yhdb.upsert_engagement(conn, lab="m", scope="10.0.0.0/24")
+    out = tool_ingest(tmp_db, "m", str(sample_nmap_xml), kind="nmap")
+    assert "nmap ingested" in out and "hosts" in out
+
+
+def test_ingest_peas_requires_host(tmp_db: Path) -> None:
+    import pytest
+    _seed(tmp_db)
+    with pytest.raises(ValueError):
+        tool_ingest(tmp_db, "m", "whatever.txt", kind="linpeas")
+
+
+def test_run_renders_task(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    tool_plan(tmp_db, "m")
+    with yhdb.transaction(tmp_db) as conn:
+        tid = conn.execute("SELECT id FROM task LIMIT 1").fetchone()["id"]
+    out = tool_run(tmp_db, "m", tid)   # render only (go defaults False)
+    assert "curl" in out               # the ollama probe command is rendered
+
+
+def test_proof_binds_and_advances(tmp_db: Path, tmp_path: Path) -> None:
+    _seed(tmp_db)
+    tool_advance(tmp_db, "m", "10.0.0.5", "foothold")
+    shot = tmp_path / "flag.png"
+    shot.write_bytes(b"png")
+    out = tool_proof(tmp_db, "m", "10.0.0.5", str(shot), flag_content="OSAI{x}")
+    assert "proof #" in out and "looted" in out
+
+
+def test_proof_refuses_missing_screenshot(tmp_db: Path, tmp_path: Path) -> None:
+    import pytest
+    _seed(tmp_db)
+    with pytest.raises(ValueError):
+        tool_proof(tmp_db, "m", "10.0.0.5", str(tmp_path / "nope.png"))
+
+
+def test_consume_marks_technique(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    tool_plan(tmp_db, "m")
+    assert "consumed" in tool_consume(tmp_db, "m", "ollama_unauth_api")
+    # re-planning now skips the consumed rule
+    assert "matched 0" in tool_plan(tmp_db, "m")
 
 
 def test_next_context_inlines_vault(tmp_db: Path) -> None:

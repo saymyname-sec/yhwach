@@ -39,9 +39,13 @@ once the target host carries the required finding tag.
 - [x] First live chain wired: the RAG-upload extractor tags `rag_upload`, unlocking
       `rag_kb_advanced_poisoning` / `embedding_collision_attack`.
 - [x] Tests: `findings_include` gates a surface rule; surface-less rule is host-scoped + idempotent.
-- **Follow-up (Phase 1b):** populate the remaining tags — extractors / ingest for `chrome_login_data`,
-      `dpapi_master_key`, `gitlab_token`, `aws_credentials`, `python_requirements`, `pickle_endpoint`,
-      `ssrf_confirmed`, etc. — so those chains light up from real detections, not just manual findings.
+- **Phase 1b (partial):** ✅ PEAS parser now tags host-side loot — `aws_credentials` (linPEAS),
+      `chrome_login_data` + `dpapi_master_key` (winPEAS) — so `aws_iam_role_chain_escalation`,
+      `chrome_abe_credential_decrypt`, and `dpapi_credential_chain` light up from a real `ingest`.
+      Remaining tags to source from detections: `gitlab_token`, `python_requirements`,
+      `pickle_endpoint`, `ssrf_confirmed`, `code_scanner`, `training_pipeline`, `ai_code_review`,
+      `mcp_config_writable`, `pod_create_permission`, `nvidia_toolkit`, `sagemaker_create_notebook`,
+      `jinja2_template`.
 
 ### Phase 2 — Installable + CI
 - [ ] Packaging: `force-include` `db/`, `persona/`, `playbooks/`; installed-path fallbacks in

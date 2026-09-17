@@ -66,6 +66,26 @@ def test_winpeas_gpp_cpassword() -> None:
     assert "GPP cpassword recoverable" in _titles(parse_winpeas(text))
 
 
+def _tag_for(findings, title_prefix):
+    return next(f.tag for f in findings if f.title.startswith(title_prefix))
+
+
+def test_linpeas_aws_credentials_tagged() -> None:
+    f = parse_linpeas("Found /home/dev/.aws/credentials with aws_access_key_id=AKIAABCDEFGHIJKLMNOP")
+    assert "AWS credentials on host" in _titles(f)
+    assert _tag_for(f, "AWS credentials") == "aws_credentials"
+
+
+def test_winpeas_chrome_login_data_tagged() -> None:
+    f = parse_winpeas(r"Google Chrome found: C:\Users\dev\AppData\Local\Google\Chrome\User Data\Default\Login Data")
+    assert _tag_for(f, "Chrome credential store") == "chrome_login_data"
+
+
+def test_winpeas_dpapi_masterkey_tagged() -> None:
+    f = parse_winpeas(r"DPAPI Master Keys found: C:\Users\dev\AppData\Roaming\Microsoft\Protect\S-1-5-21\...")
+    assert _tag_for(f, "DPAPI master key") == "dpapi_master_key"
+
+
 def test_parse_peas_dispatch() -> None:
     assert parse_peas("(root) NOPASSWD: /bin/sh", "linpeas")
     assert parse_peas("SeImpersonatePrivilege Enabled", "winpeas")

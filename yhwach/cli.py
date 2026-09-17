@@ -123,7 +123,8 @@ def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | N
         text = Path(file).read_text(encoding="utf-8", errors="replace")
         found = parse_peas(text, kind)
         for f in found:
-            yhdb.add_finding(conn, hrow["id"], None, f.cls, f.title, f.severity, f.evidence)
+            yhdb.add_finding(conn, hrow["id"], None, f.cls, f.title, f.severity, f.evidence,
+                             tag=f.tag)
         yhdb.set_host_stage(conn, eng_id, host_ip, "enumerated")
         yhdb.log_event(conn, eng_id, "ingest", {"kind": kind, "host": host_ip, "findings": len(found)})
 

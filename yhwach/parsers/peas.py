@@ -59,6 +59,12 @@ def parse_linpeas(text: str) -> list[ExtractedFinding]:
         out.append(ExtractedFinding(
             "CWE-522", "Private SSH key found on host", "high", "reuse for lateral SSH"))
 
+    # AWS credentials on disk / in env -> tag for the cloud chaining rules.
+    if re.search(r"aws_access_key_id|\.aws/credentials|AKIA[0-9A-Z]{16}", text):
+        out.append(ExtractedFinding(
+            "CWE-522", "AWS credentials on host", "high",
+            "IAM keys in ~/.aws/credentials or env", tag="aws_credentials"))
+
     return out
 
 
@@ -94,6 +100,20 @@ def parse_winpeas(text: str) -> list[ExtractedFinding]:
         out.append(ExtractedFinding(
             "CWE-522", "Stored credentials (cmdkey)", "medium",
             "runas /savecred against stored targets"))
+
+    # Chrome credential store -> tag for chrome_abe_credential_decrypt.
+    if re.search(r"chrome", text, re.I) and re.search(r"Login Data", text, re.I):
+        out.append(ExtractedFinding(
+            "CWE-522", "Chrome credential store present", "high",
+            "Chrome 'Login Data' — App-Bound Encryption decrypt from a SYSTEM/user context",
+            tag="chrome_login_data"))
+
+    # DPAPI master keys -> tag for the DPAPI credential chain.
+    if re.search(r"DPAPI\s+Master", text, re.I) or re.search(r"masterkey", text, re.I):
+        out.append(ExtractedFinding(
+            "CWE-522", "DPAPI master key material", "high",
+            "decrypt DPAPI blobs (creds/cookies) with the master key",
+            tag="dpapi_master_key"))
 
     return out
 

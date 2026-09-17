@@ -17,16 +17,26 @@ MCP-only operator can drive a whole engagement:
 
 - `yhwach_engage`    — initialise/resume a lab (scope + optional domain/dc); call this first
 - `yhwach_status`    — engagement scoreboard (hosts by stage, services, tasks, vault)
+- `yhwach_recall`    — **catch up after a context reset**: state + what was already TRIED (wins and
+  dead ends) + open leads + enum gaps + next moves. Compact and persona-free; call it first in a
+  fresh session, before `yhwach_next`
 - `yhwach_ingest`    — ingest an nmap XML / linPEAS / winPEAS / bloodhound / certipy file
 - `yhwach_enum`      — run nmap through HexStrike and ingest the result (delegated enumeration)
 - `yhwach_probe`     — probe scanned hosts for AI + traditional surfaces
 - `yhwach_plan`      — match playbooks against the world model; populate the task queue
-- `yhwach_next`      — the operator context block (persona + state + ranked candidates + commands)
+- `yhwach_next`      — the operator context block (persona + state + dead ends + enum gaps +
+  ranked candidates + commands). `persona=false` sends the frame's sha256 instead of its body for
+  cheap later turns; `fmt="json"` returns the same slice as data
 - `yhwach_run`       — render a task's actions; with `go=true`, execute read-only ones + extract findings
 - `yhwach_findings`  — recorded findings, most severe first
 - `yhwach_proof`     — bind a flag + screenshot to a host and advance `foothold → looted`
 - `yhwach_pivot`     — record a pivot (subnet reachable via a host), render the Ligolo deploy, advance to `pivoted`
 - `yhwach_advance`   — advance a host's FSM stage
+- `yhwach_outcome`   — **record how a move went** (`success|fail|blocked|partial` + a one-line
+  reason). Success consumes the technique; fail/blocked retire the task, decay its EV and pin it to
+  the handoff's DEAD ENDS block. Call it for every resolved move
+- `yhwach_gaps`      — under-enumerated hosts + the exact nmap that closes each gap (full-port /
+  `-sV` / UDP top-100), from recorded scan coverage
 - `yhwach_consume`   — mark a technique consumed (planner stops proposing it)
 - `yhwach_add_cred` / `yhwach_creds` — add to / read the credential vault
 - `yhwach_spray`     — credential-spray commands (vault creds × sprayable surfaces)

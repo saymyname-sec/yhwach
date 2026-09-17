@@ -2,19 +2,23 @@
 
 ## Status
 
-**Done and validated on a live challenge lab — Iron Crown (274 tests):**
-- ✅ World model (SQLite, 12 tables) + nmap ingestion + host FSM
+**Done and validated on a live challenge lab — Iron Crown (381 tests):**
+- ✅ World model (SQLite, 14 tables) + nmap ingestion + host FSM
 - ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
 - ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
   message brokers)
-- ✅ Deterministic planner: 60 YAML technique rules → EV-ranked tasks, AI-first tiering
+- ✅ Deterministic planner: 92 YAML technique rules → EV-ranked tasks, AI-first tiering
       (AI, traditional, cloud/k8s, broker, supply-chain, post-exploit); matches surface / auth /
       product / os / `findings_include` (post-foothold chaining — every rule is matcher-supported)
 - ✅ Cross-cutting primitives: technique exhaustion + credential reuse + lore denylist
+- ✅ Operator memory: attempt ledger (`yhwach outcome`) → dead ends + EV decay, `yhwach recall`
+      catch-up brief, cheap `--no-persona` / `--json` handoffs
+- ✅ Enumeration coverage (`scan_coverage`) + `yhwach gaps` — under-enumeration is now queryable
+- ✅ Every chaining tag has a producer (0/40 dead) — all 92 rules reachable
 - ✅ Actions layer: 107 registered actions (emits → concrete commands); read-only runs
       (untrusted substituted values are shell-guarded), exploitation render-only
 - ✅ Deterministic finding extraction from action output (incl. error-based SQLi)
-- ✅ Operator handoff: `next --contract` (persona + state + candidates + commands)
+- ✅ Operator handoff: `next --contract` (persona + state + dead ends + enum gaps + candidates)
 - ✅ Post-foothold FSM: credential vault, `spray`, linPEAS/winPEAS parsers,
       `foothold → looted → pivoted → done`
 - ✅ Proof capture: `yhwach proof` binds a flag + screenshot and gates `foothold → looted` on
@@ -42,10 +46,11 @@ once the target host carries the required finding tag.
 - **Phase 1b (partial):** ✅ PEAS parser now tags host-side loot — `aws_credentials` (linPEAS),
       `chrome_login_data` + `dpapi_master_key` (winPEAS) — so `aws_iam_role_chain_escalation`,
       `chrome_abe_credential_decrypt`, and `dpapi_credential_chain` light up from a real `ingest`.
-      Remaining tags to source from detections: `gitlab_token`, `python_requirements`,
-      `pickle_endpoint`, `ssrf_confirmed`, `code_scanner`, `training_pipeline`, `ai_code_review`,
-      `mcp_config_writable`, `pod_create_permission`, `nvidia_toolkit`, `sagemaker_create_notebook`,
-      `jinja2_template`.
+      **✅ Closed in Phase 9:** every tag on that remaining list now has a producer —
+      `gitlab_token`, `python_requirements`, `ssrf_confirmed`, `mcp_config_writable`,
+      `pod_create_permission`, `nvidia_toolkit`, `sagemaker_create_notebook` and `jinja2_template`
+      landed with their parsers; `pickle_endpoint`, `code_scanner`, `training_pipeline` and
+      `ai_code_review` in Phase 9. **0 of 40 chaining tags are now unreachable.**
 
 ### Phase 2 — Installable + CI ✅ DONE
 - [x] Packaging: `force-include` bundles `db/schema.sql`, `persona/`, `playbooks/`, `tests/fixtures/`
@@ -148,9 +153,10 @@ say so.
       (loopback + firewall), Obsidian + Local REST API, MCP registration, pre-staged tooling, smoke test.
 
 **Deliberately not built (documented decisions, not open TODOs):**
-- FSM `scanned→enumerated` predicate (`has_full_tcp AND udp_top100_done`): the data model doesn't
-  record scan *coverage*, and the transition is operator judgment today. The two predicates that
-  matter for scoring (`foothold→looted` proof, `looted→pivoted` tunnel) are enforced.
+- ~~FSM `scanned→enumerated` predicate~~ — **shipped advisory in Phase 8**: `scan_coverage` now
+  records what each run covered, `yhwach gaps` evaluates the predicate, and the handoff/`advance`
+  warn. It warns rather than refuses because scans legitimately arrive out of band; the two
+  predicates that matter for scoring (`foothold→looted` proof, `looted→pivoted` tunnel) stay hard.
 - Structured logging framework: the CLI's `click.echo` output *is* the UX; a logging layer adds
   churn without operator value.
 - Inline report screenshots + per-finding verbatim repro: the Obsidian Attack Chain note already
@@ -168,6 +174,59 @@ Closes the in-repo weaknesses from the assessment; the only remaining A-blocker 
       (kerberoast/AS-REP/DCSync/certipy); creds stay operator-supplied so secrets never render.
 - [x] Regression caught + fixed by the injection-guard test (the `<DOMAIN>` placeholder must be
       exempt from the shell-metachar taint check — it's engagement config, not target-controlled).
+
+### Phase 8 — Operator memory + enumeration coverage ✅ DONE
+The three gaps that hurt an LLM operator most: it could not remember its own failures, could not
+re-seed itself after a context reset, and could not see under-enumeration.
+- [x] **Attempt ledger** (`attempt` table, `yhwach/memory.py`, `yhwach outcome` / `yhwach_outcome`):
+      every resolved move is recorded (`success|fail|blocked|partial` + a one-line reason).
+      `success` consumes the technique and closes the task; `fail`/`blocked` retire the task and
+      halve that rule's EV on that host at the next `plan` (recomputed, never persisted); `partial`
+      leaves it queued. Closes the loop that made the queue grow forever — before this, the engine
+      never wrote `task.status` outside the planner.
+- [x] **DEAD ENDS block** in `yhwach next --contract`: burned moves, per host, with the reason and
+      the try count, so a compacted context cannot re-propose them. Persona hard-rule #2 updated.
+- [x] **Recall brief** (`yhwach recall` / `yhwach_recall`, `--json`): elapsed, stages, counts, wins,
+      dead ends, P0 leads, enum gaps, blocked hosts, recent timeline, next ranked moves — a few
+      hundred tokens, persona-free. The first command of a fresh session or a post-`/compact` turn.
+- [x] **Cheap turns**: `next --contract --no-persona` sends the frame's sha256 instead of its ~7 KB
+      body (≥50% smaller handoff); `next --json` / `yhwach_next(fmt="json")` emit the same slice as
+      data, including per-candidate `task_id` and rendered commands.
+- [x] **Scan coverage** (`scan_coverage` table, `parsers/nmap.ScanMeta`): nmap ingest now records
+      what a run *covered* — port range per protocol, `-sV`, UDP — from `<scaninfo>` + run args
+      (XML) or the command line (`-oN`). Recorded by CLI ingest, MCP ingest and HexStrike `enum`.
+- [x] **`yhwach gaps` / `yhwach_gaps`** + an ENUM GAPS block in the handoff and in recall: every
+      host missing full-TCP / `-sV` / UDP top-100, each with the exact scan that closes it.
+      `advance --to enumerated` warns. This is the `scanned→enumerated` predicate from the FSM
+      design, shipped as an advisory (see ARCHITECTURE for why it warns instead of refusing).
+- [x] Fixed in passing: the CLI's nmap ingest never wrote an `ingest` event, so it was invisible to
+      the report timeline and to recall (the MCP path did).
+- [x] 40 new tests (`test_memory.py`, `test_coverage.py`, + CLI/MCP parity); 381 green, ruff clean,
+      6/6 golden fixtures unchanged.
+
+### Phase 9 — Close the unreachable rules ✅ DONE
+Five rules shipped with a `findings_include` tag that **no parser or extractor ever produced**, so
+the planner could never fire them — rule, action and payload all present, chain permanently open.
+All five were on the scored AI surface.
+- [x] **`_ml_supply_chain` extractor** (interpret.py) over tool lists / OpenAPI specs / model
+      listings / Gradio APIs → `pickle_endpoint` (unpickling path: `pickle.loads`, `joblib.load`,
+      `dill`, `sympify`, unsafe `yaml.load`, `.pkl` route), `model_checkpoint_load` (`torch.load`,
+      `load_state_dict`, `.ckpt`/`.pth`/`pytorch_model.bin`) and `training_pipeline`
+      (`fine_tuning`, `adapter_config.json`, `peft`, `trainer_state.json`).
+- [x] **`_gitlab_ai_pipeline` extractor** over GitLab recon output → `code_scanner`
+      (pre-receive / semgrep / SAST / secret-detection) and `ai_code_review` (GitLab Duo, AI
+      reviewer bots). Both guards have documented bypasses; naming the guard unlocks them.
+- [x] **`_model_artifacts` in the PEAS parser** — post-foothold file evidence: a `.pt`/`.pth`/
+      `.ckpt` checkpoint tags `model_checkpoint_load` (severity **high** when linPEAS marks it
+      writable — overwrite + next `torch.load()` is RCE), LoRA/trainer artifacts tag
+      `training_pipeline`. `.safetensors` is deliberately never a signal.
+- [x] **`_chain()` composer** so an action that already had an extractor (`enumerate_models`,
+      `mcp_tools_list`) gains a second one instead of silently replacing it.
+- [x] Tests (`test_ml_supply_chain.py`, 14): each of the five chains driven end to end — real tool
+      output → extractor → tagged finding → `match_rules` → the rule appears in the queue — plus
+      false-positive guards (benign tool lists, `yaml.load(Loader=SafeLoader)`, `.safetensors`).
+- [x] Audit: **0 of 40 `findings_include` tags are now without a producer** (was 5); all 92 rules
+      are reachable and every `emits` maps to a registered action.
 
 **Still open — needs the live lab (not fixable in-repo):**
 - [ ] **Field validation**: run a full engagement end-to-end against real HexStrike + netexec +

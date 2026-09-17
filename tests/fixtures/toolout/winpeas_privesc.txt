@@ -1,0 +1,15 @@
+ÉÍÍÍÍÍÍÍÍÍÍ¹ Scheduled Applications --Non Microsoft--
+    (Task) KethalisZoneSync
+        Action: powershell -File C:\ProgramData\Kethalis\kethalis-zone-sync.ps1
+        Trigger: every 15 minutes
+        Run As: NT AUTHORITY\SYSTEM
+        File Permissions: BUILTIN\Users [WriteData/CreateFiles]
+
+ÉÍÍÍÍÍÍÍÍÍÍ¹ Looking for AutoLogon credentials
+    DefaultDomainName             :  KETHALIS
+    DefaultUserName               :  svc-autologon
+    DefaultPassword               :  Sup3r-S3cret-Autologon!
+
+ÉÍÍÍÍÍÍÍÍÍÍ¹ Looking for DPAPI Credential Manager
+    Folder: C:\Users\j.martinez\AppData\Roaming\Microsoft\Credentials
+    Folder: C:\Users\j.martinez\AppData\Roaming\Microsoft\Protect\S-1-5-21-...

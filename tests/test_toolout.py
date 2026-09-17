@@ -12,6 +12,7 @@ from pathlib import Path
 from yhwach.interpret import interpret_all
 from yhwach.parsers.adcs import parse_certipy
 from yhwach.parsers.bloodhound import parse_bloodhound
+from yhwach.parsers.peas import parse_winpeas
 
 _DIR = Path(__file__).parent / "fixtures" / "toolout"
 
@@ -58,6 +59,11 @@ def test_bloodhound_facts_incl_unknown_edge() -> None:
     tags = {f.tag for f in parse_bloodhound(_read("bloodhound_facts.json"))}
     assert {"kerberoastable", "dcsync", "unconstrained_delegation"}.issubset(tags)
     assert "some_new_edge_type" in tags   # forward-compatible
+
+
+def test_winpeas_privesc_multi_tag() -> None:
+    tags = {f.tag for f in parse_winpeas(_read("winpeas_privesc.txt"))}
+    assert {"writable_scheduled_task", "lsa_defaultpassword", "dpapi_master_key"}.issubset(tags)
 
 
 def test_ssrf_egress_proxy_tags_confirmed() -> None:

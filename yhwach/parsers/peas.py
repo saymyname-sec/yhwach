@@ -91,10 +91,24 @@ def parse_winpeas(text: str) -> list[ExtractedFinding]:
             "CWE-256", "GPP cpassword recoverable", "high",
             "decrypt with gpp-decrypt for domain creds", tag="gpp_password"))
 
+    # A scheduled task that RUNS AS SYSTEM whose action file/dir is writable by a
+    # low-priv group -> overwrite + trigger -> SYSTEM (Double_Hellix devws01/rsrchws01).
+    if re.search(r"(?i)task", text) and \
+            re.search(r"(?i)Run\s*As\s*:?\s*(?:NT AUTHORITY\\)?(?:SYSTEM|LocalSystem)|as SYSTEM", text) and \
+            re.search(r"(?i)(?:BUILTIN\\)?(?:Users|Everyone|Authenticated Users)\b.{0,40}"
+                      r"(?:Write|Modify|FullControl|AddFile|CreateFiles|WriteData)", text):
+        out.append(ExtractedFinding(
+            "CWE-732", "Writable scheduled-task script runs as SYSTEM", "high",
+            "overwrite the task action file (writable by Users) then schtasks /run -> SYSTEM",
+            tag="writable_scheduled_task"))
+
+    # DefaultPassword lives in the SECURITY/SOFTWARE hive as an LSA secret;
+    # secretsdump LOCAL recovers it (Double_Hellix rsrchws01 -> domain cred).
     if re.search(r"DefaultPassword\s*:\s*\S+|AutoLogon", text):
         out.append(ExtractedFinding(
-            "CWE-256", "Autologon credentials in registry", "medium",
-            "DefaultUserName/DefaultPassword set"))
+            "CWE-256", "LSA DefaultPassword / autologon credential", "high",
+            "recover DefaultPassword via secretsdump LOCAL (SECURITY hive) then reuse/spray",
+            tag="lsa_defaultpassword"))
 
     if re.search(r"Currently stored credentials|cmdkey", text, re.I) and "Target:" in text:
         out.append(ExtractedFinding(
@@ -108,11 +122,12 @@ def parse_winpeas(text: str) -> list[ExtractedFinding]:
             "Chrome 'Login Data' — App-Bound Encryption decrypt from a SYSTEM/user context",
             tag="chrome_login_data"))
 
-    # DPAPI master keys -> tag for the DPAPI credential chain.
-    if re.search(r"DPAPI\s+Master", text, re.I) or re.search(r"masterkey", text, re.I):
+    # DPAPI master keys / Credential Manager blobs -> tag for the DPAPI chain.
+    if re.search(r"DPAPI\s+Master", text, re.I) or re.search(r"masterkey", text, re.I) or \
+            re.search(r"(?i)Credential Manager|Microsoft\\+Credentials|Microsoft\\+Protect", text):
         out.append(ExtractedFinding(
-            "CWE-522", "DPAPI master key material", "high",
-            "decrypt DPAPI blobs (creds/cookies) with the master key",
+            "CWE-522", "DPAPI master key / Credential Manager blobs", "high",
+            "decrypt DPAPI blobs (Credential Manager / cookies) with the master key",
             tag="dpapi_master_key"))
 
     return out

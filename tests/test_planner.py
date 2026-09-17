@@ -142,6 +142,28 @@ def test_vault_gated_rule_needs_credentials(tmp_db: Path) -> None:
     assert "kerberoast_with_creds" in ids              # creds present
 
 
+def test_writable_scheduled_task_chain(tmp_db: Path) -> None:
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="smb", os="windows")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "writable_scheduled_task")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "writable_scheduled_task_privesc" in ids
+
+
+def test_lsa_defaultpassword_chain(tmp_db: Path) -> None:
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="smb", os="windows")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "lsa_defaultpassword")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "lsa_defaultpassword_recover" in ids
+
+
 def test_text_to_sql_bypass_chain(tmp_db: Path) -> None:
     """A chatbot surface ranks the text-to-SQL guardrail-bypass move."""
     from yhwach.playbooks import default_playbook_dir, load_rules

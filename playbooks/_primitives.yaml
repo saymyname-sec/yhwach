@@ -33,6 +33,7 @@
     - unattend_xml             # Windows sysprep artifact with plaintext creds
     - powershell_history       # PSReadline history with commands / secrets
     - dpapi_master_key         # DPAPI blob path
+    - lsa_defaultpassword      # LSA DefaultPassword / autologon secret (often a domain cred)
     - putty_session_reg        # PuTTY saved session with password
     - firefox_logins_json      # Firefox profile
     - browser_wallet_extension # crypto wallet or password manager extension state

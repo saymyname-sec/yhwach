@@ -557,6 +557,57 @@ def proof(lab: str, host_ip: str, screenshot_path: str, flag_path: str | None,
 
 @main.command()
 @click.option("--lab", required=True, help="Lab name.")
+@click.option("--via-host", "via_ip", required=True, help="Pivot host IP (runs the agent).")
+@click.option("--subnet", required=True, help="CIDR now reachable through the pivot.")
+@click.option("--lport", default=11601, show_default=True, type=int,
+              help="Ligolo proxy listener port on Kali.")
+@click.option("--no-advance", is_flag=True, default=False,
+              help="Record the tunnel but don't advance the pivot host to 'pivoted'.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def pivot(lab: str, via_ip: str, subnet: str, lport: int, no_advance: bool,
+          db_path: str | None) -> None:
+    """Record a pivot (tunnel into a subnet via a host) and render the deploy commands.
+
+    Uses the pre-staged obfuscated Ligolo agent (svcmon.exe) for a Windows pivot,
+    a stock agent otherwise. Recording the tunnel unblocks the host's
+    `looted -> pivoted` transition.
+    """
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        hrow = conn.execute("SELECT id, os FROM host WHERE engagement_id = ? AND ip = ?",
+                            (eng_id, via_ip)).fetchone()
+        if hrow is None:
+            click.echo(f"[!] Pivot host {via_ip} not found.", err=True)
+            sys.exit(2)
+        _, created = yhdb.add_tunnel(conn, eng_id, hrow["id"], subnet)
+        yhdb.log_event(conn, eng_id, "tunnel", {"via": via_ip, "subnet": subnet})
+        advanced = False
+        if not no_advance:
+            advanced, msg = yhdb.set_host_stage(conn, eng_id, via_ip, "pivoted")
+            if advanced:
+                yhdb.log_event(conn, eng_id, "stage", {"host": via_ip, "stage": "pivoted"})
+        os_name = hrow["os"]
+
+    from yhwach.engine import render_pivot
+
+    click.echo(f"[+] Tunnel {'recorded' if created else 'already known'}: {subnet} via {via_ip}")
+    if not no_advance:
+        click.echo(f"[+] {via_ip} -> pivoted" if advanced else f"[i] stage unchanged ({msg}).")
+    click.echo("== Deploy (propose — operator runs) ==")
+    for line in render_pivot(via_ip, subnet, os_name, lport=lport):
+        click.echo(line)
+    click.echo("[note] record the pivot in the Obsidian vault (Network Map + Attack Chain).")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
 @click.option("--user", "identifier", required=True, help="Username / key label / token id.")
 @click.option("--secret", default=None, help="Password / hash / key material.")
 @click.option("--kind", default="password",

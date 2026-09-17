@@ -21,6 +21,7 @@ MCP-only operator can drive a whole engagement:
 - `yhwach_run`       — render a task's actions; with `go=true`, execute read-only ones + extract findings
 - `yhwach_findings`  — recorded findings, most severe first
 - `yhwach_proof`     — bind a flag + screenshot to a host and advance `foothold → looted`
+- `yhwach_pivot`     — record a pivot (subnet reachable via a host), render the Ligolo deploy, advance to `pivoted`
 - `yhwach_advance`   — advance a host's FSM stage
 - `yhwach_consume`   — mark a technique consumed (planner stops proposing it)
 - `yhwach_add_cred` / `yhwach_creds` — add to / read the credential vault

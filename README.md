@@ -26,12 +26,12 @@ The persona travels with the engine. Whatever CLI, host, or client executes the 
 **Working end-to-end, through post-exploitation.** The deterministic engine runs from an
 nmap scan to a persona-framed, doctrine-ranked operator brief with concrete commands, then
 carries the engagement through foothold, loot, and pivot — and has been validated against a
-live challenge lab (Iron Crown). 186 tests, green on Linux and Windows.
+live challenge lab (Iron Crown). 234 tests, green on Linux and Windows.
 
 What works today:
 
 - **World model** — SQLite; hosts / services / surfaces / findings / credentials / tasks /
-  proofs / technique state / event log (11 tables)
+  proofs / tunnels / technique state / event log (12 tables)
 - **Ingestion** — nmap XML → hosts + services (monotonic host FSM); linPEAS / winPEAS →
   host-scoped privesc findings
 - **Delegated enumeration** — `yhwach enum` runs nmap through HexStrike (loopback-guarded),
@@ -46,14 +46,15 @@ What works today:
   chaining (a rule fires once the host carries the required finding tag)
 - **Primitives** — technique exhaustion (no repeats), credential reuse (never exhausted), lore
   denylist (OffSec dev-artifact filtering)
-- **Actions layer** — 96 registered actions (`yhwach actions`) turn every playbook step into a
+- **Actions layer** — 98 registered actions (`yhwach actions`) turn every playbook step into a
   concrete command; read-only recon runs itself (with untrusted values shell-guarded),
   exploitation is render-only for the operator
 - **Findings** — deterministic extraction from action output (unambiguous only; the rest is
   operator judgment via the contract)
 - **Post-foothold FSM** — credential vault, `yhwach cred` / `creds` / `spray`, and monotonic
-  host stages (`foothold → looted → pivoted → done`) via `yhwach advance`; `yhwach proof` binds
-  a flag + screenshot and gates `foothold → looted` on that evidence
+  host stages (`foothold → looted → pivoted → done`) via `yhwach advance`; `yhwach proof` gates
+  `foothold → looted` on a flag+screenshot, and `yhwach pivot` records a Ligolo tunnel (deploying
+  the pre-staged agent) to gate `looted → pivoted` on real subnet reachability
 - **Engagement notebook** — the operator writes detailed notes to an **Obsidian vault** (the
   single source of truth) via the Obsidian MCP at every objective; Yhwach's DB stays the
   queryable world model and never stores notes (see [persona/notebook.md](persona/notebook.md))
@@ -86,7 +87,7 @@ Not for unauthorized targets. Contributors: submit rules only for authorized-tar
 git clone https://github.com/saymyname-sec/yhwach ~/yhwach && cd ~/yhwach
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q            # 186 tests
+pytest -q            # 234 tests
 yhwach selftest      # golden fixtures
 
 # Drive an engagement (authorized targets only):
@@ -103,6 +104,7 @@ yhwach advance --lab lab01 --host 10.10.10.15 --to foothold   # auto-notes the m
 yhwach cred    --lab lab01 --user svc_sql --secret 'S3cr3t!' --kind password
 yhwach spray   --lab lab01                     # reuse the vault across sprayable surfaces
 yhwach proof   --lab lab01 --host 10.10.10.15 --screenshot flag.png  # -> looted (gated)
+yhwach pivot   --lab lab01 --via-host 10.10.10.15 --subnet 10.1.1.0/24  # -> pivoted
 
 yhwach findings --lab lab01
 yhwach report  --lab lab01 --out report.md

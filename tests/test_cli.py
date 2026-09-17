@@ -116,6 +116,17 @@ def test_cred_creds_and_consume(tmp_db: Path) -> None:
     assert c.exit_code == 0 and "consumed" in c.output
 
 
+def test_pivot_records_tunnel_and_advances(tmp_db: Path) -> None:
+    _seed(tmp_db)  # host 10.0.0.5 (linux)
+    r = _run(["pivot", "--lab", "L", "--via-host", "10.0.0.5", "--subnet", "10.1.0.0/24",
+              "--db", str(tmp_db)])
+    assert r.exit_code == 0
+    assert "10.1.0.0/24" in r.output and "pivoted" in r.output
+    assert "./agent -connect" in r.output          # linux pivot -> stock agent
+    rep = _run(["report", "--lab", "L", "--db", str(tmp_db)])
+    assert "Reachability" in rep.output and "10.1.0.0/24" in rep.output
+
+
 def test_spray_no_sprayable_surface(tmp_db: Path) -> None:
     _seed(tmp_db)  # ollama isn't sprayable
     _run(["cred", "--lab", "L", "--user", "admin", "--secret", "P@ss", "--db", str(tmp_db)])

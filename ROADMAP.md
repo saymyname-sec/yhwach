@@ -2,8 +2,8 @@
 
 ## Status
 
-**Done and validated on a live challenge lab — Iron Crown (186 tests):**
-- ✅ World model (SQLite, 11 tables) + nmap ingestion + host FSM
+**Done and validated on a live challenge lab — Iron Crown (234 tests):**
+- ✅ World model (SQLite, 12 tables) + nmap ingestion + host FSM
 - ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
 - ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
   message brokers)
@@ -11,7 +11,7 @@
       (AI, traditional, cloud/k8s, broker, supply-chain, post-exploit); matches surface / auth /
       product / os / `findings_include` (post-foothold chaining — all 50 rules now supported)
 - ✅ Cross-cutting primitives: technique exhaustion + credential reuse + lore denylist
-- ✅ Actions layer: 96 registered actions (emits → concrete commands); read-only runs
+- ✅ Actions layer: 98 registered actions (emits → concrete commands); read-only runs
       (untrusted substituted values are shell-guarded), exploitation render-only
 - ✅ Deterministic finding extraction from action output (incl. error-based SQLi)
 - ✅ Operator handoff: `next --contract` (persona + state + candidates + commands)
@@ -66,13 +66,39 @@ once the target host carries the required finding tag.
 - [x] Extracted `engine.py` (shared task-execution core) so CLI `run` and `yhwach_run` are one path.
 - **Done:** an MCP-only operator can drive ingest → probe → plan → next → run → proof. 228 tests green.
 
-### Phase 4 — MCP collaboration (named backlog)
-- [ ] BloodHound MCP adapter → AD path reasoning into the planner.
-- [ ] msfconsole MCP → exploit/session hand-off from proposal-tier actions.
-- [ ] Formalize HexStrike-as-MCP (richer ingestion than raw nmap).
-- [ ] Ligolo tunnel-state graph → the `pivoted` predicate.
-- [ ] Wire pre-staged `~/osai/current/tools/` binaries (`svcmon.exe` Ligolo agent, `svc.exe`/`svc.bin`
-      revshell) into the actions layer so the planner emits them directly.
+### Phase 4 — Post-foothold movement + tooling ✅ DONE (in-repo parts)
+The buildable-in-repo parts landed. The external MCPs (BloodHound, msfconsole) are driven by the
+operator, not by Yhwach (Yhwach is itself an MCP *server*, not a client) — their Yhwach-side work is
+ingestion + rules, which moves to **Phase 4a** (AD) and a later msf follow-up.
+- [x] **Ligolo tunnel-state → `pivoted` predicate**: `tunnel` table + `add_tunnel`/`list_tunnels`;
+      `set_host_stage` gates `looted → pivoted` on a tunnel/reachable-subnet via that host
+      (realizes the ARCHITECTURE predicate); a `Reachability / pivots` section in the report.
+- [x] **Pre-staged tooling wired into the actions layer**: `deploy_ligolo_agent_win` (svcmon.exe)
+      and `drop_amsi_revshell_win` (svc.exe/svc.bin) actions.
+- [x] **`yhwach pivot` / `yhwach_pivot`**: records the tunnel, renders the deploy (pre-staged
+      obfuscated agent for Windows, stock agent otherwise) + Kali-side route, advances the host to
+      `pivoted`. Shares `engine.render_pivot` across CLI + MCP. 234 tests green.
+- [ ] Deferred (operator-driven / need external servers): **BloodHound MCP** path reasoning (see
+      Phase 4a), **msfconsole MCP** exploit/session hand-off, richer HexStrike tool ingestion
+      (see Phase 4a).
+
+### Phase 4a — AD enumeration & chaining (the real enumeration gap)
+HexStrike can *run* AD tools (netexec / enum4linux-ng / ldapsearch / smbmap / impacket) and the
+playbooks already emit some, but Yhwach has no **parsers** for their output and no **AD attack
+rules**, so nothing chains. BloodHound provides the path *reasoning* HexStrike structurally can't.
+- [ ] **AD output parsers** (like the PEAS parser): netexec / ldapsearch / enum4linux / smbmap →
+      `finding` + `credential` rows with chaining tags (`kerberoastable`, `asreproastable`,
+      `smb_signing_off`, `ldap_anon`, `null_session`, `gpp_password`, `adcs_esc1`, …).
+- [ ] **AD attack playbook rules** gated via `findings_include`: kerberoast, AS-REP roast,
+      password spray, ADCS ESC1–ESC16 (certipy), unconstrained/constrained delegation, DCSync /
+      secretsdump, `kerberos:88` surface rule (currently detected but no rule acts on it).
+- [ ] **BloodHound ingestion**: operator runs BloodHound MCP collection/queries; Yhwach parses the
+      path output (e.g. shortest-path-to-DA, ACL abuse) into findings/tasks so the planner ranks the
+      next AD move. This is where "BloodHound MCP collaboration" actually lands.
+- [ ] **Deepen HexStrike helpers**: typed `netexec`/`nuclei`/`ldapsearch` calls + recon-dir capture,
+      so AD enum runs through `yhwach enum`/`run` and feeds the parsers above.
+- **Done when:** an SMB/LDAP/kerberos enumeration ingest tags the host, and the planner then ranks a
+      concrete AD attack (e.g. kerberoast) — the same findings_include chain we shipped, applied to AD.
 
 ### Phase 5 — Judgment layer: align docs to reality  ✅ DECIDED (align, don't build)
 The engine is a read-only context handoff; the operator (Claude Code) does the reasoning. We are NOT

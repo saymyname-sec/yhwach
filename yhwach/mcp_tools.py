@@ -321,6 +321,36 @@ def tool_proof(db_path: Path | str, lab: str, host: str, screenshot: str,
     return msg
 
 
+def tool_pivot(db_path: Path | str, lab: str, via_host: str, subnet: str,
+               lport: int = 11601, advance: bool = True) -> str:
+    """Record a pivot (subnet reachable via a host) and render the deploy commands.
+
+    Unblocks the pivot host's looted -> pivoted transition. Uses the pre-staged
+    obfuscated Ligolo agent for a Windows pivot, a stock agent otherwise."""
+    from yhwach.engine import render_pivot
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        hrow = conn.execute("SELECT id, os FROM host WHERE engagement_id=? AND ip=?",
+                            (eid, via_host)).fetchone()
+        if hrow is None:
+            raise ValueError(f"pivot host {via_host} not found")
+        _, created = yhdb.add_tunnel(conn, eid, hrow["id"], subnet)
+        yhdb.log_event(conn, eid, "tunnel", {"via": via_host, "subnet": subnet})
+        msg = f"tunnel {'recorded' if created else 'already known'}: {subnet} via {via_host}"
+        if advance:
+            adv, m = yhdb.set_host_stage(conn, eid, via_host, "pivoted")
+            if adv:
+                yhdb.log_event(conn, eid, "stage", {"host": via_host, "stage": "pivoted"})
+                msg += f"; {via_host} -> pivoted"
+            else:
+                msg += f"; stage unchanged ({m})"
+        os_name = hrow["os"]
+    lines = [msg, "== Deploy (propose — operator runs) =="]
+    lines += render_pivot(via_host, subnet, os_name, lport=lport)
+    return "\n".join(lines)
+
+
 def tool_consume(db_path: Path | str, lab: str, technique: str,
                  host: str | None = None) -> str:
     """Mark a technique consumed — the planner stops proposing it this engagement."""
@@ -364,6 +394,9 @@ TOOL_SPECS = [
      "Render a task's actions; with go=true, execute read-only ones and extract findings."),
     ("yhwach_proof", tool_proof,
      "Bind a flag + screenshot to a host as evidence and advance foothold -> looted."),
+    ("yhwach_pivot", tool_pivot,
+     "Record a pivot (subnet reachable via a host), render the Ligolo deploy, and advance "
+     "the host looted -> pivoted."),
     ("yhwach_consume", tool_consume,
      "Mark a technique consumed so the planner stops proposing it this engagement."),
 ]

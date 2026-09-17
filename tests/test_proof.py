@@ -59,3 +59,38 @@ def test_empty_screenshot_does_not_satisfy_gate(tmp_db: Path) -> None:
         changed, msg = yhdb.set_host_stage(conn, eng, "10.0.0.5", "looted")
     assert changed is False
     assert "proof" in msg
+
+
+# --- looted -> pivoted gate (Ligolo tunnel state) ---------------------------
+
+def test_pivoted_refused_without_tunnel(tmp_db: Path) -> None:
+    eng, _ = _seed_host(tmp_db, "looted")
+    with yhdb.transaction(tmp_db) as conn:
+        changed, msg = yhdb.set_host_stage(conn, eng, "10.0.0.5", "pivoted")
+    assert changed is False
+    assert "tunnel" in msg
+
+
+def test_pivoted_allowed_with_tunnel(tmp_db: Path) -> None:
+    eng, hid = _seed_host(tmp_db, "looted")
+    with yhdb.transaction(tmp_db) as conn:
+        yhdb.add_tunnel(conn, eng, hid, "10.1.0.0/24")
+        changed, msg = yhdb.set_host_stage(conn, eng, "10.0.0.5", "pivoted")
+    assert changed is True and msg is None
+
+
+def test_pivoted_force_bypasses_gate(tmp_db: Path) -> None:
+    eng, _ = _seed_host(tmp_db, "looted")
+    with yhdb.transaction(tmp_db) as conn:
+        changed, _ = yhdb.set_host_stage(conn, eng, "10.0.0.5", "pivoted", monotonic=False)
+    assert changed is True
+
+
+def test_add_tunnel_dedupes(tmp_db: Path) -> None:
+    eng, hid = _seed_host(tmp_db)
+    with yhdb.transaction(tmp_db) as conn:
+        _, c1 = yhdb.add_tunnel(conn, eng, hid, "10.1.0.0/24")
+        _, c2 = yhdb.add_tunnel(conn, eng, hid, "10.1.0.0/24")
+        rows = yhdb.list_tunnels(conn, eng)
+    assert c1 is True and c2 is False
+    assert len(rows) == 1 and rows[0]["subnet"] == "10.1.0.0/24"

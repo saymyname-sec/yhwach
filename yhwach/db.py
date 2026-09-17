@@ -206,11 +206,51 @@ def set_host_stage(
         if has_proof is None:
             return False, (f"{ip}: 'looted' needs a proof (flag + screenshot) — run "
                            "`yhwach proof` first (or advance --force to override)")
+    # looted -> pivoted requires a route out: a tunnel / reachable subnet via this host.
+    if monotonic and stage == "pivoted":
+        has_tunnel = conn.execute(
+            "SELECT 1 FROM tunnel WHERE via_host_id = ? LIMIT 1", (row["id"],)
+        ).fetchone()
+        if has_tunnel is None:
+            return False, (f"{ip}: 'pivoted' needs a tunnel/reachable subnet via this host — "
+                           "run `yhwach pivot` first (or advance --force to override)")
     conn.execute(
         "UPDATE host SET stage = ?, last_updated = ? WHERE id = ?",
         (stage, _now_utc(), row["id"]),
     )
     return True, None
+
+
+def add_tunnel(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    via_host_id: int | None,
+    subnet: str,
+    kind: str = "ligolo",
+) -> tuple[int, bool]:
+    """Record a pivot tunnel (a subnet reachable via a host). Deduped by
+    (engagement, via_host, subnet). Returns (id, created)."""
+    existing = conn.execute(
+        "SELECT id FROM tunnel WHERE engagement_id = ? AND via_host_id IS ? AND subnet = ?",
+        (engagement_id, via_host_id, subnet),
+    ).fetchone()
+    if existing is not None:
+        return int(existing["id"]), False
+    cur = conn.execute(
+        "INSERT INTO tunnel (engagement_id, via_host_id, subnet, kind, created_at) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (engagement_id, via_host_id, subnet, kind, _now_utc()),
+    )
+    return int(cur.lastrowid), True
+
+
+def list_tunnels(conn: sqlite3.Connection, engagement_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT t.subnet, t.kind, t.created_at, h.ip AS via_ip "
+        "FROM tunnel t LEFT JOIN host h ON h.id = t.via_host_id "
+        "WHERE t.engagement_id = ? ORDER BY t.created_at",
+        (engagement_id,),
+    ).fetchall()
 
 
 def add_proof(

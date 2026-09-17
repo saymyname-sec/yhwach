@@ -38,7 +38,7 @@ Verify:
 ```bash
 yhwach --version
 yhwach persona           # prints the operator persona in effect + its hash
-pytest -q                # 186 tests
+pytest -q                # 234 tests
 yhwach selftest          # golden fixtures
 ```
 

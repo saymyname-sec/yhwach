@@ -173,6 +173,23 @@ CREATE TABLE IF NOT EXISTS lore_denylist_hit (
     seen_at        TEXT    NOT NULL
 );
 
+-- ---------------------------------------------------------------------------
+-- Tunnels — pivot / subnet-reachability state. A row means the operator has a
+-- route into `subnet` via the pivot host `via_host_id` (e.g. a Ligolo agent).
+-- This is what gates a host's `looted -> pivoted` transition and feeds the
+-- reachability picture in the report.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS tunnel (
+    id             INTEGER PRIMARY KEY,
+    engagement_id  INTEGER NOT NULL REFERENCES engagement(id),
+    via_host_id    INTEGER REFERENCES host(id),   -- pivot host running the agent
+    subnet         TEXT    NOT NULL,               -- CIDR now reachable through it
+    kind           TEXT    NOT NULL DEFAULT 'ligolo',
+    created_at     TEXT    NOT NULL,
+    UNIQUE(engagement_id, via_host_id, subnet)
+);
+CREATE INDEX IF NOT EXISTS idx_tunnel_host ON tunnel(via_host_id);
+
 -- Notes are NOT stored here. The engagement notebook is the Obsidian vault, and
 -- the operator (Claude Code) writes it directly via the Obsidian MCP — detailed,
 -- at every objective. See persona/notebook.md for the structure. The DB is the

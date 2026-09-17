@@ -71,6 +71,11 @@ def test_nxc_maq_zero_quota_not_tagged() -> None:
     assert not interpret_all("netexec_maq", "MAQ  DC01  MachineAccountQuota: 0", {"IP": "x"})
 
 
+def test_nxc_badsuccessor_tag() -> None:
+    fs = interpret_all("nxc_badsuccessor_check", _read("nxc_badsuccessor.txt"), {"IP": "10.10.10.10"})
+    assert fs and fs[0].tag == "dmsa_badsuccessor" and fs[0].severity == "critical"
+
+
 def test_nxc_pass_pol_no_lockout() -> None:
     fs = interpret_all("netexec_pass_pol", _read("nxc_pass_pol.txt"), {"IP": "10.10.10.10"})
     assert fs and fs[0].tag == "password_policy"

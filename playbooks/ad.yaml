@@ -352,6 +352,37 @@
   source: 'internalallthethings . passwords in AD user descriptions (get-desc-users)'
   authorized_only: true
 
+# We hold a domain cred -> check for BadSuccessor (writable/creatable dMSA OU).
+- id: ldap_badsuccessor_check
+  when: { surface: ldap, vault: nonempty }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: nxc_badsuccessor_check
+  maps: [T1087.002]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . BadSuccessor dMSA check (nxc -M badsuccessor)'
+  authorized_only: true
+
+# BadSuccessor-vulnerable OU -> create a dMSA succeeding a DA -> its keys/TGT.
+- id: badsuccessor_abuse
+  when: { findings_include: dmsa_badsuccessor }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: badsuccessor_exploit
+  maps: [T1078]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'internalallthethings . BadSuccessor dMSA succession -> predecessor keys (DA)'
+  technique: badsuccessor
+  authorized_only: true
+
 # We hold a domain cred -> read MachineAccountQuota (enumeration). >0 unlocks RBCD.
 - id: ldap_machineaccountquota
   when: { surface: ldap, vault: nonempty }

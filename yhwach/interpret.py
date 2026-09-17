@@ -283,6 +283,20 @@ def _maq(output: str, ctx: dict) -> ExtractedFinding | None:
         tag="machine_account_quota")
 
 
+def _badsuccessor(output: str, ctx: dict) -> ExtractedFinding | None:
+    """nxc -M badsuccessor flagging a writable/creatable dMSA OU -> tag
+    dmsa_badsuccessor (Server 2025 domain-user -> DA path)."""
+    for line in output.splitlines():
+        if "[+]" not in line:
+            continue
+        if re.search(r"(?i)dmsa|badsuccessor|create.*dmsa|delegated managed service", line):
+            return ExtractedFinding(
+                "T1078", "BadSuccessor: can create/edit a dMSA (Server 2025)", "critical",
+                f"{ctx.get('IP','?')} — dMSA succession abuse yields the predecessor's keys (DA)",
+                tag="dmsa_badsuccessor")
+    return None
+
+
 def _pass_pol(output: str, ctx: dict) -> ExtractedFinding | None:
     """Domain password policy dumped -> tag password_policy (safe-spray gate).
 
@@ -486,6 +500,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "netexec_pass_pol": _pass_pol,
     "netexec_maq": _maq,
     "ldap_find_constrained_delegation": _constrained_deleg,
+    "nxc_badsuccessor_check": _badsuccessor,
     "netexec_get_desc_users": _desc_password,
     "netexec_laps": _laps,
     "asreproast_users": _kerberos_roast,

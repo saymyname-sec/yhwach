@@ -164,6 +164,27 @@ def _smb_null(output: str, ctx: dict) -> list[ExtractedFinding]:
     return out
 
 
+def _coerce_services(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """nxc -M spooler / -M webdav -> tag a coercible service.
+
+    WebClient (HTTP auth) is the higher-value one: it relays to ADCS (ESC8).
+    Both tag coercion_target so the coerce->relay rule can fire."""
+    ip = ctx.get("IP", "?")
+    out: list[ExtractedFinding] = []
+    # nxc marks a positive with [+]; a "not enabled" line never carries it.
+    hits = [ln for ln in output.splitlines() if "[+]" in ln]
+    if any(re.search(r"(?i)spooler", ln) for ln in hits):
+        out.append(ExtractedFinding(
+            "T1187", "Print Spooler running (MS-RPRN PrinterBug coercible)", "high",
+            f"{ip} Spooler is up — coerce machine auth over SMB", tag="coercion_target"))
+    if any(re.search(r"(?i)web(dav|client)", ln) for ln in hits):
+        out.append(ExtractedFinding(
+            "T1187", "WebClient running (HTTP coercion -> ADCS ESC8)", "high",
+            f"{ip} WebClient is up — coerce over HTTP and relay to ADCS certsrv",
+            tag="webclient_running"))
+    return out
+
+
 def _ldap_anon(output: str, ctx: dict) -> list[ExtractedFinding]:
     """Anonymous LDAP bind / naming-context leak -> tag ldap_anon (+ the domain)."""
     ip = ctx.get("IP", "?")
@@ -382,6 +403,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "jenkins_oauth2proxy_bypass": _jenkins_proxy_bypass,
     "craft_tool_agency_abuse": _tool_call_success,
     "netexec_smb_null": _smb_null,
+    "nxc_coerce_service_check": _coerce_services,
     "probe_writable_smb_share": _smb_null,
     "enum4linux_ng": _enum4linux,
     "smbmap_shares": _smb_null,

@@ -86,6 +86,37 @@
   technique: asrep_roast
   authorized_only: true
 
+# We hold a domain cred -> probe for coercible services (Spooler / WebClient).
+- id: smb_coercible_service_check
+  when: { surface: smb, vault: nonempty }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: nxc_coerce_service_check
+  maps: [T1187]
+  points: 10
+  risk: read_only
+  routes: /osai-relay
+  source: 'internalallthethings . detect Spooler/WebClient before coercing (nxc -M spooler/webdav)'
+  authorized_only: true
+
+# A coercible service is up -> force machine auth to a waiting relay/listener.
+- id: coerce_authentication_to_relay
+  when: { findings_include: coercion_target }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: coerce_authentication
+  maps: [T1187, T1557.001]
+  points: 15
+  risk: propose
+  routes: /osai-relay
+  source: 'internalallthethings . coerce_plus PrinterBug/PetitPotam/DFSCoerce -> ntlmrelayx'
+  technique: coercion
+  authorized_only: true
+
 # SMB signing not required -> NTLM relay (pair with a coercion).
 - id: smb_ntlm_relay
   when: { surface: smb, findings_include: smb_signing_off }

@@ -100,6 +100,25 @@ def test_findings_include_gates_surface_rule(tmp_db: Path) -> None:
     assert tasks[0]["playbook_rule_id"] == "rag_adv"
 
 
+def test_coercion_chain(tmp_db: Path) -> None:
+    """With a vault cred, SMB offers the coercible-service check; a coercion_target
+    finding then unlocks the coerce-to-relay rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="smb")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        yhdb.add_credential(conn, eng, "svc", "P@ss", "password", "dump")
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "smb_coercible_service_check" in ids
+    assert "coerce_authentication_to_relay" not in ids
+    _add_finding(tmp_db, eng, "coercion_target")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "coerce_authentication_to_relay" in ids
+
+
 def test_smb_password_policy_chain(tmp_db: Path) -> None:
     """An SMB surface offers password-policy enumeration (pre-spray)."""
     from yhwach.playbooks import default_playbook_dir, load_rules

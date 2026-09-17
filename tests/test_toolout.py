@@ -29,6 +29,12 @@ def test_nxc_smb_realistic_multi_signal() -> None:
     assert any(f.severity == "critical" for f in fs)   # (Pwn3d!)
 
 
+def test_nxc_coerce_services_tags() -> None:
+    tags = {f.tag for f in interpret_all("nxc_coerce_service_check",
+                                         _read("nxc_coerce_services.txt"), {"IP": "10.10.10.10"})}
+    assert tags == {"coercion_target", "webclient_running"}   # 'not enabled' line ignored
+
+
 def test_nxc_rid_brute_userlist() -> None:
     fs = interpret_all("netexec_rid_brute", _read("nxc_rid_brute.txt"), {"IP": "10.10.11.231"})
     assert any(f.tag == "domain_users" for f in fs)

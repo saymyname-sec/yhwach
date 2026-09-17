@@ -352,6 +352,38 @@
   source: 'internalallthethings . passwords in AD user descriptions (get-desc-users)'
   authorized_only: true
 
+# We hold a domain cred -> map domain/forest trusts + both SIDs.
+- id: ldap_trust_enum
+  when: { surface: ldap, vault: nonempty }
+  class: traditional
+  likelihood: L
+  time_cost: fast
+  emits:
+    - action: enumerate_domain_trusts
+  maps: [T1482]
+  points: 10
+  risk: read_only
+  routes: /osai-ad-attack
+  source: 'internalallthethings . enumerate trusts + domain SIDs (nxc -M enum_trusts / lookupsid)'
+  authorized_only: true
+
+# A trust exists (+ you hold the trust key / child krbtgt) -> forge an inter-realm
+# ticket with SID history to escalate child DA -> forest root (Enterprise Admins).
+- id: trust_ticket_forge
+  when: { findings_include: domain_trust }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: forge_inter_realm_trust_ticket
+  maps: [T1134.005, T1482]
+  points: 15
+  risk: propose
+  routes: /osai-ad-attack
+  source: 'internalallthethings . inter-realm ticket + SID history (ticketer -extra-sid -519)'
+  technique: trust_forge
+  authorized_only: true
+
 # We hold a domain cred -> check for BadSuccessor (writable/creatable dMSA OU).
 - id: ldap_badsuccessor_check
   when: { surface: ldap, vault: nonempty }

@@ -39,6 +39,8 @@ _KIND_MAP: dict[str, tuple[str, str, str]] = {
     "webclient_running": ("T1187", "high", "WebClient running (HTTP coercion -> ADCS ESC8)"),
     "ntlm_relay_dc": ("T1557.001", "high", "DC vulnerable to NTLM relay (LDAP signing not enforced)"),
     "no_smb_signing": ("T1557.001", "medium", "SMB signing not required (relay target)"),
+    # Domain/forest trust (map_domain_trusts) -> SID-history / inter-realm forge.
+    "domain_trust": ("T1482", "high", "Domain/forest trust"),
 }
 
 

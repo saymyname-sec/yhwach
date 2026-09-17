@@ -196,6 +196,16 @@ def test_ollama_version_fixture_is_vulnerable() -> None:
     assert fs and fs[0].tag == "ollama_probllama" and fs[0].cls == "CVE-2024-37032"
 
 
+def test_enum_trusts_tag() -> None:
+    fs = interpret_all("enumerate_domain_trusts", _read("nxc_enum_trusts.txt"), {"IP": "10.10.10.10"})
+    assert fs and fs[0].tag == "domain_trust"
+
+
+def test_bloodhound_domain_trust_fact() -> None:
+    tags = {f.tag for f in parse_bloodhound('[{"kind":"domain_trust","principal":"corp.local"}]')}
+    assert "domain_trust" in tags
+
+
 def test_bloodhound_relay_facts() -> None:
     tags = {f.tag for f in parse_bloodhound(_read("bloodhound_relay_facts.json"))}
     assert {"webclient_running", "ntlm_relay_dc", "no_smb_signing"}.issubset(tags)

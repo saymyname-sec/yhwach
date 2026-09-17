@@ -1,0 +1,3 @@
+LDAP        10.10.10.10     389    DC01             [+] child.corp.local\svc:Passw0rd
+ENUM_TRUS.. 10.10.10.10     389    DC01             [*] Enumerating domain trusts
+ENUM_TRUS.. 10.10.10.10     389    DC01             child.corp.local <-> corp.local (ParentChild, Bidirectional)

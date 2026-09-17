@@ -257,6 +257,16 @@ def _desc_password(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _domain_trust(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A domain/forest trust in the enum output -> tag domain_trust."""
+    if re.search(r"(?i)parent[\s_-]?child|tree[\s_-]?root|forest|external|bidirectional|<->", output):
+        return ExtractedFinding(
+            "T1482", "Domain/forest trust present", "high",
+            f"{ctx.get('IP','?')} exposes a trust — SID history / inter-realm forge candidate",
+            tag="domain_trust")
+    return None
+
+
 def _constrained_deleg(output: str, ctx: dict) -> ExtractedFinding | None:
     """An account with msDS-AllowedToDelegateTo set -> tag constrained_delegation."""
     if re.search(r"(?i)msds?-?allowedtodelegateto\s*[:=]\s*\S+", output):
@@ -501,6 +511,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "netexec_maq": _maq,
     "ldap_find_constrained_delegation": _constrained_deleg,
     "nxc_badsuccessor_check": _badsuccessor,
+    "enumerate_domain_trusts": _domain_trust,
     "netexec_get_desc_users": _desc_password,
     "netexec_laps": _laps,
     "asreproast_users": _kerberos_roast,

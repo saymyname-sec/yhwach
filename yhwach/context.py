@@ -116,6 +116,18 @@ def build_context(
                 src = f"{src} @ {r['source_host_ip']}"
             lines.append(f"  - {r['identifier']}  ({r['kind']})  =  {sec}   [{src}]")
 
+    # P0 leads — high-EV findings (DA/cred paths) surfaced above the ranked queue.
+    from yhwach.primitives import p0_leads
+    leads = p0_leads(conn, engagement_id)
+    if leads:
+        lines.append("")
+        lines.append("=" * 70)
+        lines.append(f"## P0 LEADS ({len(leads)}) — attack these first (credential/DA paths)")
+        lines.append("=" * 70)
+        for lead in leads:
+            lines.append(f"  ! [{lead['severity'].upper()}] {lead['ip'] or '-'}  "
+                         f"{lead['tag']}  — {lead['title']}")
+
     lines.append("")
     lines.append("=" * 70)
     lines.append(f"## RANKED CANDIDATES ({len(tasks)}) — EV pre-computed by Yhwach")

@@ -26,7 +26,7 @@ The persona travels with the engine. Whatever CLI, host, or client executes the 
 **Working end-to-end, through post-exploitation.** The deterministic engine runs from an
 nmap scan to a persona-framed, doctrine-ranked operator brief with concrete commands, then
 carries the engagement through foothold, loot, and pivot — and has been validated against a
-live challenge lab (Iron Crown). 263 tests, green on Linux and Windows.
+live challenge lab (Iron Crown). 265 tests, green on Linux and Windows.
 
 What works today:
 
@@ -90,7 +90,7 @@ Not for unauthorized targets. Contributors: submit rules only for authorized-tar
 git clone https://github.com/saymyname-sec/yhwach ~/yhwach && cd ~/yhwach
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q            # 263 tests
+pytest -q            # 265 tests
 yhwach selftest      # golden fixtures
 
 # Drive an engagement (authorized targets only):
@@ -118,7 +118,12 @@ Obsidian MCP — the notebook is the vault, not the DB. Run `yhwach mcp` to expo
 Claude Code on Kali as MCP tools (`pip install -e ".[mcp]"`). See [docs/deploy.md](docs/deploy.md).
 
 Yhwach never auto-runs exploitation — it proposes, and the operator (you, or Claude Code
-on Kali) executes with judgment. See [docs/install.md](docs/install.md) and [docs/deploy.md](docs/deploy.md).
+on Kali) executes with judgment.
+
+**New here?** [docs/setup.md](docs/setup.md) is a full, copy-paste, newbie walkthrough — Kali prep,
+the offensive toolchain, HexStrike (bound to loopback + firewalled), the Obsidian notebook, and
+registering the MCP servers in Claude Code. See also [docs/install.md](docs/install.md) (reference)
+and [docs/deploy.md](docs/deploy.md) (MCP details).
 
 ---
 

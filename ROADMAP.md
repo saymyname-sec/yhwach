@@ -2,7 +2,7 @@
 
 ## Status
 
-**Done and validated on a live challenge lab — Iron Crown (263 tests):**
+**Done and validated on a live challenge lab — Iron Crown (265 tests):**
 - ✅ World model (SQLite, 12 tables) + nmap ingestion + host FSM
 - ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
 - ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
@@ -133,18 +133,31 @@ say so.
 - [x] schema: `event.persona_hash`/`rules_hash` marked **reserved (not populated)**; the event
       comment lists the kinds actually written.
 
-### Phase 6 — Polish (in progress)
-- [x] **Report v2 — timeline**: the report now renders a `## Timeline` table from the append-only
+### Phase 6 — Polish ✅ DONE
+- [x] **Report v2 — timeline**: the report renders a `## Timeline` table from the append-only
       `event` log (ingest / enum / probe / stage / credential / proof / tunnel), each row summarised.
 - [x] **Scope validation**: `yhwach engage` rejects a malformed `--scope`; `yhwach enum` refuses an
       out-of-scope `--target` before any HexStrike traffic (`yhwach/scope.py`). Hostname targets warn.
-- [ ] Enforce the remaining FSM entry-predicate (`scanned→enumerated`) + `high_ev_leads` auto-P0 +
-      the declared OPSEC invariants.
-- [ ] Structured logging / config file / configurable timeouts.
-- [ ] Report v2 extras: inline proof screenshots + verbatim per-finding reproduction commands.
+- [x] **`high_ev_leads` auto-P0**: `primitives.p0_leads` surfaces high-EV findings (dcsync,
+      kerberoastable, adcs_vuln, chrome/dpapi/gpp/aws loot, …) as a **P0 LEADS** block at the top of
+      the `yhwach next --contract` handoff — attack these before the ranked queue.
+- [x] **OPSEC invariants** written into the persona: screenshot the win immediately, never drive
+      Metasploit through HexStrike, read the vector-DB detection rules first, keep HexStrike loopback.
+- [x] **Configurable timeouts**: `YHWACH_RUN_TIMEOUT` (per-action) and `YHWACH_HEXSTRIKE_TIMEOUT`.
+- [x] **Newbie setup guide**: [docs/setup.md](docs/setup.md) — Kali prep, toolchain, HexStrike
+      (loopback + firewall), Obsidian + Local REST API, MCP registration, pre-staged tooling, smoke test.
 
-The original phased plan below is kept for reference; the numbering predates the
-build order above.
+**Deliberately not built (documented decisions, not open TODOs):**
+- FSM `scanned→enumerated` predicate (`has_full_tcp AND udp_top100_done`): the data model doesn't
+  record scan *coverage*, and the transition is operator judgment today. The two predicates that
+  matter for scoring (`foothold→looted` proof, `looted→pivoted` tunnel) are enforced.
+- Structured logging framework: the CLI's `click.echo` output *is* the UX; a logging layer adds
+  churn without operator value.
+- Inline report screenshots + per-finding verbatim repro: the Obsidian Attack Chain note already
+  carries reproduction detail + evidence images; the Markdown report links the proof paths.
+
+The engine is feature-complete against the plan. The original phased scaffold below predates this
+build order and is kept for reference.
 
 ---
 

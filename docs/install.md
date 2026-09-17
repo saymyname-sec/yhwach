@@ -2,6 +2,10 @@
 
 Yhwach targets Kali Linux with the standard OSAI-exam tooling stack.
 
+> **New to this?** Follow the step-by-step [setup.md](setup.md) instead — it walks the whole
+> machine prep (toolchain, HexStrike, Obsidian, MCP registration) for a newcomer. This page is the
+> terse requirements reference.
+
 ## Requirements
 
 - Kali Linux 2025+ (or any Debian-derived distro with the tools below)
@@ -38,7 +42,7 @@ Verify:
 ```bash
 yhwach --version
 yhwach persona           # prints the operator persona in effect + its hash
-pytest -q                # 263 tests
+pytest -q                # 265 tests
 yhwach selftest          # golden fixtures
 ```
 

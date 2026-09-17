@@ -125,6 +125,18 @@ def test_status_shows_vault_ids(tmp_db: Path) -> None:
     assert "vault_ids: svc_portal(password)" in out
 
 
+def test_next_surfaces_p0_leads(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    with yhdb.transaction(tmp_db) as conn:
+        eid = yhdb.engagement_id_for(conn, "m")
+        hid = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip='10.0.0.5'",
+                           (eid,)).fetchone()["id"]
+        yhdb.add_finding(conn, hid, None, "T1003.006", "DCSync rights: svc_bkp",
+                         "critical", "replication rights", tag="dcsync")
+    ctx = tool_next(tmp_db, "m")
+    assert "P0 LEADS" in ctx and "dcsync" in ctx
+
+
 def test_ingest_nmap(tmp_db: Path, sample_nmap_xml: Path) -> None:
     with yhdb.transaction(tmp_db) as conn:
         yhdb.upsert_engagement(conn, lab="m", scope="10.0.0.0/24")

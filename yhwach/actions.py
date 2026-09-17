@@ -12,11 +12,15 @@ Execution policy — Yhwach proposes, the operator executes:
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
 from typing import Any
+
+# Per-command execution timeout for auto-run read-only actions (env-overridable).
+_DEFAULT_RUN_TIMEOUT = float(os.environ.get("YHWACH_RUN_TIMEOUT", "60"))
 
 
 @dataclass
@@ -813,7 +817,7 @@ def run_action(
     context: dict[str, str],
     *,
     loot_dir: Path | str | None = None,
-    timeout: float = 60.0,
+    timeout: float = _DEFAULT_RUN_TIMEOUT,
     hexstrike=None,
 ) -> list[dict]:
     """Execute a runnable read-only action's commands, capturing output.

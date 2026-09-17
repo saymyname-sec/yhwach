@@ -123,3 +123,16 @@ def test_consume_by_shared_technique_key(tmp_db: Path) -> None:
         report = match_rules(conn, eng, [r1, r2])
     assert report.tasks_created == 0
     assert set(report.rules_skipped_consumed) == {"chatbot_a", "chatbot_b"}
+
+
+def test_p0_leads_filters_to_high_ev_tags(tmp_db) -> None:
+    from yhwach.primitives import p0_leads
+    eng, hid = _seed(tmp_db)
+    with yhdb.transaction(tmp_db) as conn:
+        yhdb.add_finding(conn, hid, None, "T1003.006", "DCSync rights: svc",
+                         "critical", "ev", tag="dcsync")
+        yhdb.add_finding(conn, hid, None, "LLM06", "Ollama exposed", "high", "ev")  # no tag
+        yhdb.add_finding(conn, hid, None, "CWE-200", "shares", "high", "ev", tag="null_session")
+        leads = p0_leads(conn, eng)
+    tags = {r["tag"] for r in leads}
+    assert tags == {"dcsync"}   # dcsync is P0; null_session / untagged are not

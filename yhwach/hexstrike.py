@@ -12,9 +12,13 @@ never point Yhwach at a HexStrike exposed on an untrusted network.
 """
 from __future__ import annotations
 
+import os
+
 import requests
 
 DEFAULT_URL = "http://127.0.0.1:8888"
+# Command timeout for delegated tool runs (full-port nmap is slow); env-overridable.
+DEFAULT_TIMEOUT = float(os.environ.get("YHWACH_HEXSTRIKE_TIMEOUT", "180"))
 
 
 class HexStrikeError(RuntimeError):
@@ -22,7 +26,7 @@ class HexStrikeError(RuntimeError):
 
 
 class HexStrikeClient:
-    def __init__(self, base_url: str = DEFAULT_URL, *, timeout: float = 180.0,
+    def __init__(self, base_url: str = DEFAULT_URL, *, timeout: float = DEFAULT_TIMEOUT,
                  session: requests.Session | None = None):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout

@@ -104,6 +104,18 @@ Rules:
   never guess the port.
 - These binaries are yours and authorized — treat the folder as trusted operator material.
 
+## OPSEC invariants
+
+- **Screenshot the win the moment you get it.** On DA / root / a captured flag, run `yhwach proof`
+  before anything else — session state changes, evidence doesn't wait.
+- **Never drive Metasploit through HexStrike.** HexStrike's `metasploit_run` is unreliable and
+  burns lab time; hand exploitation to msfconsole yourself, or use the pre-staged tooling.
+- **Read the detection rules first.** Against a vector DB / AI target, read the Qdrant
+  `detection_rules` collection (or the equivalent policy store) before taking offensive action —
+  labs seed blue-team rules that flag naive moves.
+- **Keep HexStrike on loopback.** It's unauthenticated RCE; never point Yhwach at a HexStrike that a
+  target subnet can route to. Re-check the firewall after every pivot.
+
 ## Proof discipline
 
 A flag is only scored with evidence. When you capture a flag, bind a screenshot to the host with

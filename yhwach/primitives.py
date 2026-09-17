@@ -138,3 +138,31 @@ def consumed_techniques(conn: sqlite3.Connection, engagement_id: int) -> set[str
         (engagement_id,),
     ).fetchall()
     return {r["technique_id"] for r in rows}
+
+
+# --------------------------------------------------------------------------
+# high_ev_leads — auto-P0
+# --------------------------------------------------------------------------
+# Finding tags that historically produce a credential/DA path in OSAI-style labs.
+# When present, the operator handoff surfaces them as P0 so they're attacked
+# before lower-value work (see playbooks/_primitives.yaml: high_ev_leads).
+P0_LEAD_TAGS = frozenset({
+    "dcsync", "kerberoastable", "asreproastable", "adcs_vuln",
+    "unconstrained_delegation", "chrome_login_data", "dpapi_master_key",
+    "gpp_password", "aws_credentials",
+})
+
+
+def p0_leads(conn: sqlite3.Connection, engagement_id: int) -> list[sqlite3.Row]:
+    """Open findings whose tag is a high-EV lead, most severe first."""
+    tags = sorted(P0_LEAD_TAGS)
+    placeholders = ",".join("?" * len(tags))
+    order = ("CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
+             "WHEN 'medium' THEN 2 ELSE 3 END")
+    return conn.execute(
+        "SELECT f.tag AS tag, f.title AS title, f.severity AS severity, h.ip AS ip "
+        "FROM finding f LEFT JOIN host h ON h.id = f.host_id "
+        "WHERE (h.engagement_id = ? OR f.host_id IS NULL) AND f.status = 'open' "
+        f"AND f.tag IN ({placeholders}) ORDER BY {order}, f.id",
+        (engagement_id, *tags),
+    ).fetchall()

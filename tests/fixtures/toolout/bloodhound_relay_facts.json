@@ -1,0 +1,7 @@
+{
+  "facts": [
+    {"kind": "webclient_running", "principal": "WS01.CORP.LOCAL", "detail": "WebClient service running"},
+    {"kind": "ntlm_relay_dc", "principal": "DC01.CORP.LOCAL", "detail": "LDAP signing not enforced"},
+    {"kind": "no_smb_signing", "principal": "SRV02.CORP.LOCAL", "detail": "SMB signing not required"}
+  ]
+}

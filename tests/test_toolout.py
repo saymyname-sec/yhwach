@@ -155,6 +155,11 @@ def test_ollama_version_fixture_is_vulnerable() -> None:
     assert fs and fs[0].tag == "ollama_probllama" and fs[0].cls == "CVE-2024-37032"
 
 
+def test_bloodhound_relay_facts() -> None:
+    tags = {f.tag for f in parse_bloodhound(_read("bloodhound_relay_facts.json"))}
+    assert {"webclient_running", "ntlm_relay_dc", "no_smb_signing"}.issubset(tags)
+
+
 def test_bloodhound_shadow_cred_target() -> None:
     fs = parse_bloodhound(_read("bloodhound_shadowcred.json"))
     sc = next(f for f in fs if f.tag == "shadow_cred_target")

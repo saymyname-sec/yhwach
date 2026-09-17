@@ -130,6 +130,30 @@ def test_smb_password_policy_chain(tmp_db: Path) -> None:
     assert "smb_password_policy" in ids
 
 
+def test_relay_adcs_esc8_chain(tmp_db: Path) -> None:
+    """A webclient_running fact unlocks the coerce->relay-to-ADCS (ESC8) rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="smb")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "webclient_running")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "ntlm_relay_to_adcs_esc8" in ids
+
+
+def test_relay_dc_ldap_chain(tmp_db: Path) -> None:
+    """An ntlm_relay_dc fact unlocks the relay-to-LDAP (RBCD/DCSync) rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="smb")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "ntlm_relay_dc")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "ntlm_relay_dc_ldap" in ids
+
+
 def test_smb_rid_cycling_chain(tmp_db: Path) -> None:
     """An SMB surface offers RID cycling for first-contact user enumeration."""
     from yhwach.playbooks import default_playbook_dir, load_rules

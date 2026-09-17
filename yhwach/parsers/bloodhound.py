@@ -34,6 +34,11 @@ _KIND_MAP: dict[str, tuple[str, str, str]] = {
     # GenericWrite / WriteDACL / AddKeyCredentialLink over a Tier-0 principal:
     # write msDS-KeyCredentialLink -> PKINIT -> NT hash (shadow credential).
     "shadow_cred_target": ("T1556", "critical", "Shadow-credential target (writable msDS-KeyCredentialLink)"),
+    # Coercion / NTLM-relay facts (find_computers_webclient_running,
+    # find_dcs_vulnerable_ntlm_relay, find_computers_no_smb_signing).
+    "webclient_running": ("T1187", "high", "WebClient running (HTTP coercion -> ADCS ESC8)"),
+    "ntlm_relay_dc": ("T1557.001", "high", "DC vulnerable to NTLM relay (LDAP signing not enforced)"),
+    "no_smb_signing": ("T1557.001", "medium", "SMB signing not required (relay target)"),
 }
 
 

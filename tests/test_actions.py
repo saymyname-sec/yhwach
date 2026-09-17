@@ -52,6 +52,14 @@ def test_render_substitutes_endpoint_from_meta() -> None:
     assert "http://10.0.0.7:8000/v2/message" in rendered
 
 
+def test_text_to_sql_bypass_renders_hex_projection() -> None:
+    action = get_action("craft_text_to_sql_bypass")
+    assert action.risk == "propose" and action.runnable is False
+    rendered = "\n".join(render_action(action, context_from_surface("10.0.0.20", 80, {})))
+    assert "hex(value)" in rendered
+    assert "http://10.0.0.20:80" in rendered
+
+
 def test_run_action_refuses_propose() -> None:
     action = get_action("jenkins_script_console")
     assert action.risk == "propose"

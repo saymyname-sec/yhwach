@@ -142,6 +142,17 @@ def test_vault_gated_rule_needs_credentials(tmp_db: Path) -> None:
     assert "kerberoast_with_creds" in ids              # creds present
 
 
+def test_text_to_sql_bypass_chain(tmp_db: Path) -> None:
+    """A chatbot surface ranks the text-to-SQL guardrail-bypass move."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="chatbot")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "text_to_sql_guardrail_bypass" in ids
+
+
 def test_agent_ssrf_and_imds_chain(tmp_db: Path) -> None:
     """An a2a agent hub offers the egress-proxy SSRF recon; a confirmed SSRF then
     unlocks the pre-existing IMDS/cloud-metadata rule."""

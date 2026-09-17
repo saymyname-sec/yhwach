@@ -198,6 +198,18 @@ def _kerberos_roast(output: str, ctx: dict) -> list[ExtractedFinding]:
     return out
 
 
+def _ssrf_file(output: str, ctx: dict) -> ExtractedFinding | None:
+    """An egress-proxy tool returning local file content via file:// -> tag
+    ssrf_confirmed (also unlocks the IMDS/cloud-metadata rule). Markers: a
+    passwd line or a PEM private-key header."""
+    if re.search(r"^\w[\w.\-]*:[^:]*:\d+:\d+:", output, re.M) or "PRIVATE KEY-----" in output:
+        return ExtractedFinding(
+            "LLM06", "Agent egress proxy accepts file:// (SSRF -> local file read)", "critical",
+            f"{ctx.get('URL','?')}/api/try?url=file:// reads local files / private keys",
+            tag="ssrf_confirmed")
+    return None
+
+
 def _lfi_passwd(output: str, ctx: dict) -> ExtractedFinding | None:
     """/etc/passwd leaking through an agent tool surface -> tag lfi_confirmed.
 
@@ -291,6 +303,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "probe_langflow_exec": _langflow_exec,
     "craft_ssti_probe": _ssti_reflection,
     "probe_tool_lfi_traversal": _lfi_passwd,
+    "probe_ssrf_egress_proxy": _ssrf_file,
     # --- AD enumeration ---
     "netexec_ldap": _ldap_anon,
     "ldapsearch_anon": _ldap_anon,

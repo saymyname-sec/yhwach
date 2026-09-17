@@ -142,6 +142,29 @@ def test_vault_gated_rule_needs_credentials(tmp_db: Path) -> None:
     assert "kerberoast_with_creds" in ids              # creds present
 
 
+def test_agent_ssrf_and_imds_chain(tmp_db: Path) -> None:
+    """An a2a agent hub offers the egress-proxy SSRF recon; a confirmed SSRF then
+    unlocks the pre-existing IMDS/cloud-metadata rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="a2a")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "agent_egress_proxy_ssrf" in ids
+    # ssrf_confirmed is what the file:// extractor sets; it lights up aws_ml_infra_ssrf
+    # (which is gated on surface: web) -> seed a web surface on the same host too.
+    with yhdb.transaction(tmp_db) as conn:
+        hid = conn.execute("SELECT id FROM host WHERE engagement_id=?", (eng,)).fetchone()["id"]
+        sid = conn.execute("SELECT id FROM service WHERE host_id=?", (hid,)).fetchone()["id"]
+        yhdb.upsert_surface(conn, hid, sid, "web", "none", "{}")
+    _add_finding(tmp_db, eng, "ssrf_confirmed")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "aws_ml_infra_ssrf" in ids
+
+
 def test_oauth2proxy_jenkins_bypass_chain(tmp_db: Path) -> None:
     """A web surface offers the oauth2-proxy suffix-bypass recon; the
     jenkins_unsecured tag then unlocks the anonymous console RCE."""

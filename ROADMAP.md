@@ -2,7 +2,7 @@
 
 ## Status
 
-**Done and validated on a live challenge lab — Iron Crown (255 tests):**
+**Done and validated on a live challenge lab — Iron Crown (263 tests):**
 - ✅ World model (SQLite, 12 tables) + nmap ingestion + host FSM
 - ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
 - ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
@@ -133,10 +133,15 @@ say so.
 - [x] schema: `event.persona_hash`/`rules_hash` marked **reserved (not populated)**; the event
       comment lists the kinds actually written.
 
-### Phase 6 — Polish
-- [ ] Report v2: event-log timeline + inline screenshots + verbatim repro commands.
-- [ ] Enforce FSM entry-predicates (`scanned→enumerated`, …) + `high_ev_leads` auto-P0 + OPSEC invariants.
-- [ ] Structured logging / config / configurable timeouts; scope validation on `engage`/`enum`.
+### Phase 6 — Polish (in progress)
+- [x] **Report v2 — timeline**: the report now renders a `## Timeline` table from the append-only
+      `event` log (ingest / enum / probe / stage / credential / proof / tunnel), each row summarised.
+- [x] **Scope validation**: `yhwach engage` rejects a malformed `--scope`; `yhwach enum` refuses an
+      out-of-scope `--target` before any HexStrike traffic (`yhwach/scope.py`). Hostname targets warn.
+- [ ] Enforce the remaining FSM entry-predicate (`scanned→enumerated`) + `high_ev_leads` auto-P0 +
+      the declared OPSEC invariants.
+- [ ] Structured logging / config file / configurable timeouts.
+- [ ] Report v2 extras: inline proof screenshots + verbatim per-finding reproduction commands.
 
 The original phased plan below is kept for reference; the numbering predates the
 build order above.

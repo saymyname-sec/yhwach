@@ -148,6 +148,25 @@ def test_report(tmp_db: Path) -> None:
     assert r.exit_code == 0 and "# Yhwach Engagement Report" in r.output
 
 
+def test_report_timeline(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    _run(["advance", "--lab", "L", "--host", "10.0.0.5", "--to", "foothold", "--db", str(tmp_db)])
+    r = _run(["report", "--lab", "L", "--db", str(tmp_db)])
+    assert "## Timeline" in r.output and "stage" in r.output
+
+
+def test_engage_rejects_invalid_scope(tmp_path: Path) -> None:
+    db = tmp_path / "bad.db"
+    r = _run(["engage", "--lab", "X", "--scope", "not-a-cidr", "--db", str(db)])
+    assert r.exit_code == 2 and "Invalid scope" in r.output
+
+
+def test_enum_rejects_out_of_scope_target(tmp_db: Path) -> None:
+    _run(["engage", "--lab", "L", "--scope", "10.0.0.0/24", "--db", str(tmp_db)])
+    r = _run(["enum", "--lab", "L", "--target", "10.9.9.9", "--db", str(tmp_db)])
+    assert r.exit_code == 2 and "not in scope" in r.output   # refused before HexStrike
+
+
 def test_snapshot_to_stdout(tmp_db: Path) -> None:
     _seed(tmp_db)
     r = _run(["snapshot", "--lab", "L", "--db", str(tmp_db)])

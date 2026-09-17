@@ -6,6 +6,7 @@ their evidence and the rendered command lives in the task/action layer.
 """
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 
@@ -15,6 +16,31 @@ _SEV_ORDER = "CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 " \
 
 def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _event_summary(kind: str, payload_json: str | None) -> str:
+    """One-line, human summary of an event's payload for the timeline."""
+    try:
+        p = json.loads(payload_json) if payload_json else {}
+    except (ValueError, TypeError):
+        p = {}
+    if not isinstance(p, dict):
+        return str(p)[:80]
+    if kind in ("ingest", "enum") and "hosts" in p:
+        return f"{p.get('hosts', '?')} hosts, {p.get('services', '?')} services" \
+               + (f" (via {p['via']})" if p.get("via") else "")
+    if kind == "ingest":
+        return f"{p.get('kind', '?')} on {p.get('host', '?')}: {p.get('findings', 0)} finding(s)"
+    if kind == "stage":
+        return f"{p.get('host', '?')} -> {p.get('stage', '?')}"
+    if kind == "credential":
+        return f"{p.get('id', '?')} ({p.get('kind', '?')})" \
+               + (f" @ {p['host']}" if p.get("host") else "")
+    if kind == "proof":
+        return f"{p.get('host', '?')} (screenshot)"
+    if kind == "tunnel":
+        return f"{p.get('subnet', '?')} via {p.get('via', '?')}"
+    return ", ".join(f"{k}={v}" for k, v in list(p.items())[:3])[:80]
 
 
 def build_report(conn: sqlite3.Connection, engagement_id: int) -> str:
@@ -162,6 +188,21 @@ def build_report(conn: sqlite3.Connection, engagement_id: int) -> str:
         out.append("|---|---|---|")
         for t in tunnels:
             out.append(f"| {t['subnet']} | {t['via_ip'] or '-'} | {t['kind']} |")
+        out.append("")
+
+    # --- Timeline (from the append-only event log) ---
+    events = conn.execute(
+        "SELECT ts, kind, payload_json FROM event WHERE engagement_id = ? "
+        "ORDER BY ts, id",
+        (engagement_id,),
+    ).fetchall()
+    if events:
+        out.append("## Timeline")
+        out.append("")
+        out.append("| Time (UTC) | Event | Detail |")
+        out.append("|---|---|---|")
+        for e in events:
+            out.append(f"| {e['ts']} | {e['kind']} | {_event_summary(e['kind'], e['payload_json'])} |")
         out.append("")
 
     out.append("---")

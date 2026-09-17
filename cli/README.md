@@ -19,7 +19,8 @@ Almost every command takes `--lab <name>` to select the engagement.
 
 ### `yhwach engage --lab <name> --scope <cidr,...> [--domain <d>] [--dc <ip>]`
 
-Create the SQLite DB if needed and upsert the engagement row (scope, optional AD domain/DC).
+Create the SQLite DB if needed and upsert the engagement row (scope, optional AD domain/DC). The
+`--scope` tokens are validated as IPs/CIDRs; a malformed token is rejected.
 
 ### `yhwach ingest <file> --lab <name> [--kind nmap|linpeas|winpeas|bloodhound|certipy] [--host <ip>]`
 
@@ -34,7 +35,9 @@ change the host stage.
 ### `yhwach enum --lab <name> --target <ip/cidr> [--ports <spec>] [--hexstrike-url <url>]`
 
 Run nmap through HexStrike (delegated enumeration), save the raw XML to `recon/`, and ingest
-it. Warns if the HexStrike URL is not loopback (unauthenticated RCE over a network).
+it. **Refuses an out-of-scope `--target`** (checked against the engagement scope) before any
+HexStrike traffic; a hostname target warns instead. Warns if the HexStrike URL is not loopback
+(unauthenticated RCE over a network).
 
 ### `yhwach probe --lab <name> [--host <ip>] [--timeout <s>]`
 
@@ -119,7 +122,8 @@ List recorded findings, most severe first, with evidence.
 
 ### `yhwach report --lab <name> [--out <file>]`
 
-Render a Markdown engagement report (scoreboard, findings, hosts, proofs) to stdout or a file.
+Render a Markdown engagement report (scoreboard, findings, hosts, proofs, reachability/pivots, and
+a timeline from the event log) to stdout or a file.
 
 ## Calibration and introspection
 

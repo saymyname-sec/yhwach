@@ -71,6 +71,14 @@ def main() -> None:
 def engage(lab: str, scope: str, domain: str | None, dc_ip: str | None,
            db_path: str | None) -> None:
     """Initialize an engagement: create the DB if needed, upsert the engagement row."""
+    from yhwach.scope import validate_scope
+
+    bad = validate_scope(scope)
+    if bad:
+        click.echo(f"[!] Invalid scope token(s): {', '.join(bad)} — use IPs/CIDRs "
+                   "(e.g. 10.10.10.0/24,192.168.1.5).", err=True)
+        sys.exit(2)
+
     path = _db_path(db_path)
     if not path.exists():
         yhdb.init(path)
@@ -224,6 +232,24 @@ def enum(lab: str, target: str, ports: str | None, hexstrike_url: str | None,
     if not path.exists():
         click.echo(f"[!] DB not found at {path}; run `yhwach engage` first.", err=True)
         sys.exit(2)
+
+    # Fail fast — unknown lab or out-of-scope target — before any HexStrike traffic.
+    from yhwach.scope import in_scope, is_ip_or_cidr
+
+    with yhdb.transaction(path) as conn:
+        srow = conn.execute("SELECT scope FROM engagement WHERE lab = ?", (lab,)).fetchone()
+    if srow is None:
+        click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+        sys.exit(2)
+    if is_ip_or_cidr(target):
+        if not in_scope(target, srow["scope"] or ""):
+            click.echo(f"[!] Target {target} is not in scope ({srow['scope']}). Refusing.",
+                       err=True)
+            sys.exit(2)
+    else:
+        click.echo(f"[i] Target {target} is not an IP/CIDR — cannot verify scope; continuing.",
+                   err=True)
+
     if not is_loopback(url):
         click.echo(f"[!] OPSEC: HexStrike URL {url} is not loopback — unauthenticated "
                    "RCE over a network. Continuing, but bind HexStrike to 127.0.0.1.", err=True)

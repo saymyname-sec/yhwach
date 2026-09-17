@@ -12,9 +12,8 @@ Execution policy — Yhwach proposes, the operator executes:
 """
 from __future__ import annotations
 
-import shlex
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from string import Template
 from typing import Any
@@ -39,6 +38,11 @@ def _a(id: str, commands, risk="read_only", runnable=True, outputs="raw", note="
 # Registry — every action id referenced by playbooks/*.yaml has an entry.
 # --------------------------------------------------------------------------
 ACTION_REGISTRY: dict[str, Action] = {
+    # --- bootstrap recon (persona "silence is not a valid state" fallback) ---
+    "run_initial_hexstrike_smart_scan": _a("run_initial_hexstrike_smart_scan",
+        ["yhwach enum --lab $LAB --target $IP  # delegated nmap+ingest via HexStrike"],
+        runnable=False, note="Bootstrap: scan + ingest the scope via HexStrike, then probe/plan."),
+
     # --- AI: ollama / openai-compat ---
     "probe_ollama_models": _a("probe_ollama_models",
         ["curl -sk $URL/api/tags"], outputs="http"),
@@ -714,6 +718,27 @@ def get_action(action_id: str) -> Action | None:
     return ACTION_REGISTRY.get(action_id)
 
 
+# Shell metacharacters that must never reach a shell=True command through a
+# substituted context value. Context values (MODEL, URL, ENDPOINT, ...) can be
+# derived from a target's own HTTP responses (e.g. an Ollama model name), so a
+# hostile target could smuggle command injection into an auto-run action.
+_SHELL_META = set(";|&$`\\\"'<>(){}\n\r*?!")
+
+
+def _tainted_context_values(context: dict[str, str]) -> dict[str, str]:
+    """Return the context entries whose value carries a shell metacharacter.
+
+    $OSAI is excluded — it stays a literal `$OSAI` for the operator's env and is
+    never auto-run into a shell here (render-only actions carry it)."""
+    bad = {}
+    for k, v in context.items():
+        if k == "OSAI":
+            continue
+        if any(c in _SHELL_META for c in str(v)):
+            bad[k] = v
+    return bad
+
+
 def run_action(
     action: Action,
     context: dict[str, str],
@@ -724,7 +749,10 @@ def run_action(
     """Execute a runnable read-only action's commands, capturing output.
 
     Refuses (raises) anything that is not read_only or not runnable — that is
-    the operator's to run, by policy.
+    the operator's to run, by policy. Also refuses to auto-run when any
+    substituted context value carries shell metacharacters (a hostile target
+    could inject commands via, e.g., a crafted model name); such actions are
+    left for the operator to review and run by hand.
     """
     if action.risk != "read_only" or not action.runnable:
         raise PermissionError(
@@ -732,8 +760,22 @@ def run_action(
             "render-only — the operator runs it."
         )
 
+    tainted = _tainted_context_values(context)
+    if tainted:
+        keys = ", ".join(sorted(tainted))
+        return [
+            {
+                "cmd": cmd,
+                "returncode": None,
+                "refused": True,
+                "output": (f"[refused] untrusted value(s) with shell metacharacters "
+                           f"({keys}) — not auto-run. Review and run this by hand."),
+            }
+            for cmd in render_action(action, context)
+        ]
+
     results: list[dict] = []
-    for cmd in render_action(action, context):
+    for idx, cmd in enumerate(render_action(action, context)):
         proc = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, timeout=timeout
         )
@@ -743,7 +785,7 @@ def run_action(
             loot_dir = Path(loot_dir)
             loot_dir.mkdir(parents=True, exist_ok=True)
             safe = "".join(c if c.isalnum() else "_" for c in action.id)[:40]
-            fp = loot_dir / f"{safe}_{context.get('IP','x')}_{context.get('PORT','x')}.txt"
+            fp = loot_dir / f"{safe}_{context.get('IP','x')}_{context.get('PORT','x')}_{idx}.txt"
             fp.write_text(out, encoding="utf-8")
             entry["loot_file"] = str(fp)
         results.append(entry)

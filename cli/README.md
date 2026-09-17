@@ -70,6 +70,14 @@ Advance a host's FSM stage (`undiscovered → scanned → enumerated → foothol
 done`, or `blocked`). Monotonic by default (`--force` allows moving backwards). Reaching an
 objective prints a reminder to write the host note in the Obsidian vault (via the Obsidian MCP).
 
+### `yhwach proof --lab <name> --host <ip> --screenshot <path> [--flag <path>] [--flag-content <s>] [--no-advance]`
+
+Bind a flag + screenshot to a host and advance it `foothold → looted`. The screenshot file must
+exist — Yhwach refuses otherwise, because the screenshot is the evidence that gates `looted` (the
+same gate `advance --to looted` enforces; `advance --force` overrides it). `--no-advance` records
+the proof without moving the stage. Prints a reminder to mirror the screenshot into the Obsidian
+vault.
+
 ### `yhwach cred --lab <name> --user <id> [--secret <s>] [--kind ...] [--source ...] [--host <ip>]`
 
 Add a credential to the vault (`password`/`ntlm`/`kerberos`/`ssh_key`/`api_key`/`token`/`dpapi`).

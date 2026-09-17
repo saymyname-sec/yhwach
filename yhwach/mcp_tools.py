@@ -11,7 +11,7 @@ from pathlib import Path
 
 from yhwach import db as yhdb
 from yhwach.context import build_context
-from yhwach.planner import match_rules, top_tasks
+from yhwach.planner import match_rules
 from yhwach.playbooks import default_playbook_dir, load_rules
 from yhwach.report import build_report
 from yhwach.spray import build_spray_plan

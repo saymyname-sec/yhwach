@@ -34,7 +34,7 @@ Verify:
 ```bash
 yhwach --version
 yhwach persona           # prints the operator persona in effect + its hash
-pytest -q                # 170 tests
+pytest -q                # 186 tests
 yhwach selftest          # golden fixtures
 ```
 
@@ -72,7 +72,11 @@ Yhwach reads and writes here:
     scope.txt                         # source of truth for scope
   recon/                              # raw scan output (e.g. HexStrike nmap XML)
   loot/                               # captured action output (yhwach run --go)
-  screenshots/                        # bound to `proof` rows
+  screenshots/                        # bound to `proof` rows (yhwach proof)
+  tools/                              # pre-staged custom tooling (provided per challenge):
+                                      #   svcmon.exe  — obfuscated Windows Ligolo agent
+                                      #   svc.exe / svc.bin — custom AMSI-bypass reverse shell
+                                      #   + an instructions file with the listener port
 ~/yhwach/                             # this repo, checked out
 ```
 

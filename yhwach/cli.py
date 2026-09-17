@@ -322,9 +322,7 @@ def next_cmd(lab: str, limit: int, host_ip: str | None, contract: bool,
             click.echo(block)
             return
 
-        tasks = top_tasks(conn, eng_id, limit)
-        if host_ip is not None:
-            tasks = [t for t in tasks if t["host_ip"] == host_ip]
+        tasks = top_tasks(conn, eng_id, limit, host_ip=host_ip)
 
     if not tasks:
         click.echo("[!] No pending tasks. Run `yhwach probe` then `yhwach plan` first.")
@@ -553,6 +551,70 @@ def advance(host_ip: str, stage: str, lab: str, force: bool, db_path: str | None
     else:
         click.echo(f"[!] {msg}", err=True)
         sys.exit(1)
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--host", "host_ip", required=True, help="Host IP the flag was captured on.")
+@click.option("--screenshot", "screenshot_path", required=True, type=click.Path(),
+              help="Path to the proof screenshot (must exist).")
+@click.option("--flag", "flag_path", default=None, type=click.Path(),
+              help="Path to the flag/proof file (optional).")
+@click.option("--flag-content", default=None, help="The flag text itself (optional).")
+@click.option("--no-advance", is_flag=True, default=False,
+              help="Record the proof but do not advance the host to 'looted'.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def proof(lab: str, host_ip: str, screenshot_path: str, flag_path: str | None,
+          flag_content: str | None, no_advance: bool, db_path: str | None) -> None:
+    """Bind a flag + screenshot to a host, then advance it to 'looted'.
+
+    The screenshot is the evidence that gates `foothold -> looted`; Yhwach
+    refuses if the file does not exist. If a --flag file is given, its content
+    is stored. Capture the screenshot as you take the flag, then mirror it into
+    the Obsidian vault.
+    """
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+
+    shot = Path(os.path.expanduser(screenshot_path))
+    if not shot.is_file():
+        click.echo(f"[!] Screenshot not found: {shot} — a proof needs a real screenshot.",
+                   err=True)
+        sys.exit(2)
+
+    if flag_content is None and flag_path:
+        fp = Path(os.path.expanduser(flag_path))
+        if fp.is_file():
+            flag_content = fp.read_text(encoding="utf-8", errors="replace").strip()
+
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        hrow = conn.execute("SELECT id FROM host WHERE engagement_id = ? AND ip = ?",
+                            (eng_id, host_ip)).fetchone()
+        if hrow is None:
+            click.echo(f"[!] Host {host_ip} not found; ingest a scan first.", err=True)
+            sys.exit(2)
+        pid = yhdb.add_proof(conn, hrow["id"], flag_path or "-", str(shot),
+                             flag_content=flag_content)
+        yhdb.log_event(conn, eng_id, "proof",
+                       {"host": host_ip, "screenshot": str(shot), "flag": flag_path or None})
+        advanced = False
+        if not no_advance:
+            advanced, msg = yhdb.set_host_stage(conn, eng_id, host_ip, "looted")
+            if advanced:
+                yhdb.log_event(conn, eng_id, "stage", {"host": host_ip, "stage": "looted"})
+
+    click.echo(f"[+] Proof #{pid} recorded for {host_ip} (screenshot: {shot.name}).")
+    if not no_advance:
+        click.echo(f"[+] {host_ip} -> looted" if advanced
+                   else f"[i] stage unchanged ({msg}).")
+    click.echo("[note] mirror the screenshot into the Obsidian vault and bind it to the host "
+               "note + Attack Chain step it proves (via the Obsidian MCP).")
 
 
 @main.command()

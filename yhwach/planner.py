@@ -59,7 +59,9 @@ def match_rules(
             report.rules_skipped_unsupported.append(rule.id)
             continue
 
-        if rule.technique in consumed:
+        # A technique is consumed if either its alias (`technique:`) or its rule
+        # id was marked — `yhwach consume` accepts either, so match both.
+        if rule.technique in consumed or rule.id in consumed:
             report.rules_skipped_consumed.append(rule.id)
             # Retire any pending tasks already queued for this rule.
             conn.execute(
@@ -171,13 +173,24 @@ def top_tasks(
     conn: sqlite3.Connection,
     engagement_id: int,
     limit: int = 5,
+    *,
+    host_ip: str | None = None,
 ) -> list[sqlite3.Row]:
     """Pending tasks, AI-first then EV descending (id as stable tie-break).
 
     The `technique_class` tier enforces the OSAI doctrine — AI hosts before
     traditional — regardless of raw EV, so a low-EV AI move still outranks a
     high-EV traditional one. Within a tier, EV decides.
+
+    `host_ip` filters BEFORE the limit (a per-host focus must not lose that
+    host's lower-ranked tasks to globally higher-ranked ones on other hosts).
     """
+    clauses = ["t.engagement_id = ?", "t.status = 'pending'"]
+    params: list = [engagement_id]
+    if host_ip is not None:
+        clauses.append("h.ip = ?")
+        params.append(host_ip)
+    params.append(limit)
     return conn.execute(
         "SELECT t.id, t.kind, t.playbook_rule_id, t.technique_class, t.rationale, "
         "t.risk, t.autonomy, t.ev_score, t.status, h.ip AS host_ip, "
@@ -186,9 +199,9 @@ def top_tasks(
         "JOIN host h ON h.id = t.target_host_id "
         "LEFT JOIN surface s ON s.id = t.target_surface_id "
         "LEFT JOIN service svc ON svc.id = s.service_id "
-        "WHERE t.engagement_id = ? AND t.status = 'pending' "
+        f"WHERE {' AND '.join(clauses)} "
         "ORDER BY CASE t.technique_class WHEN 'ai' THEN 0 ELSE 1 END ASC, "
         "t.ev_score DESC, t.id ASC "
         "LIMIT ?",
-        (engagement_id, limit),
+        params,
     ).fetchall()

@@ -34,9 +34,11 @@ def _engagement_summary(conn: sqlite3.Connection, engagement_id: int) -> dict:
         "SELECT COUNT(*) AS n FROM credential WHERE engagement_id = ?",
         (engagement_id,),
     ).fetchone()["n"]
+    # Match report.py / mcp_tools counting: include engagement hosts' findings
+    # plus unscoped (host_id IS NULL) ones, via a LEFT JOIN so counts agree.
     findings = conn.execute(
-        "SELECT COUNT(*) AS n FROM finding f JOIN host h ON h.id = f.host_id "
-        "WHERE h.engagement_id = ?",
+        "SELECT COUNT(*) AS n FROM finding f LEFT JOIN host h ON h.id = f.host_id "
+        "WHERE h.engagement_id = ? OR f.host_id IS NULL",
         (engagement_id,),
     ).fetchone()["n"]
     return {
@@ -62,9 +64,7 @@ def build_context(
 
     persona = load_persona()
     summary = _engagement_summary(conn, engagement_id)
-    tasks = top_tasks(conn, engagement_id, limit)
-    if host_ip is not None:
-        tasks = [t for t in tasks if t["host_ip"] == host_ip]
+    tasks = top_tasks(conn, engagement_id, limit, host_ip=host_ip)
 
     eng = summary["eng"]
     stage_str = ", ".join(f"{k}:{v}" for k, v in sorted(summary["stages"].items())) or "none"

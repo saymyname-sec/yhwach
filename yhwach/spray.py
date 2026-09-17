@@ -8,6 +8,7 @@ operator runs it.
 """
 from __future__ import annotations
 
+import shlex
 import sqlite3
 from collections import defaultdict
 
@@ -49,11 +50,13 @@ def build_spray_plan(
         ip_list = " ".join(sorted(set(proto_ips[proto])))
         for c in creds:
             secret = c["secret"] or ""
-            if c["kind"] == "ntlm":
-                auth = f"-H {secret}"
-            else:
-                auth = f"-p '{secret}'"
+            # Shell-quote every field: secrets and identifiers can legitimately
+            # contain quotes, spaces, or shell metacharacters, which would
+            # otherwise break or misfire the rendered nxc line.
+            flag = "-H" if c["kind"] == "ntlm" else "-p"
+            auth = f"{flag} {shlex.quote(secret)}"
+            user = shlex.quote(c["identifier"] or "")
             commands.append(
-                f"nxc {proto} {ip_list} -u {c['identifier']} {auth} --continue-on-success"
+                f"nxc {proto} {ip_list} -u {user} {auth} --continue-on-success"
             )
     return commands

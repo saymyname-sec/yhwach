@@ -229,8 +229,12 @@
 
 - id: rag_kb_probing
   when: { surface: chatbot }
-  likelihood: H
-  time_cost: fast
+  # Recon, not the scoring attack: on first contact you don't yet know the
+  # chatbot is RAG-backed (likelihood M), and probing KB contents / chunk sizes
+  # / source filenames thoroughly is medium-cost. Keep it below the primary
+  # direct-injection probe so doctrine (attack before recon-of-a-maybe-KB) holds.
+  likelihood: M
+  time_cost: med
   emits:
     - action: rag_kb_probe
   maps: [LLM01, LLM02]

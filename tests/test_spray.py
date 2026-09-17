@@ -38,8 +38,23 @@ def test_spray_pairs_creds_with_protocols(tmp_db: Path) -> None:
     winrm = [c for c in cmds if c.startswith("nxc winrm")]
     assert len(smb) == 1 and len(winrm) == 1
     assert "10.0.0.1 10.0.0.2" in smb[0]
-    assert "-u admin -p 'P@ss'" in smb[0]
+    assert "-u admin -p P@ss" in smb[0]  # shlex.quote leaves shell-safe secrets bare
     assert "--continue-on-success" in smb[0]
+
+
+def test_spray_quotes_tricky_secret(tmp_db: Path) -> None:
+    """A password with a single quote / space must render as one safe, correct arg."""
+    import shlex
+
+    eng = _seed(tmp_db)
+    with yhdb.transaction(tmp_db) as conn:
+        yhdb.add_credential(conn, eng, "svc user", "Pa'ss w0rd", "password", "dump")
+        cmds = build_spray_plan(conn, eng, proto_filter="smb")
+    assert cmds
+    # The rendered line must tokenise back to the original identifier + secret.
+    toks = shlex.split(cmds[0])
+    assert toks[toks.index("-u") + 1] == "svc user"
+    assert toks[toks.index("-p") + 1] == "Pa'ss w0rd"
 
 
 def test_spray_ntlm_uses_hash_flag(tmp_db: Path) -> None:

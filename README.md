@@ -26,7 +26,7 @@ The persona travels with the engine. Whatever CLI, host, or client executes the 
 **Working end-to-end, through post-exploitation.** The deterministic engine runs from an
 nmap scan to a persona-framed, doctrine-ranked operator brief with concrete commands, then
 carries the engagement through foothold, loot, and pivot — and has been validated against a
-live challenge lab (Iron Crown). 170 tests, green on Linux and Windows.
+live challenge lab (Iron Crown). 186 tests, green on Linux and Windows.
 
 What works today:
 
@@ -40,17 +40,20 @@ What works today:
 - **Surface detection** — AI (Ollama, OpenAI-compat, chatbot, MCP, Gradio, A2A, vector DB) **and**
   traditional (Jenkins, GitLab, SMB, LDAP, MSSQL, WinRM, SSH, web portal, message brokers), via
   live probes
-- **Planner** — 58 declarative YAML playbook rules across AI, traditional, cloud/k8s,
+- **Planner** — 50 declarative YAML technique rules across AI, traditional, cloud/k8s,
   message-broker, supply-chain, and post-exploit surfaces, matched and EV-ranked with
-  **AI-first tiering**
+  **AI-first tiering** (32 fire today; 18 chaining rules await `findings_include` planner
+  support — see [ROADMAP.md](ROADMAP.md))
 - **Primitives** — technique exhaustion (no repeats), credential reuse (never exhausted), lore
   denylist (OffSec dev-artifact filtering)
-- **Actions layer** — 95 registered actions (`yhwach actions`) turn every playbook step into a
-  concrete command; read-only recon runs itself, exploitation is render-only for the operator
+- **Actions layer** — 96 registered actions (`yhwach actions`) turn every playbook step into a
+  concrete command; read-only recon runs itself (with untrusted values shell-guarded),
+  exploitation is render-only for the operator
 - **Findings** — deterministic extraction from action output (unambiguous only; the rest is
   operator judgment via the contract)
 - **Post-foothold FSM** — credential vault, `yhwach cred` / `creds` / `spray`, and monotonic
-  host stages (`foothold → looted → pivoted → done`) via `yhwach advance`
+  host stages (`foothold → looted → pivoted → done`) via `yhwach advance`; `yhwach proof` binds
+  a flag + screenshot and gates `foothold → looted` on that evidence
 - **Engagement notebook** — the operator writes detailed notes to an **Obsidian vault** (the
   single source of truth) via the Obsidian MCP at every objective; Yhwach's DB stays the
   queryable world model and never stores notes (see [persona/notebook.md](persona/notebook.md))
@@ -83,7 +86,7 @@ Not for unauthorized targets. Contributors: submit rules only for authorized-tar
 git clone https://github.com/saymyname-sec/yhwach ~/yhwach && cd ~/yhwach
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
-pytest -q            # 170 tests
+pytest -q            # 186 tests
 yhwach selftest      # golden fixtures
 
 # Drive an engagement (authorized targets only):
@@ -99,6 +102,7 @@ yhwach run     --lab lab01 --task 1 --go       # run read-only recon; render exp
 yhwach advance --lab lab01 --host 10.10.10.15 --to foothold   # auto-notes the milestone
 yhwach cred    --lab lab01 --user svc_sql --secret 'S3cr3t!' --kind password
 yhwach spray   --lab lab01                     # reuse the vault across sprayable surfaces
+yhwach proof   --lab lab01 --host 10.10.10.15 --screenshot flag.png  # -> looted (gated)
 
 yhwach findings --lab lab01
 yhwach report  --lab lab01 --out report.md

@@ -85,6 +85,32 @@ write-ups. Yhwach's SQLite DB is the queryable world model; it does **not** stor
 Note-writing is a side action, not part of the Contract JSON: do it via the MCP, then emit the
 Contract. If the notebook write fails, say so in `RESEARCH` and continue.
 
+## Pre-staged tooling — use what's provided, don't roll your own
+
+Before each challenge, custom operator tooling is dropped in `~/osai/current/tools/`. **Check that
+folder first** and read the instructions file inside — it specifies the listener port and exact
+invocation for that engagement:
+
+- `svcmon.exe` — the obfuscated **Windows Ligolo agent** (pivoting). Deploy this for Windows
+  pivots instead of a stock Ligolo agent; it is built to get past AV/EDR.
+- `svc.exe` / `svc.bin` — the custom **reverse shell** (AMSI bypass). Prefer it over a
+  hand-crafted or downloaded one-liner on Windows targets.
+
+Rules:
+
+- When a step needs a Windows reverse shell or a Ligolo pivot, **use the pre-staged binary** with
+  the port from its instructions — do not hand-craft or fetch a stock equivalent.
+- The instructions file in `~/osai/current/tools/` is authoritative for port + usage. Read it;
+  never guess the port.
+- These binaries are yours and authorized — treat the folder as trusted operator material.
+
+## Proof discipline
+
+A flag is only scored with evidence. When you capture a flag, bind a screenshot to the host with
+`yhwach proof --host <ip> --screenshot <path> [--flag <path>]` — this records the `proof` row and
+advances the host `foothold → looted`. The engine **refuses** `looted` without a proof screenshot,
+so capture the screenshot as you take the flag, then also mirror it into the Obsidian vault.
+
 ## Silence is not a valid state
 
 If the state slice is empty, your Contract still fires:

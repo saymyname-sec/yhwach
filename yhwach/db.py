@@ -184,6 +184,9 @@ def set_host_stage(
 ) -> tuple[bool, str | None]:
     """Set a host's FSM stage. With monotonic=True, refuse to move backwards
     (except to 'blocked'). Returns (changed, message)."""
+    if stage not in STAGES and stage != "blocked":
+        return False, (f"unknown stage '{stage}' — must be one of "
+                       f"{', '.join(STAGES + ['blocked'])}")
     row = conn.execute(
         "SELECT id, stage FROM host WHERE engagement_id = ? AND ip = ?",
         (engagement_id, ip),
@@ -194,11 +197,43 @@ def set_host_stage(
     if monotonic and stage != "blocked" and cur_stage in STAGES and stage in STAGES:
         if STAGES.index(stage) < STAGES.index(cur_stage):
             return False, f"{ip} is already at '{cur_stage}'; refusing to move back to '{stage}'"
+    # foothold -> looted requires evidence: a proof row with a screenshot.
+    if monotonic and stage == "looted":
+        has_proof = conn.execute(
+            "SELECT 1 FROM proof WHERE host_id = ? AND screenshot_path != '' LIMIT 1",
+            (row["id"],),
+        ).fetchone()
+        if has_proof is None:
+            return False, (f"{ip}: 'looted' needs a proof (flag + screenshot) — run "
+                           "`yhwach proof` first (or advance --force to override)")
     conn.execute(
         "UPDATE host SET stage = ?, last_updated = ? WHERE id = ?",
         (stage, _now_utc(), row["id"]),
     )
     return True, None
+
+
+def add_proof(
+    conn: sqlite3.Connection,
+    host_id: int,
+    flag_path: str,
+    screenshot_path: str,
+    *,
+    flag_content: str | None = None,
+    obsidian_ref: str | None = None,
+) -> int:
+    """Record a proof (flag + screenshot) for a host and return its id.
+
+    The screenshot is what gates `foothold -> looted` (see set_host_stage). The
+    caller verifies the screenshot file exists before calling; the vault mirror
+    (obsidian_ref) is optional and filled in when the operator syncs it.
+    """
+    cur = conn.execute(
+        "INSERT INTO proof (host_id, flag_path, flag_content, screenshot_path, "
+        "obsidian_ref, scored, captured_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
+        (host_id, flag_path, flag_content, screenshot_path, obsidian_ref, _now_utc()),
+    )
+    return int(cur.lastrowid)
 
 
 def add_credential(

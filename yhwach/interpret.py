@@ -26,22 +26,20 @@ class ExtractedFinding:
 
 
 def _first_json(output: str) -> Any:
-    """Parse the first JSON object/array embedded in output, or None."""
+    """Parse the first JSON object/array embedded in output, or None.
+
+    Uses raw_decode from each `[`/`{` candidate so trailing text after the JSON
+    is tolerated in a single pass (no quadratic substring scan, no size cap)."""
     if not output:
         return None
-    m = re.search(r"[\[{]", output)
-    if not m:
-        return None
-    frag = output[m.start():]
-    for end in range(len(frag), max(len(frag) - 200000, 0), -1):
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r"[\[{]", output):
         try:
-            return json.loads(frag[:end])
+            obj, _ = decoder.raw_decode(output, m.start())
+            return obj
         except ValueError:
             continue
-    try:
-        return json.loads(frag)
-    except ValueError:
-        return None
+    return None
 
 
 def _ollama_models(output: str, ctx: dict) -> ExtractedFinding | None:

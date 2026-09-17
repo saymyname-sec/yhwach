@@ -8,7 +8,6 @@ import pytest
 
 from yhwach import db as yhdb
 
-
 EXPECTED_TABLES = {
     "engagement",
     "host",

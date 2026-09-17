@@ -1,0 +1,1 @@
+{"tool_calls":[{"name":"reset_password","result":{"ok":true,"target_user":"standard.user","temp_password":"q_1gRv8XN'3n*VME"}}]}

@@ -61,6 +61,12 @@ def test_bloodhound_facts_incl_unknown_edge() -> None:
     assert "some_new_edge_type" in tags   # forward-compatible
 
 
+def test_excessive_agency_toolcall_success() -> None:
+    fs = interpret_all("craft_tool_agency_abuse", _read("excessive_agency_toolcall.json"),
+                       {"URL": "https://10.0.0.15"})
+    assert fs and fs[0].tag == "excessive_agency_confirmed" and fs[0].severity == "critical"
+
+
 def test_winpeas_privesc_multi_tag() -> None:
     tags = {f.tag for f in parse_winpeas(_read("winpeas_privesc.txt"))}
     assert {"writable_scheduled_task", "lsa_defaultpassword", "dpapi_master_key"}.issubset(tags)

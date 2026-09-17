@@ -175,6 +175,17 @@ def test_text_to_sql_bypass_chain(tmp_db: Path) -> None:
     assert "text_to_sql_guardrail_bypass" in ids
 
 
+def test_excessive_agency_chain(tmp_db: Path) -> None:
+    """A chatbot surface ranks the excessive-agency tool-abuse move."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="chatbot")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "chatbot_excessive_agency" in ids
+
+
 def test_agent_ssrf_and_imds_chain(tmp_db: Path) -> None:
     """An a2a agent hub offers the egress-proxy SSRF recon; a confirmed SSRF then
     unlocks the pre-existing IMDS/cloud-metadata rule."""

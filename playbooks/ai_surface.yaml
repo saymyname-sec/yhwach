@@ -73,6 +73,22 @@
   source: 'osai/03 . Direct Prompts'
   authorized_only: true
 
+- id: chatbot_excessive_agency
+  when: { surface: chatbot }
+  class: ai
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: craft_tool_enumeration
+    - action: craft_tool_agency_abuse
+  maps: [LLM06]
+  points: 15
+  risk: propose
+  routes: /osai-mcp-attack
+  source: 'double_hellix . AI helpdesk reset_password tool executes on an unverified justification'
+  technique: excessive_agency
+  authorized_only: true
+
 - id: chatbot_session_enumeration
   when: { surface: chatbot }
   likelihood: M

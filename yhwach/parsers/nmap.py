@@ -7,6 +7,7 @@ with its service/version info. Only 'open' ports are recorded by default
 """
 from __future__ import annotations
 
+import re
 import sqlite3
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -49,6 +50,54 @@ def parse_nmap_xml_text(
     """Parse nmap XML from a string (e.g. HexStrike's `-oX -` stdout)."""
     root = ET.fromstring(xml_text)
     return _parse_root(root, include_open_filtered=include_open_filtered)
+
+
+_HOST_RE = re.compile(
+    r"^Nmap scan report for (?:(?P<host>[^\s()]+) \((?P<ip1>[\d.]+)\)|(?P<ip2>[\d.:a-fA-F]+))")
+_PORT_RE = re.compile(
+    r"^(?P<port>\d+)/(?P<proto>tcp|udp)\s+(?P<state>open|open\|filtered)\s+"
+    r"(?P<svc>\S+)(?:\s+(?P<ver>.*\S))?")
+
+
+def parse_nmap_normal(text: str, *, include_open_filtered: bool = False) -> list[ParsedHost]:
+    """Parse normal (`-oN`) nmap output — the human-readable table format.
+
+    Best-effort but robust for the common shape: `Nmap scan report for <host> (<ip>)`
+    followed by `PORT STATE SERVICE VERSION` rows. Removes the need to convert
+    `-oN` to `-oX` before ingesting."""
+    hosts: list[ParsedHost] = []
+    cur: ParsedHost | None = None
+    for line in text.splitlines():
+        m = _HOST_RE.match(line)
+        if m:
+            ip = m.group("ip1") or m.group("ip2")
+            cur = ParsedHost(ip=ip, hostname=m.group("host"))
+            hosts.append(cur)
+            continue
+        if cur is None:
+            continue
+        low = line.strip().lower()
+        if low.startswith(("os details:", "running:", "os cpe:")) and not cur.os_hint:
+            cur.os_hint = line.split(":", 1)[1].strip()
+            continue
+        pm = _PORT_RE.match(line.strip())
+        if pm:
+            if pm.group("state") != "open" and not include_open_filtered:
+                continue
+            svc = pm.group("svc")
+            ver = pm.group("ver")
+            cur.services.append(ParsedService(
+                port=int(pm.group("port")), proto=pm.group("proto"),
+                product=svc if svc and svc != "?" else None, version=ver))
+    return [h for h in hosts if h.services or h.hostname]
+
+
+def parse_nmap(text: str, *, include_open_filtered: bool = False) -> list[ParsedHost]:
+    """Auto-detect XML (`-oX`) vs normal (`-oN`) nmap output and parse either."""
+    head = text.lstrip()[:256].lower()
+    if head.startswith("<?xml") or "<nmaprun" in head:
+        return parse_nmap_xml_text(text, include_open_filtered=include_open_filtered)
+    return parse_nmap_normal(text, include_open_filtered=include_open_filtered)
 
 
 def _parse_root(root, *, include_open_filtered: bool = False) -> list[ParsedHost]:

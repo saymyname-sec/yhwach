@@ -93,6 +93,19 @@ print a reminder. Every scored proof MUST have a screenshot in the vault — uns
 - **LLM08 Vector/Embedding Weaknesses** → embed
 - LLM09/10 low exam value — note & chain. Proof is usually LLM01/02/07/06/08.
 
+## Fold-back & notes are NOT optional (the #1 discipline)
+Under attack momentum it's tempting to chain exploits and "record it later" — later never comes, and
+after a `/clear` an uncaptured win is lost. So, **at every objective, before the next step:**
+1. Fold state into Yhwach — `yhwach_cred` / `yhwach_proof` / `yhwach_advance` / `yhwach_pivot` /
+   `yhwach_ingest`. Yhwach is the **ledger**, not just a planner; if it's not in the DB it didn't happen.
+2. Write the **full** Obsidian note — the Attack Chain step with the exact command (fenced), captured
+   output, and evidence path; update the host + Credentials notes. A creds-only note is not enough.
+3. Re-call `yhwach_next` before starting a new target — don't free-run enumeration once the chain feels obvious.
+
+A **PostToolUse hook** (`~/.claude/hooks/yhwach-sync-reminder.sh`) enforces this: after any offensive/
+loot command it interrupts with the checklist above — it survives context compaction, unlike this text.
+**After a compaction, re-read `persona/notebook.md`** to restore the full note structure.
+
 ## Skill trigger map — the /osai-* skills are your EXECUTORS; Yhwach ranks WHICH to run
 - **Enum:** HexStrike MCP (`intelligent_smart_scan`, `nmap_advanced_scan`, `autorecon_comprehensive`)
   → `yhwach_ingest`/`yhwach_probe`. AI surface: `/osai-ai-hunter`. Web: HexStrike web stack.

@@ -138,3 +138,31 @@ def test_finding_scoped_to_engagement(tmp_db: Path) -> None:
         n1 = conn.execute("SELECT COUNT(*) n FROM finding WHERE engagement_id=?", (e1,)).fetchone()["n"]
         n2 = conn.execute("SELECT COUNT(*) n FROM finding WHERE engagement_id=?", (e2,)).fetchone()["n"]
     assert n1 == 1 and n2 == 0
+
+
+def test_migrate_self_heals_old_db(tmp_path: Path) -> None:
+    """An older DB (no finding.tag/engagement_id, no tunnel, no source_host_id)
+    is brought current on open — the 'no such column' friction can't recur."""
+    import sqlite3
+    p = tmp_path / "old.db"
+    raw = sqlite3.connect(str(p))
+    raw.executescript(
+        "CREATE TABLE engagement (id INTEGER PRIMARY KEY, lab TEXT, scope TEXT, started_at TEXT);"
+        "CREATE TABLE host (id INTEGER PRIMARY KEY, engagement_id INTEGER, ip TEXT);"
+        "CREATE TABLE finding (id INTEGER PRIMARY KEY, host_id INTEGER, class TEXT, title TEXT, severity TEXT);"
+        "CREATE TABLE credential (id INTEGER PRIMARY KEY, engagement_id INTEGER, identifier TEXT);"
+    )
+    raw.commit()
+    raw.close()
+
+    conn = yhdb.connect(str(p))          # self-heals on open
+    try:
+        fcols = {r["name"] for r in conn.execute("PRAGMA table_info(finding)")}
+        ccols = {r["name"] for r in conn.execute("PRAGMA table_info(credential)")}
+        tables = {r["name"] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        conn.close()
+    assert {"tag", "engagement_id"} <= fcols
+    assert "source_host_id" in ccols
+    assert "tunnel" in tables

@@ -171,6 +171,12 @@ loop's spine and carries the OSAI methodology (scoring, foothold sequence, skill
 then start a lab with `/osai-lab --lab <name> --scope <cidr> --domain <d> --dc <ip>` (omit args to
 resume). It engages the lab and drives the whole Yhwach loop — no copy-paste prompt needed.
 
+**Discipline hook (recommended):** copy [hooks/yhwach-sync-reminder.sh](hooks/yhwach-sync-reminder.sh)
+to `~/.claude/hooks/`, `chmod +x` it, and add the PostToolUse matcher from its header to
+`~/.claude/settings.json`. It interrupts after any offensive/loot command with a "fold state into
+Yhwach + write the note" checklist — the enforcement that keeps the loop and the notebook from lapsing
+mid-engagement (survives context compaction).
+
 ## 7. Pre-staged operator tooling
 
 Before each challenge, drop your custom binaries in `~/osai/current/tools/` with an instructions

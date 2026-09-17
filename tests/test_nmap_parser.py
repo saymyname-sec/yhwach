@@ -107,3 +107,40 @@ def test_os_class_windows_and_linux(sample_nmap_xml: Path, tmp_db: Path) -> None
     m = {r["ip"]: r["os"] for r in rows}
     assert m["10.10.10.15"] == "linux"
     assert m["10.10.10.20"] == "windows"
+
+
+# --- normal (-oN) output + auto-detect --------------------------------------
+
+_NORMAL = """\
+Nmap scan report for dc02.corp.local (10.1.239.15)
+Host is up (0.0011s latency).
+PORT     STATE SERVICE       VERSION
+88/tcp   open  kerberos-sec  Microsoft Windows Kerberos
+389/tcp  open  ldap          Microsoft Windows Active Directory LDAP
+445/tcp  open  microsoft-ds?
+Running: Microsoft Windows Server 2022
+
+Nmap scan report for 10.1.239.27
+Host is up.
+PORT   STATE SERVICE VERSION
+22/tcp open  ssh     OpenSSH 8.9p1
+"""
+
+
+def test_parse_nmap_normal() -> None:
+    from yhwach.parsers.nmap import parse_nmap_normal
+    hosts = {h.ip: h for h in parse_nmap_normal(_NORMAL)}
+    assert set(hosts) == {"10.1.239.15", "10.1.239.27"}
+    dc = hosts["10.1.239.15"]
+    assert dc.hostname == "dc02.corp.local"
+    assert {s.port for s in dc.services} == {88, 389, 445}
+    assert dc.os_hint and "Windows Server 2022" in dc.os_hint
+    assert hosts["10.1.239.27"].services[0].version == "OpenSSH 8.9p1"
+
+
+def test_parse_nmap_autodetect(sample_nmap_xml: Path) -> None:
+    from yhwach.parsers.nmap import parse_nmap
+    xml_hosts = {h.ip for h in parse_nmap(sample_nmap_xml.read_text(encoding="utf-8"))}
+    assert xml_hosts == {"10.10.10.15", "10.10.10.20"}          # XML path
+    norm_hosts = {h.ip for h in parse_nmap(_NORMAL)}
+    assert norm_hosts == {"10.1.239.15", "10.1.239.27"}         # normal path

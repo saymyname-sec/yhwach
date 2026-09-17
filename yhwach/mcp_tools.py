@@ -195,12 +195,13 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
     findings on `host` (advances it to 'enumerated'). kind=bloodhound: AD
     findings + chaining tags on `host` (the DC); no stage change. All set the
     `findings_include` chaining tags their parser detects."""
-    from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml
+    from yhwach.parsers.nmap import insert_hosts, parse_nmap
 
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
         if kind == "nmap":
-            h, s = insert_hosts(conn, eid, parse_nmap_xml(file))
+            nmap_text = Path(file).read_text(encoding="utf-8", errors="replace")
+            h, s = insert_hosts(conn, eid, parse_nmap(nmap_text))
             yhdb.log_event(conn, eid, "ingest", {"kind": "nmap", "hosts": h, "services": s})
             return f"nmap ingested: {h} hosts, {s} services"
         if kind not in ("linpeas", "winpeas", "bloodhound", "certipy"):

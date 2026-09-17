@@ -25,7 +25,7 @@ from yhwach import __version__
 from yhwach import db as yhdb
 from yhwach.engine import artifact_dir as _artifact_dir
 from yhwach.engine import execute_task
-from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml
+from yhwach.parsers.nmap import insert_hosts, parse_nmap
 from yhwach.probes import PROBES_BY_PORT, new_session, run_probes
 
 DEFAULT_DB_ENV = "YHWACH_DB"
@@ -119,7 +119,7 @@ def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | N
             sys.exit(2)
 
         if kind == "nmap":
-            hosts = parse_nmap_xml(file)
+            hosts = parse_nmap(Path(file).read_text(encoding="utf-8", errors="replace"))
             h, s = insert_hosts(conn, eng_id, hosts)
             click.echo(f"[+] Ingested nmap: {h} hosts, {s} services")
             return

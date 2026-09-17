@@ -19,12 +19,58 @@ from pathlib import Path
 
 from yhwach import schema_sql_path
 
+# Schema additions made after the original v0 (columns + whole tables). Applied
+# idempotently on every open so a DB created by an older Yhwach self-heals — no
+# more "no such column: f.tag / engagement_id" on an upgraded engagement.
+_ADDED_COLUMNS = [
+    ("finding", "tag", "TEXT"),
+    ("finding", "engagement_id", "INTEGER"),
+    ("credential", "source_host_id", "INTEGER"),
+]
+_ADDED_TABLES = {
+    "tunnel": (
+        "CREATE TABLE IF NOT EXISTS tunnel ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER REFERENCES engagement(id),"
+        "  via_host_id INTEGER REFERENCES host(id),"
+        "  subnet TEXT NOT NULL,"
+        "  kind TEXT NOT NULL DEFAULT 'ligolo',"
+        "  created_at TEXT NOT NULL,"
+        "  UNIQUE(engagement_id, via_host_id, subnet))"
+    ),
+}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring an existing DB up to the current schema (added columns/tables).
+
+    Safe on a fresh/empty DB: with no base tables yet there's nothing to migrate,
+    and init()'s full schema then creates everything current."""
+    tables = {r["name"] for r in
+              conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "engagement" not in tables:
+        return  # empty DB — init() will apply the full, current schema
+    changed = False
+    for tname, ddl in _ADDED_TABLES.items():
+        if tname not in tables:
+            conn.execute(ddl)
+            changed = True
+    for tname, col, decl in _ADDED_COLUMNS:
+        if tname in tables:
+            cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({tname})")}
+            if col not in cols:
+                conn.execute(f"ALTER TABLE {tname} ADD COLUMN {col} {decl}")
+                changed = True
+    if changed:
+        conn.commit()
+
 
 def connect(db_path: Path | str) -> sqlite3.Connection:
-    """Open a connection with row-dict access and foreign keys on."""
+    """Open a connection with row-dict access, foreign keys on, and schema self-heal."""
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    _migrate(conn)
     return conn
 
 

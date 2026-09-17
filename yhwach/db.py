@@ -38,6 +38,32 @@ _ADDED_TABLES = {
         "  created_at TEXT NOT NULL,"
         "  UNIQUE(engagement_id, via_host_id, subnet))"
     ),
+    "attempt": (
+        "CREATE TABLE IF NOT EXISTS attempt ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  task_id INTEGER REFERENCES task(id),"
+        "  host_id INTEGER REFERENCES host(id),"
+        "  playbook_rule_id TEXT,"
+        "  technique_id TEXT,"
+        "  result TEXT NOT NULL,"
+        "  reason TEXT,"
+        "  evidence TEXT,"
+        "  attempted_at TEXT NOT NULL)"
+    ),
+    "scan_coverage": (
+        "CREATE TABLE IF NOT EXISTS scan_coverage ("
+        "  id INTEGER PRIMARY KEY,"
+        "  host_id INTEGER NOT NULL REFERENCES host(id),"
+        "  proto TEXT NOT NULL,"
+        "  ports TEXT NOT NULL,"
+        "  port_count INTEGER NOT NULL DEFAULT 0,"
+        "  full_range INTEGER NOT NULL DEFAULT 0,"
+        "  version_scan INTEGER NOT NULL DEFAULT 0,"
+        "  source TEXT,"
+        "  scanned_at TEXT NOT NULL,"
+        "  UNIQUE(host_id, proto, ports))"
+    ),
 }
 
 
@@ -473,3 +499,114 @@ def all_services_for_scanned_hosts(
         (engagement_id,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Attempt ledger — the negative half of technique_exhaustion.
+# ---------------------------------------------------------------------------
+ATTEMPT_RESULTS = ("success", "fail", "blocked", "partial")
+
+
+def add_attempt(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    *,
+    result: str,
+    task_id: int | None = None,
+    host_id: int | None = None,
+    playbook_rule_id: str | None = None,
+    technique_id: str | None = None,
+    reason: str | None = None,
+    evidence: str | None = None,
+) -> int:
+    """Append an attempt row (append-only: re-trying a move adds a row, never
+    overwrites one — the ledger is the operator's memory of what it burned)."""
+    if result not in ATTEMPT_RESULTS:
+        raise ValueError(
+            f"unknown result '{result}' — use one of {', '.join(ATTEMPT_RESULTS)}")
+    cur = conn.execute(
+        "INSERT INTO attempt (engagement_id, task_id, host_id, playbook_rule_id, "
+        "technique_id, result, reason, evidence, attempted_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (engagement_id, task_id, host_id, playbook_rule_id, technique_id, result,
+         reason, evidence, _now_utc()),
+    )
+    return int(cur.lastrowid)
+
+
+def list_attempts(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    *,
+    result: str | None = None,
+    limit: int | None = None,
+) -> list[sqlite3.Row]:
+    """Attempts newest-first, with the target host IP joined in."""
+    clauses = ["a.engagement_id = ?"]
+    params: list = [engagement_id]
+    if result is not None:
+        clauses.append("a.result = ?")
+        params.append(result)
+    sql = (
+        "SELECT a.id, a.task_id, a.playbook_rule_id, a.technique_id, a.result, "
+        "a.reason, a.evidence, a.attempted_at, h.ip AS host_ip "
+        "FROM attempt a LEFT JOIN host h ON h.id = a.host_id "
+        f"WHERE {' AND '.join(clauses)} ORDER BY a.id DESC"
+    )
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, params).fetchall()
+
+
+# ---------------------------------------------------------------------------
+# Scan coverage — what was scanned, so under-enumeration becomes queryable.
+# ---------------------------------------------------------------------------
+def record_coverage(
+    conn: sqlite3.Connection,
+    host_id: int,
+    *,
+    proto: str,
+    ports: str,
+    port_count: int = 0,
+    full_range: bool = False,
+    version_scan: bool = False,
+    source: str | None = None,
+) -> tuple[int, bool]:
+    """Record (host, proto, port-range) coverage. Deduped on that triple; a
+    re-ingest only ever ADDS capability (version_scan never regresses to 0).
+    Returns (id, created)."""
+    existing = conn.execute(
+        "SELECT id, version_scan FROM scan_coverage WHERE host_id = ? AND proto = ? "
+        "AND ports = ?",
+        (host_id, proto, ports),
+    ).fetchone()
+    if existing is not None:
+        if version_scan and not existing["version_scan"]:
+            conn.execute(
+                "UPDATE scan_coverage SET version_scan = 1, scanned_at = ?, "
+                "source = COALESCE(?, source) WHERE id = ?",
+                (_now_utc(), source, existing["id"]),
+            )
+        return int(existing["id"]), False
+    cur = conn.execute(
+        "INSERT INTO scan_coverage (host_id, proto, ports, port_count, full_range, "
+        "version_scan, source, scanned_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (host_id, proto, ports, int(port_count), int(bool(full_range)),
+         int(bool(version_scan)), source, _now_utc()),
+    )
+    return int(cur.lastrowid), True
+
+
+def coverage_for_engagement(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+) -> list[sqlite3.Row]:
+    """Every coverage row in the engagement, host IP joined in."""
+    return conn.execute(
+        "SELECT c.host_id, c.proto, c.ports, c.port_count, c.full_range, "
+        "c.version_scan, c.scanned_at, h.ip AS host_ip, h.stage AS stage "
+        "FROM scan_coverage c JOIN host h ON h.id = c.host_id "
+        "WHERE h.engagement_id = ? ORDER BY h.ip, c.proto, c.port_count DESC",
+        (engagement_id,),
+    ).fetchall()

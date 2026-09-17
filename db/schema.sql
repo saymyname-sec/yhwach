@@ -231,3 +231,50 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_surface_hosted_svc
 CREATE UNIQUE INDEX IF NOT EXISTS ux_surface_hosted_no_svc
     ON surface(host_id, kind)
     WHERE service_id IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Attempt ledger — what the operator actually TRIED and how it went.
+--
+-- `technique_state` only records success (a consumed technique). This table is
+-- the other half: the negative feedback loop. A recorded `fail` / `blocked`
+-- retires the task, decays the EV of that rule on that host at the next plan,
+-- and surfaces in the operator handoff as a DEAD END so a model whose context
+-- was compacted never re-proposes a move it already burned.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS attempt (
+    id                INTEGER PRIMARY KEY,
+    engagement_id     INTEGER NOT NULL REFERENCES engagement(id),
+    task_id           INTEGER REFERENCES task(id),
+    host_id           INTEGER REFERENCES host(id),
+    playbook_rule_id  TEXT,
+    technique_id      TEXT,               -- exhaustion key (rule.technique), for consume-on-success
+    result            TEXT    NOT NULL,   -- success | fail | blocked | partial
+    reason            TEXT,               -- one line: WHY it went that way (operator judgement)
+    evidence          TEXT,               -- loot path / Obsidian ref / one-line output excerpt
+    attempted_at      TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attempt_engagement ON attempt(engagement_id, result);
+CREATE INDEX IF NOT EXISTS idx_attempt_rule ON attempt(playbook_rule_id, host_id);
+
+-- ---------------------------------------------------------------------------
+-- Scan coverage — what was actually SCANNED, not just what was found.
+--
+-- Under-enumeration is the top OSAI failure mode, and the world model could not
+-- see it: a 1-1000 scan and a -p- scan produced identical host rows. Ingest now
+-- records the run's port range / version-scan flag per host (from nmap's
+-- <scaninfo> + run args), so `yhwach gaps` can name the hosts that were never
+-- full-ported and the handoff can warn before the operator calls enum "done".
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS scan_coverage (
+    id            INTEGER PRIMARY KEY,
+    host_id       INTEGER NOT NULL REFERENCES host(id),
+    proto         TEXT    NOT NULL,              -- tcp | udp
+    ports         TEXT    NOT NULL,              -- range as nmap reported it ('1-65535', '1-1000')
+    port_count    INTEGER NOT NULL DEFAULT 0,    -- number of ports in that range
+    full_range    INTEGER NOT NULL DEFAULT 0,    -- 1 when the whole 1-65535 space was covered
+    version_scan  INTEGER NOT NULL DEFAULT 0,    -- 1 when the run carried -sV / -A
+    source        TEXT,                          -- the nmap args line, when available
+    scanned_at    TEXT    NOT NULL,
+    UNIQUE(host_id, proto, ports)
+);
+CREATE INDEX IF NOT EXISTS idx_coverage_host ON scan_coverage(host_id, proto);

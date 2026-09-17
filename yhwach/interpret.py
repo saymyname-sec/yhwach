@@ -111,6 +111,19 @@ def _jenkins_api(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _jenkins_proxy_bypass(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Jenkins reachable through an auth-proxy static-suffix bypass -> tag
+    jenkins_unsecured. The `X-Jenkins` header or a hudson.model.Hudson body
+    behind a `.css` suffix is the deterministic marker."""
+    if "X-Jenkins" in output or "hudson.model.Hudson" in output:
+        return ExtractedFinding(
+            "CWE-287", "Auth proxy bypassed via static-extension suffix (Jenkins reachable)",
+            "critical",
+            f"{ctx.get('URL','?')}/api/json/x.css reaches Jenkins past oauth2-proxy skip_auth_routes",
+            tag="jenkins_unsecured")
+    return None
+
+
 def _smb_null(output: str, ctx: dict) -> list[ExtractedFinding]:
     """netexec/smbmap SMB output — one run yields several AD signals at once."""
     ip = ctx.get("IP", "?")
@@ -269,6 +282,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "enumerate_models": _openai_models,
     "mcp_tools_list": _mcp_tools,
     "jenkins_auth_check": _jenkins_api,
+    "jenkins_oauth2proxy_bypass": _jenkins_proxy_bypass,
     "netexec_smb_null": _smb_null,
     "probe_writable_smb_share": _smb_null,
     "enum4linux_ng": _enum4linux,

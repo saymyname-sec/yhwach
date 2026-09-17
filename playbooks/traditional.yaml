@@ -22,6 +22,41 @@
   source: 'hacktricks . pentesting-web/jenkins'
   authorized_only: true
 
+# A plain web surface may be an oauth2-proxy fronting a backend. Its
+# skip_auth_routes often uses an unanchored \.(js|css|..)$ regex; Jenkins/Stapler
+# ignores a trailing /x.css suffix, so the pair bypasses auth. Recon only here.
+- id: oauth2proxy_static_suffix_bypass
+  when: { surface: web }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: jenkins_oauth2proxy_bypass
+  maps: [CWE-287, CVE-2025-54576]
+  points: 10
+  risk: read_only
+  routes: /osai-web
+  source: 'double_hellix . oauth2-proxy skip_auth_routes unanchored ext regex + Jenkins Stapler suffix'
+  authorized_only: true
+
+# The bypass probe reached Jenkins (tag jenkins_unsecured) -> anonymous Groovy
+# script console RCE through the same /x.css suffix. Host-scoped.
+- id: jenkins_unsecured_console_rce
+  when: { findings_include: jenkins_unsecured }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: jenkins_suffix_console_rce
+    - action: jenkins_cred_dump
+  maps: [CWE-94, CWE-287]
+  points: 15
+  risk: propose
+  routes: /osai-web
+  source: 'double_hellix . anonymous Jenkins script console via the proxy-bypass suffix (authZ=Unsecured)'
+  technique: jenkins_suffix_rce
+  authorized_only: true
+
 - id: gitlab_recon
   when: { surface: gitlab }
   class: traditional

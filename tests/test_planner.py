@@ -142,6 +142,24 @@ def test_vault_gated_rule_needs_credentials(tmp_db: Path) -> None:
     assert "kerberoast_with_creds" in ids              # creds present
 
 
+def test_oauth2proxy_jenkins_bypass_chain(tmp_db: Path) -> None:
+    """A web surface offers the oauth2-proxy suffix-bypass recon; the
+    jenkins_unsecured tag then unlocks the anonymous console RCE."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="web")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "oauth2proxy_static_suffix_bypass" in ids
+    assert "jenkins_unsecured_console_rce" not in ids   # not until the bypass lands
+    _add_finding(tmp_db, eng, "jenkins_unsecured")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
+    assert "jenkins_unsecured_console_rce" in ids
+
+
 def test_agent_tool_lfi_chain(tmp_db: Path) -> None:
     """A gradio tool console surfaces the LFI recon rule (read_log traversal +
     unsafe YAML include)."""

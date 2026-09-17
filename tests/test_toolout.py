@@ -60,6 +60,12 @@ def test_bloodhound_facts_incl_unknown_edge() -> None:
     assert "some_new_edge_type" in tags   # forward-compatible
 
 
+def test_jenkins_proxy_bypass_tags_unsecured() -> None:
+    fs = interpret_all("jenkins_oauth2proxy_bypass", _read("jenkins_proxy_bypass.txt"),
+                       {"URL": "http://10.0.0.30:8443"})
+    assert fs and fs[0].tag == "jenkins_unsecured" and fs[0].severity == "critical"
+
+
 def test_lfi_passwd_tags_confirmed() -> None:
     fs = interpret_all("probe_tool_lfi_traversal", _read("lfi_passwd.txt"),
                        {"URL": "http://10.0.0.90"})

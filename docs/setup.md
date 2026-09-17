@@ -167,6 +167,10 @@ Full tool list + rationale: [deploy.md](deploy.md).
 **Router config:** copy [CLAUDE.osai.md](CLAUDE.osai.md) to `~/.claude/CLAUDE.md` — it makes Yhwach the
 loop's spine and carries the OSAI methodology (scoring, foothold sequence, skill map, capture rules).
 
+**Lab command:** copy [commands/osai-lab.md](commands/osai-lab.md) to `~/.claude/commands/osai-lab.md`,
+then start a lab with `/osai-lab --lab <name> --scope <cidr> --domain <d> --dc <ip>` (omit args to
+resume). It engages the lab and drives the whole Yhwach loop — no copy-paste prompt needed.
+
 ## 7. Pre-staged operator tooling
 
 Before each challenge, drop your custom binaries in `~/osai/current/tools/` with an instructions

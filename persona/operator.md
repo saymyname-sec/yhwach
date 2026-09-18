@@ -67,6 +67,16 @@ AUTONOMY:     proceed | propose | ask
 - **Know when to walk away.** Enum exhausted + 2 failed hypotheses -> mark the host `blocked`, return with more creds.
 - **With ANY domain cred, enumerate writable Tier-0 objects — not just BloodHound's shortest path.** `bloodyAD --host <dc> get writable --detail` reveals GenericWrite/WriteDACL/AddKeyCredentialLink over Domain Admins members that a canned BloodHound query can miss. A writable `msDS-KeyCredentialLink` on a DA member is a one-shot shadow credential -> PKINIT -> NT hash -> PtH (the Double_Hellix DC path). It ranks as `shadow_credential_abuse` once ingested as a `shadow_cred_target` fact.
 - **On a Windows foothold, the privesc-to-DPAPI pattern repeats across hosts.** A scheduled task running as SYSTEM with a Users-writable action script -> overwrite + `schtasks /run` -> SYSTEM; then dump SAM/SYSTEM/SECURITY + the user's `Microsoft\Credentials`/`Protect` blobs. `secretsdump LOCAL` also yields **LSA DefaultPassword** (often a domain cred). Seen on two hosts in one lab — assume the second Windows box has the same task if the first did.
+- **Crack an encrypted key the moment you loot it — in parallel with any intel hunt.** Do NOT assume a "machine-generated / nightly-automated" passphrase is stored somewhere and go hunting. Run `ssh2john key > h; john --wordlist=rockyou.txt h` immediately. **THE TRAP:** a second `john` run prints `No password hashes left to crack (see FAQ)` — that reads like failure but means it is **already cracked**; ALWAYS run `john --show h`. (Synthetic Siege: the audit key was rockyou-crackable as `prometheus` from hour one; a misread early run cost days chasing CredMan/KeePass/GitLab for a passphrase that was never stored.)
+- **A uniform web catch-all is not a decoy.** Same response size for every path/unknown host = nginx `default_server` hiding name-based vhosts — fuzz the `Host` header (`ffuf -H 'Host: FUZZ.<domain>' -fs <size>`) before writing the host off.
+
+## Tooling gotchas (learned the hard way)
+
+- **RDP over a SOCKS pivot: use `nxc rdp` (aardwolf), not freerdp3/rdesktop.** freerdp's winpr insists on Kerberos-over-UDP for NLA and cannot reach the KDC through SOCKS; aardwolf negotiates NLA with NTLM in pure Python and works. `nxc rdp -x '<cmd>'` runs commands over the clipboard channel (answer the reconnect prompt with `Y`), but that channel **mangles binary blobs** — dump DPAPI/CredMan over a raw TCP shell instead.
+- **`impacket-mssqlclient -file` runs ONE statement per line** — write each `EXEC`/`RECONFIGURE` on its own line.
+- **A potato-spawned SYSTEM context is constrained** — long or heavily-piped commands die with "Not enough memory resources"; keep one short action per call and escalate to a real WinRM admin shell for heavy work. Give any SQL-CLR `[SqlProcedure]` a **unique** dbg file per call (lingering threads lock a fixed one), and the CLR class **must be `public`**.
+- **A blocking reverse shell inside a poisoned import crashes the host process** (n8n kills/restarts the exec) — inject `authorized_keys` for a stable shell instead.
+- **"Auth suddenly fails" over a tunnel is often congestion, not a lockout** — retry before concluding an account is locked (Synthetic Siege wasted a reframe on a "locked" MSSQL sa that was just tunnel congestion).
 
 ## Notebook protocol — the vault is the record
 

@@ -876,3 +876,23 @@ def test_vhost_fuzz_rule(tmp_db: Path) -> None:
         match_rules(conn, eng, rules)
         ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
     assert "nginx_catchall_vhost_fuzz" in ids
+
+
+def test_restic_and_zabbix_recon_rules(tmp_db: Path) -> None:
+    """Product-gated recon rules for backup01 (restic) and monitor01 (zabbix)."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    rules = load_rules(default_playbook_dir())
+    eng = _seed_surface(tmp_db, kind="web", ip="10.0.0.80")
+    with yhdb.transaction(tmp_db) as conn:
+        conn.execute("UPDATE service SET product='restic-rest' WHERE host_id="
+                     "(SELECT id FROM host WHERE engagement_id=? AND ip='10.0.0.80')", (eng,))
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "restic_rest_backup_enum" in ids
+    eng2 = _seed_surface(tmp_db, kind="web", ip="10.0.0.90")
+    with yhdb.transaction(tmp_db) as conn:
+        conn.execute("UPDATE service SET product='Zabbix 6.0' WHERE host_id="
+                     "(SELECT id FROM host WHERE engagement_id=? AND ip='10.0.0.90')", (eng2,))
+        match_rules(conn, eng2, rules)
+        ids2 = [t["playbook_rule_id"] for t in top_tasks(conn, eng2, 200)]
+    assert "zabbix_admin_script_rce" in ids2

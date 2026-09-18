@@ -295,3 +295,38 @@
   source: 'synthetic_siege . a uniform catch-all (default_server) hid portal/trials vhosts (obj1)'
   technique: vhost_fuzz
   authorized_only: true
+
+# --- restic-rest backup server (backup01) — the parked alt path to obj13 ---
+# GET / lists repos; each repo needs its own Bearer token (lives on the backed-up
+# host). Restoring the agents01/labdb01 repo would expose the audit runner + key.
+- id: restic_rest_backup_enum
+  when: { surface: web, product: restic }
+  class: traditional
+  likelihood: L
+  time_cost: fast
+  emits:
+    - action: restic_rest_enum
+  maps: [CWE-200]
+  points: 10
+  risk: read_only
+  routes: /osai-triage
+  source: 'synthetic_siege . restic-rest on backup01 held labdb01/agents01 repos (parked alt path)'
+  authorized_only: true
+
+# --- Zabbix (monitor01) — the parked key-free path to the DC ---
+# Zabbix admin (often LDAP-backed, so a domain cred may work) can run agentless
+# scripts on any monitored host = RCE on DC01/agents01 without the audit key.
+- id: zabbix_admin_script_rce
+  when: { surface: web, product: zabbix }
+  class: traditional
+  likelihood: L
+  time_cost: med
+  emits:
+    - action: zabbix_login_probe
+    - action: zabbix_script_rce
+  maps: [CWE-287, CWE-78]
+  points: 10
+  risk: propose
+  routes: /osai-web-exploit
+  source: 'synthetic_siege . Zabbix LDAP auth + agentless script exec on monitored hosts (parked alt path)'
+  authorized_only: true

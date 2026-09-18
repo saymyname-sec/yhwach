@@ -270,3 +270,9 @@ def test_gitlab_pat_tags_token() -> None:
     fs = interpret_all("gitlab_create_pat", _read("gitlab_pat.json"),
                        {"URL": "http://10.0.0.40"})
     assert fs and fs[0].tag == "gitlab_token"
+
+
+def test_git_import_pipeline_tag() -> None:
+    fs = interpret_all("inspect_workflow_config", _read("workflow_git_import.txt"),
+                       {"IP": "192.168.232.30"})
+    assert fs and fs[0].tag == "git_import_pipeline" and fs[0].severity == "critical"

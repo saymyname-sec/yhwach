@@ -201,3 +201,22 @@
   source: 'synthetic_siege . poison clinical_docs_train.jsonl so flagged_doc reclassifies NON-SENSITIVE -> published'
   technique: classifier_poison
   authorized_only: true
+
+# --- Scheduled git-pull-and-import -> poison the module for RCE (obj7) ---
+# A workflow/cron that git-pulls a repo with a leaked credential.helper cred and
+# then imports it (import_module) executes clf/__init__.py on every run. If the
+# leaked cred has push access, poison __init__.py -> RCE as the runtime user.
+- id: gitea_deploy_poison_rce
+  when: { findings_include: git_import_pipeline }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: poison_git_imported_module
+  maps: [CWE-94, LLM05]
+  points: 15
+  risk: propose
+  routes: /osai-supplychain
+  source: 'synthetic_siege . n8n git credential.helper leaked deploy-bot; poison clf/__init__.py -> RCE'
+  technique: git_import_poison
+  authorized_only: true

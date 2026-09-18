@@ -79,6 +79,21 @@ def _ollama_version(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _git_import_pipeline(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A scheduled git-pull-and-import carrying a credential.helper cred ->
+    tag git_import_pipeline (poison the imported module for RCE, obj7)."""
+    has_cred = "credential.helper" in output or re.search(r"password=\S+", output)
+    has_git = re.search(r"\bgit\b.*\bpull\b", output, re.DOTALL)
+    has_import = "import_module(" in output or "__init__" in output
+    if not (has_cred and has_git and has_import):
+        return None
+    return ExtractedFinding(
+        "CWE-94", "Scheduled git-pull-and-import with a pushable cred", "critical",
+        "a scheduled job git-pulls then imports a repo using a leaked credential.helper cred — "
+        "poison the imported module (__init__.py) for RCE as the runtime user",
+        tag="git_import_pipeline")
+
+
 def _gitlab_pat(output: str, ctx: dict) -> ExtractedFinding | None:
     """A minted GitLab PAT -> tag gitlab_token (unlocks the CI-exfil chain)."""
     data = _first_json(output)
@@ -602,6 +617,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "a2a_capture_task_creds": _a2a_capture,
     "inspect_private_key": _encrypted_privkey,
     "gitlab_create_pat": _gitlab_pat,
+    "inspect_workflow_config": _git_import_pipeline,
     "enumerate_models": _openai_models,
     "mcp_tools_list": _mcp_tools,
     "jenkins_auth_check": _jenkins_api,

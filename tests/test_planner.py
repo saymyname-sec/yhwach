@@ -774,3 +774,19 @@ def test_mssql_sqlclr_chain(tmp_db: Path) -> None:
         match_rules(conn, eng, rules)
         ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
     assert "mssql_sqlclr_code_exec" in ids
+
+
+def test_seimpersonate_potato_chain(tmp_db: Path) -> None:
+    """A seimpersonate finding (winPEAS) unlocks the potato-to-SYSTEM rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="mssql", os="windows")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "seimpersonate_potato_system" not in ids
+    _add_finding(tmp_db, eng, "seimpersonate")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "seimpersonate_potato_system" in ids

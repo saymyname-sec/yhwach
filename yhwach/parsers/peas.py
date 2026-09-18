@@ -111,7 +111,8 @@ def parse_winpeas(text: str) -> list[ExtractedFinding]:
     if re.search(r"Se(Impersonate|AssignPrimaryToken)Privilege", text):
         out.append(ExtractedFinding(
             "CWE-250", "SeImpersonate/SeAssignPrimaryToken (Potato)", "high",
-            "token-impersonation privesc to SYSTEM"))
+            "token-impersonation privesc to SYSTEM (GodPotato/PrintSpoofer)",
+            tag="seimpersonate"))
 
     if re.search(r"AlwaysInstallElevated.*?1", text, re.S):
         out.append(ExtractedFinding(

@@ -13,3 +13,8 @@
 ÉÍÍÍÍÍÍÍÍÍÍ¹ Looking for DPAPI Credential Manager
     Folder: C:\Users\j.martinez\AppData\Roaming\Microsoft\Credentials
     Folder: C:\Users\j.martinez\AppData\Roaming\Microsoft\Protect\S-1-5-21-...
+
+=========================================
+ÉÍÍÍÍ¹ Token privileges
+    SeImpersonatePrivilege: Enabled
+    SeChangeNotifyPrivilege: Enabled

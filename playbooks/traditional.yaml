@@ -276,3 +276,22 @@
   source: 'synthetic_siege . CREATE ASSEMBLY ... UNSAFE loads a potato in-process, bypassing Defender/AMSI'
   technique: mssql_sqlclr
   authorized_only: true
+
+# --- nginx default_server catch-all -> mandatory vhost fuzzing (obj1 lead) ---
+# A web server that returns a UNIFORM response (same size/body) for every path
+# and unknown host is an nginx default_server masking name-based vhosts — NOT a
+# decoy. Fuzz the Host header (filter the catch-all size) to find the real apps.
+- id: nginx_catchall_vhost_fuzz
+  when: { surface: web }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: vhost_fuzz
+  maps: [CWE-200]
+  points: 10
+  risk: read_only
+  routes: /osai-web-exploit
+  source: 'synthetic_siege . a uniform catch-all (default_server) hid portal/trials vhosts (obj1)'
+  technique: vhost_fuzz
+  authorized_only: true

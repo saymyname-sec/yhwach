@@ -256,6 +256,13 @@ ACTION_REGISTRY: dict[str, Action] = {
     "sqlmap_forms": _a("sqlmap_forms",
         ["sqlmap -u $URL/ --forms --batch --level 2 --risk 2"], risk="propose", runnable=False,
         note="Active SQLi; operator confirms scope."),
+    "vhost_fuzz": _a("vhost_fuzz",
+        ["ffuf -u $URL -H 'Host: FUZZ.$DOMAIN' "
+         "-w /usr/share/seclists/Discovery/DNS/subdomains-top1million-5000.txt -fs <catchall-size>"],
+        runnable=False,
+        note="A uniform catch-all response (same size for every path/unknown host) = nginx "
+             "default_server hiding name-based vhosts — NOT a decoy. Set -fs to the catch-all "
+             "byte size to filter it, and fuzz the Host header to reveal the real apps."),
 
     # --- Message brokers (self-learned from Iron Crown BROKER01) ---
     "activemq_version_jolokia": _a("activemq_version_jolokia",

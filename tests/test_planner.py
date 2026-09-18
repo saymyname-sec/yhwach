@@ -865,3 +865,14 @@ def test_docker_group_root_chain(tmp_db: Path) -> None:
         match_rules(conn, eng, rules)
         ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
     assert "docker_group_root" in ids
+
+
+def test_vhost_fuzz_rule(tmp_db: Path) -> None:
+    """A web surface offers the default_server vhost-fuzz recon nudge."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="web")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "nginx_catchall_vhost_fuzz" in ids

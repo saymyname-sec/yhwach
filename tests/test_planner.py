@@ -736,3 +736,14 @@ def test_rag_readpage_bypass_chain(tmp_db: Path) -> None:
         match_rules(conn, eng, rules)
         ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
     assert "rag_readpage_poison_unlock" in ids
+
+
+def test_chatbot_memory_recall_rule(tmp_db: Path) -> None:
+    """A chatbot surface offers the recall_conversation cross-session memory leak."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="chatbot")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "chatbot_memory_recall_leak" in ids

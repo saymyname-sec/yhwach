@@ -1,0 +1,145 @@
+name: synthetic_siege
+description: |
+  Calibration capture reconstructing the "Synthetic Siege" engagement world
+  model (external portal + internal kethalis.corp estate). Synthetic IPs and
+  hostnames — the point is the RANKING, not the addresses.
+
+  This locks the AI-first kill path Yhwach learned from the engagement:
+    * every AI attack surface from the chains is represented and its recon rule
+      must appear: the portal chatbot (recall_conversation cross-session memory
+      leak), the wiki RAG (read_page import-poison), the A2A mesh (rogue-agent
+      task capture), the n8n workflow host (CVE-2026-21858), and GitLab
+      (classifier poisoning / registry).
+    * the finding-GATED and vault-GATED exploit rules must NOT rank yet — they
+      only unlock once their probe/ingest sets the chaining tag or a credential
+      lands in the vault. This is the guardrail against proposing exploitation
+      (n8n file-read, RAG read_page unlock, SQL-CLR, potato, key-crack, docker
+      root, classifier poison) before confirmation.
+    * the parked alternate paths (restic-rest backup, Zabbix) are product-gated
+      recon and must appear so they are never silently dropped again.
+world_model:
+  engagement:
+    lab: synthetic_siege
+    scope: [10.20.0.0/24]
+    domain: kethalis.corp
+    dc: 10.20.0.60
+  hosts:
+    # External portal — AI chatbot (recall_conversation leak) behind an nginx catch-all
+    - ip: 10.20.0.10
+      hostname: portal01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 80, proto: tcp, product: nginx}
+      surfaces:
+        - {kind: chatbot, auth: unknown, service_port: 80, meta: {endpoint: /api/chat}}
+        - {kind: web, auth: unknown, service_port: 80, meta: {title: catch-all}}
+    # workflow01 — n8n (CVE-2026-21858), gitea, wiki decoy
+    - ip: 10.20.0.30
+      hostname: workflow01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 5678, proto: tcp, product: n8n}
+      surfaces:
+        - {kind: web, auth: unknown, service_port: 5678, meta: {product: n8n}}
+    # wiki01 — RAG retrieval assistant (read_page import-poison)
+    - ip: 10.20.0.55
+      hostname: wiki01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 8000, proto: tcp, product: uvicorn}
+      surfaces:
+        - {kind: rag, auth: basic, service_port: 8000, meta: {endpoint: /api/query}}
+    # agents01 — A2A mesh (rogue-agent task capture), Windows Server 2025
+    - ip: 10.20.0.11
+      hostname: agents01
+      os: windows
+      stage: scanned
+      services:
+        - {port: 8080, proto: tcp, product: FastAPI}
+      surfaces:
+        - {kind: a2a, auth: unknown, service_port: 8080, meta: {registry: /registry/agents}}
+    # labdb01 — MSSQL (sa -> SQL-CLR -> potato), WinRM
+    - ip: 10.20.0.31
+      hostname: labdb01
+      os: windows
+      stage: scanned
+      services:
+        - {port: 1433, proto: tcp, product: Microsoft SQL Server}
+        - {port: 5985, proto: tcp, product: Microsoft HTTPAPI}
+      surfaces:
+        - {kind: mssql, auth: unknown, service_port: 1433, meta: {}}
+        - {kind: winrm, auth: unknown, service_port: 5985, meta: {}}
+    # gitlab01 — classifier poisoning / registry / docker-root
+    - ip: 10.20.0.40
+      hostname: gitlab01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 80, proto: tcp, product: GitLab}
+      surfaces:
+        - {kind: gitlab, auth: unknown, service_port: 80, meta: {}}
+    # backup01 — restic-rest (parked alt path)
+    - ip: 10.20.0.80
+      hostname: backup01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 8000, proto: tcp, product: restic-rest}
+      surfaces:
+        - {kind: web, auth: unknown, service_port: 8000, meta: {product: restic}}
+    # monitor01 — Zabbix (parked alt path)
+    - ip: 10.20.0.90
+      hostname: monitor01
+      os: linux
+      stage: scanned
+      services:
+        - {port: 80, proto: tcp, product: Zabbix}
+      surfaces:
+        - {kind: web, auth: unknown, service_port: 80, meta: {product: zabbix}}
+    # dc01 — the objective host (lowest-value by doctrine)
+    - ip: 10.20.0.60
+      hostname: dc01
+      os: windows
+      stage: scanned
+      services:
+        - {port: 389, proto: tcp, product: Microsoft Windows LDAP}
+        - {port: 445, proto: tcp, product: Microsoft-DS}
+      surfaces:
+        - {kind: ldap, auth: unknown, service_port: 389, meta: {}}
+        - {kind: smb, auth: unknown, service_port: 445, meta: {}}
+expected:
+  autonomy: proceed
+  # AI-first doctrine: every AI recon move is EV-15 and outranks the traditional
+  # surfaces (mssql/gitlab/dc); the RAG entry to obj8/9 is the deterministic top.
+  top_hypothesis: {playbook_rule_id: rag_surface_recon}
+  must_include_hypotheses:
+    - chatbot_memory_recall_leak       # portal recall_conversation leak (obj1)
+    - chatbot_direct_injection_probe
+    - rag_surface_recon                # wiki01 RAG (obj8/9)
+    - a2a_task_credential_capture      # agents01 rogue-agent capture (obj3/4)
+    - a2a_orchestrator_probe
+    - n8n_workflow_recon               # workflow01 Ni8mare gate (obj6)
+    - gitlab_open_registration         # gitlab01 open reg -> PAT (obj10)
+    - mssql_enumeration                # labdb01 (obj4/5)
+    - restic_rest_backup_enum          # backup01 parked alt path
+    - zabbix_admin_script_rce          # monitor01 parked alt path
+  must_not_include:
+    # finding-gated exploitation must not rank before its tag is set
+    - n8n_ni8mare_fileread
+    - n8n_auth_jwt_forge
+    - n8n_credential_store_decrypt
+    - rag_readpage_poison_unlock
+    - gitea_deploy_poison_rce
+    - gitlab_registry_layer_secret
+    - gitlab_classifier_training_poison
+    - seimpersonate_potato_system
+    - encrypted_ssh_key_crack
+    - keepass_kdbx_open
+    - credential_manager_dump
+    - docker_group_root
+    # vault-gated moves must not rank with an empty vault
+    - rag_authenticated_import
+    - mssql_sqlclr_code_exec

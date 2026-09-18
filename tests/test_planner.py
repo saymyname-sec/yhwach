@@ -684,3 +684,31 @@ def test_os_filter_matches(tmp_db: Path) -> None:
     with yhdb.transaction(tmp_db) as conn:
         match_win = match_rules(conn, eng_id, [_rule("win", {"surface": "chatbot", "os": "windows"})])
     assert match_win.tasks_created == 1
+
+
+def test_n8n_ni8mare_chain(tmp_db: Path) -> None:
+    """A web surface whose service product is n8n offers the version recon; the
+    n8n_ni8mare tag then unlocks the unauth file read, and n8n_encryption_key
+    unlocks both the JWT forge and the credential-store decrypt."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="web", ip="10.0.0.30")
+    with yhdb.transaction(tmp_db) as conn:
+        conn.execute(
+            "UPDATE service SET product='n8n 1.120.4' WHERE host_id="
+            "(SELECT id FROM host WHERE engagement_id=? AND ip='10.0.0.30')", (eng,))
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "n8n_workflow_recon" in ids
+    _add_finding(tmp_db, eng, "n8n_ni8mare", ip="10.0.0.30")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "n8n_ni8mare_fileread" in ids
+    _add_finding(tmp_db, eng, "n8n_encryption_key", ip="10.0.0.30")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "n8n_auth_jwt_forge" in ids
+    assert "n8n_credential_store_decrypt" in ids

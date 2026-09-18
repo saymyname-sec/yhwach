@@ -192,3 +192,68 @@
   routes: /osai-triage
   source: 'hacktricks . pentesting/ftp'
   authorized_only: true
+
+# --- n8n (workflow automation) — CVE-2026-21858 "Ni8mare" chain (synthetic_siege) ---
+# n8n < 1.121.0 form-trigger content-type confusion = unauth arbitrary TEXT file read.
+# Fingerprint the version first (gates the exploit deterministically, like ollama).
+- id: n8n_workflow_recon
+  when: { surface: web, product: n8n }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: probe_n8n_version
+  maps: [CWE-200]
+  points: 10
+  risk: read_only
+  routes: /osai-web-exploit
+  source: 'synthetic_siege . n8n form-trigger fingerprint (Ni8mare gate)'
+  authorized_only: true
+
+# Version probe tagged n8n_ni8mare (< 1.121.0) -> read /etc/n8n.env unauth.
+- id: n8n_ni8mare_fileread
+  when: { findings_include: n8n_ni8mare }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: n8n_ni8mare_file_read
+  maps: [CVE-2026-21858, CWE-22]
+  points: 15
+  risk: propose
+  routes: /osai-web-exploit
+  source: 'synthetic_siege . CVE-2026-21858 Ni8mare: application/json form upload reads arbitrary text files'
+  technique: n8n_ni8mare
+  authorized_only: true
+
+# /etc/n8n.env read leaked N8N_ENCRYPTION_KEY -> forge an n8n-auth session JWT.
+- id: n8n_auth_jwt_forge
+  when: { findings_include: n8n_encryption_key }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: n8n_forge_auth_jwt
+  maps: [CWE-287]
+  points: 15
+  risk: propose
+  routes: /osai-web-exploit
+  source: 'synthetic_siege . n8n-auth JWT secret = sha256(key[::2]) -> forge owner/member cookie'
+  technique: n8n_jwt_forge
+  authorized_only: true
+
+# Same key decrypts the entire n8n credential store (LLM06 blast radius).
+- id: n8n_credential_store_decrypt
+  when: { findings_include: n8n_encryption_key }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: n8n_credstore_decrypt
+  maps: [LLM06, CWE-522]
+  points: 15
+  risk: propose
+  routes: /osai-win-enum
+  source: 'synthetic_siege . decrypt credentials_entity offline (CryptoJS AES, OpenSSL MD5 KDF)'
+  technique: n8n_credstore
+  authorized_only: true

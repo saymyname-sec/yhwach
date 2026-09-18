@@ -196,6 +196,24 @@ def test_ollama_version_fixture_is_vulnerable() -> None:
     assert fs and fs[0].tag == "ollama_probllama" and fs[0].cls == "CVE-2024-37032"
 
 
+def test_n8n_version_fixture_is_vulnerable() -> None:
+    fs = interpret_all("probe_n8n_version", _read("n8n_version.json"),
+                       {"URL": "https://10.0.0.30:5678"})
+    assert fs and fs[0].tag == "n8n_ni8mare" and fs[0].cls == "CVE-2026-21858"
+
+
+def test_n8n_version_patched_is_clean() -> None:
+    fs = interpret_all("probe_n8n_version", '{"data":{"versionCli":"1.121.0"}}',
+                       {"URL": "https://10.0.0.30:5678"})
+    assert fs == []
+
+
+def test_n8n_env_leaks_encryption_key() -> None:
+    fs = interpret_all("n8n_ni8mare_file_read", _read("n8n_env.txt"),
+                       {"URL": "https://10.0.0.30:5678"})
+    assert fs and fs[0].tag == "n8n_encryption_key" and fs[0].cls == "CWE-522"
+
+
 def test_gpohound_control_tag() -> None:
     fs = interpret_all("gpohound_enum", _read("gpohound_analysis.txt"), {"IP": "10.10.10.10"})
     assert fs and fs[0].tag == "gpo_control"

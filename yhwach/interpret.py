@@ -79,6 +79,46 @@ def _ollama_version(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _n8n_version(output: str, ctx: dict) -> ExtractedFinding | None:
+    """n8n version -> tag n8n_ni8mare when < 1.121.0 (CVE-2026-21858 "Ni8mare").
+
+    The form-trigger content-type-confusion arbitrary-file-read is version-gated
+    (fixed 1.121.0), so fingerprinting the version unlocks the exploit rule."""
+    ver = None
+    data = _first_json(output)
+    if isinstance(data, dict):
+        inner = data.get("data") if isinstance(data.get("data"), dict) else data
+        v = inner.get("versionCli") or inner.get("n8nVersion") or inner.get("version")
+        if isinstance(v, str):
+            ver = v
+    if ver is None:
+        m = re.search(r"n8n[\s/@v-]*?(\d+\.\d+\.\d+)", output, re.IGNORECASE)
+        if m:
+            ver = m.group(1)
+    if not isinstance(ver, str):
+        return None
+    parts = tuple(int(x) for x in re.findall(r"\d+", ver)[:3])
+    if parts and parts < (1, 121, 0):
+        return ExtractedFinding(
+            "CVE-2026-21858", "n8n vulnerable to Ni8mare (unauth arbitrary file read)", "critical",
+            f"n8n {ver} on {ctx.get('URL','?')} < 1.121.0 — a form-trigger content-type confusion "
+            "(application/json upload) reads arbitrary text files unauthenticated",
+            tag="n8n_ni8mare")
+    return None
+
+
+def _n8n_env_secret(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A leaked /etc/n8n.env -> tag n8n_encryption_key (unlocks JWT forge + cred-store decrypt)."""
+    m = re.search(r"N8N_ENCRYPTION_KEY\s*=\s*[\"']?([^\s\"']+)", output)
+    if not m:
+        return None
+    return ExtractedFinding(
+        "CWE-522", "n8n encryption key disclosed", "critical",
+        f"N8N_ENCRYPTION_KEY recovered ({m.group(1)[:6]}…) on {ctx.get('URL','?')} — forge the "
+        "n8n-auth JWT (secret = sha256(key[::2])) and decrypt the whole credential store",
+        tag="n8n_encryption_key")
+
+
 def _openai_models(output: str, ctx: dict) -> ExtractedFinding | None:
     data = _first_json(output)
     if isinstance(data, dict) and isinstance(data.get("data"), list) and data["data"]:
@@ -492,6 +532,8 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "sqli_error_probe": _sqli_error,
     "probe_ollama_models": _ollama_models,
     "probe_ollama_version": _ollama_version,
+    "probe_n8n_version": _n8n_version,
+    "n8n_ni8mare_file_read": _n8n_env_secret,
     "enumerate_models": _openai_models,
     "mcp_tools_list": _mcp_tools,
     "jenkins_auth_check": _jenkins_api,

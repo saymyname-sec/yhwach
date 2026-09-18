@@ -758,3 +758,19 @@ def test_a2a_task_capture_rule(tmp_db: Path) -> None:
         match_rules(conn, eng, rules)
         ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
     assert "a2a_task_credential_capture" in ids
+
+
+def test_mssql_sqlclr_chain(tmp_db: Path) -> None:
+    """MSSQL + a vault cred (sa) offers the SQL-CLR in-process code-exec bypass."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="mssql")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "mssql_sqlclr_code_exec" not in ids  # no creds yet
+    with yhdb.transaction(tmp_db) as conn:
+        yhdb.add_credential(conn, eng, "sa", "K3thalis-SQL-SA!2026", "password", "a2a")
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "mssql_sqlclr_code_exec" in ids

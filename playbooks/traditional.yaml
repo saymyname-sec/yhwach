@@ -257,3 +257,22 @@
   source: 'synthetic_siege . decrypt credentials_entity offline (CryptoJS AES, OpenSSL MD5 KDF)'
   technique: n8n_credstore
   authorized_only: true
+
+# --- MSSQL sa -> SQL CLR in-process assembly load = AMSI/Defender bypass (obj5) ---
+# When Defender/AMSI block every PE on disk and in-memory Assembly.Load, sqlservr
+# will load a .NET assembly straight from T-SQL bytes into its own process — no
+# disk write, no AMSI scan, no command line. sa can enable CLR + UNSAFE and run it.
+- id: mssql_sqlclr_code_exec
+  when: { surface: mssql, vault: nonempty }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: mssql_sqlclr_assembly_load
+  maps: [CWE-269, T1055]
+  points: 15
+  risk: propose
+  routes: /osai-win-enum
+  source: 'synthetic_siege . CREATE ASSEMBLY ... UNSAFE loads a potato in-process, bypassing Defender/AMSI'
+  technique: mssql_sqlclr
+  authorized_only: true

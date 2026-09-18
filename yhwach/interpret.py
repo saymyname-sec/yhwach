@@ -79,6 +79,23 @@ def _ollama_version(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _encrypted_privkey(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A looted *encrypted* private key -> tag encrypted_private_key.
+
+    Ranks offline cracking immediately (ssh2john + rockyou) instead of a
+    days-long "where is the passphrase stored" hunt. The Synthetic Siege audit
+    key was rockyou-crackable (`prometheus`) from the first hour."""
+    enc = bool(re.search(r"Proc-Type:\s*4,ENCRYPTED", output)) or "DEK-Info:" in output or (
+        "BEGIN OPENSSH PRIVATE KEY" in output and re.search(r"bcrypt|aes\d", output, re.IGNORECASE))
+    if not enc:
+        return None
+    return ExtractedFinding(
+        "CWE-522", "Encrypted private key looted", "high",
+        "an encrypted private key is present — run ssh2john + rockyou NOW (in parallel with any "
+        "intel hunt) and ALWAYS check `john --show`",
+        tag="encrypted_private_key")
+
+
 def _a2a_capture(output: str, ctx: dict) -> ExtractedFinding | None:
     """Captured A2A task traffic containing a DB connection string / creds ->
     tag a2a_creds_captured (obj3/obj4)."""
@@ -567,6 +584,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "n8n_ni8mare_file_read": _n8n_env_secret,
     "rag_authenticated_import": _rag_import,
     "a2a_capture_task_creds": _a2a_capture,
+    "inspect_private_key": _encrypted_privkey,
     "enumerate_models": _openai_models,
     "mcp_tools_list": _mcp_tools,
     "jenkins_auth_check": _jenkins_api,

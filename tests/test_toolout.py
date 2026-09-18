@@ -253,3 +253,14 @@ def test_a2a_task_capture_tags_creds() -> None:
                        {"IP": "172.16.232.10"})
     assert fs and fs[0].tag == "a2a_creds_captured" and fs[0].severity == "critical"
     assert "sa" in fs[0].evidence
+
+
+def test_encrypted_ssh_key_tag() -> None:
+    fs = interpret_all("inspect_private_key", _read("encrypted_ssh_key.txt"),
+                       {"IP": "172.16.232.30"})
+    assert fs and fs[0].tag == "encrypted_private_key"
+
+
+def test_unencrypted_key_not_tagged() -> None:
+    plain = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z9\n-----END RSA PRIVATE KEY-----"
+    assert interpret_all("inspect_private_key", plain, {"IP": "x"}) == []

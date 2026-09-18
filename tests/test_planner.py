@@ -805,3 +805,19 @@ def test_windows_credential_hunt_chain(tmp_db: Path) -> None:
     assert "keepass_kdbx_open" in ids
     assert "credential_manager_dump" in ids
     assert "autorun_credential_leak" in ids
+
+
+def test_encrypted_key_crack_chain(tmp_db: Path) -> None:
+    """A looted encrypted private key unlocks the immediate offline-crack rule."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="ssh")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "encrypted_ssh_key_crack" not in ids
+    _add_finding(tmp_db, eng, "encrypted_private_key")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "encrypted_ssh_key_crack" in ids

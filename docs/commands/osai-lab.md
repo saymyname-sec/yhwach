@@ -26,15 +26,22 @@ surfaces) → `yhwach_plan` (rank tasks). If hosts already exist, skip to the lo
 ## Step 2 — run the loop
 Repeat until out of scored objectives or ~2h left (then `/osai-report`):
 
-1. **`yhwach_next`** — it returns your persona frame, the **P0 LEADS** (do these first), and the
+1. **`yhwach_next`** — it returns your persona frame, the **P0 LEADS** (do these first), the
+   **PATH TO OBJECTIVE** (shortest known route to Domain Admins — prefer moves on it), and the
    EV-ranked candidates with concrete commands. Reason OBSERVE → ORIENT → DECIDE → ACT → ASSESS;
-   pick the top move and say why.
+   pick the top move and say why. Before committing to a host, `yhwach_recon --host <ip>` prints
+   everything the model holds on it.
 2. **Execute** it — HexStrike MCP, a `/osai-*` skill, or the metasploit MCP.
-3. **Fold the result back into Yhwach**: `yhwach_ingest <file> --kind nmap|linpeas|winpeas|bloodhound|certipy --host <ip>`
-   · `yhwach_run --task N --go` (read-only auto-runs, findings + tags extracted) · `yhwach_cred` ·
+3. **Fold the result back into Yhwach**:
+   `yhwach_ingest <file> --kind nmap|linpeas|winpeas|bloodhound|certipy|netexec|web --host <ip>`
+   (web needs `--url`; netexec adds shares/users/admin/policy, bloodhound builds the AD graph) ·
+   `yhwach_vulns` after ingesting versions (offline version→CVE → `exploit_known_cve`) ·
+   `yhwach_run --task N --go` (read-only auto-runs, findings + tags extracted) · `yhwach_cred` ·
    `yhwach_proof --host <ip> --screenshot <path>` on flags · `yhwach_pivot --via-host <ip> --subnet <cidr>`
-   on new subnets · `yhwach_advance` / `yhwach_consume`.
-4. **Write the Obsidian note** for this objective (obsidian MCP), in full detail.
+   on new subnets · `yhwach_advance` / `yhwach_consume` · `yhwach_outcome` when a move resolves.
+4. **Write the Obsidian note** for this objective (obsidian MCP), in full detail. `yhwach_export_notes`
+   auto-scaffolds the DB-derived tables (services/software, vulns, web, users & groups, shares,
+   per-host) so you write only the prose around them.
 5. **`yhwach_plan`** to re-rank, then back to `yhwach_next`.
 
 ## Rules

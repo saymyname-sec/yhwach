@@ -151,8 +151,18 @@ def collect_context(
         "p0_leads": [dict(r) for r in p0_leads(conn, engagement_id)],
         "dead_ends": [dict(r) for r in dead_ends(conn, engagement_id, limit=8)],
         "enum_gaps": gaps_as_dicts(enum_gaps(conn, engagement_id, host_ip=host_ip)),
+        "attack_path": _attack_path_data(conn, engagement_id),
         "candidates": _candidates(tasks, rule_by_id, eng["domain"]),
     }
+
+
+def _attack_path_data(conn: sqlite3.Connection, engagement_id: int) -> dict | None:
+    """The shortest owned->DA path as data, for the JSON handoff (None if none)."""
+    best = shortest_owned_to_da(conn, engagement_id)
+    if not best:
+        return None
+    return {"hops": len(best) - 1, "route": render_attack_path(conn, best),
+            "nodes": best}
 
 
 def build_context_json(
@@ -180,22 +190,22 @@ def _fmt_node(conn: sqlite3.Connection, node: str) -> str:
     return (r["hostname"] or r["ip"]) if r else node
 
 
-def _attack_path_block(conn: sqlite3.Connection, engagement_id: int) -> list[str]:
-    """Shortest known edge-path from an owned node to Domain/Enterprise Admins.
+def shortest_owned_to_da(conn: sqlite3.Connection, engagement_id: int) -> list[str] | None:
+    """Shortest edge-path (node ids) from an owned node to Domain/Enterprise Admins.
 
     Owned = hosts at foothold+ and principals we hold a credential for (linked by
-    principal_id or by identifier==name). Returns [] when there is no graph, no
-    owned node, or no known path (so the block only shows when it's actionable)."""
+    principal_id or by identifier==name). None when there is no graph, no owned
+    node, no DA target, or no known path. Shared by the text and JSON handoffs."""
     from yhwach.db import shortest_path
 
     if not conn.execute("SELECT 1 FROM edge WHERE engagement_id=? LIMIT 1",
                         (engagement_id,)).fetchone():
-        return []
+        return None
     targets = [f"principal:{r['id']}" for r in conn.execute(
         "SELECT id FROM principal WHERE engagement_id=? AND type='group' "
         "AND name IN ('Domain Admins','Enterprise Admins')", (engagement_id,))]
     if not targets:
-        return []
+        return None
 
     owned: list[str] = [f"host:{r['id']}" for r in conn.execute(
         "SELECT id FROM host WHERE engagement_id=? AND stage IN (?,?,?,?)",
@@ -206,7 +216,7 @@ def _attack_path_block(conn: sqlite3.Connection, engagement_id: int) -> list[str
         "EXISTS (SELECT 1 FROM credential c WHERE c.engagement_id=p.engagement_id "
         "AND c.identifier=p.name COLLATE NOCASE))", (engagement_id,))]
     if not owned:
-        return []
+        return None
 
     best: list[str] | None = None
     for src in owned:
@@ -214,15 +224,35 @@ def _attack_path_block(conn: sqlite3.Connection, engagement_id: int) -> list[str
             p = shortest_path(conn, engagement_id, src, dst)
             if p and (best is None or len(p) < len(best)):
                 best = p
-    if not best:
-        return ["  (no known path yet — enumerate more edges via bloodhound/netexec)"]
+    return best
 
-    rendered = _fmt_node(conn, best[0])
-    for i in range(1, len(best)):
+
+def render_attack_path(conn: sqlite3.Connection, path: list[str]) -> str:
+    """A node-id path -> 'DC01 --HasSession--> svc_sql --MemberOf--> Domain Admins'."""
+    rendered = _fmt_node(conn, path[0])
+    for i in range(1, len(path)):
         e = conn.execute("SELECT kind FROM edge WHERE src=? AND dst=? LIMIT 1",
-                         (best[i - 1], best[i])).fetchone()
-        rendered += f"  --{e['kind'] if e else '?'}-->  {_fmt_node(conn, best[i])}"
-    return [f"  {rendered}", f"  ({len(best) - 1} hop(s) — `yhwach path` for alternatives)"]
+                         (path[i - 1], path[i])).fetchone()
+        rendered += f"  --{e['kind'] if e else '?'}-->  {_fmt_node(conn, path[i])}"
+    return rendered
+
+
+def _attack_path_block(conn: sqlite3.Connection, engagement_id: int) -> list[str]:
+    """The text-handoff PATH TO OBJECTIVE block ([] when there's nothing to show)."""
+    if not conn.execute("SELECT 1 FROM edge WHERE engagement_id=? LIMIT 1",
+                        (engagement_id,)).fetchone():
+        return []
+    # A DA target exists but no route -> say so; no target at all -> stay silent.
+    has_da = conn.execute(
+        "SELECT 1 FROM principal WHERE engagement_id=? AND type='group' "
+        "AND name IN ('Domain Admins','Enterprise Admins') LIMIT 1", (engagement_id,)).fetchone()
+    best = shortest_owned_to_da(conn, engagement_id)
+    if not best:
+        if has_da:
+            return ["  (no known path yet — enumerate more edges via bloodhound/netexec)"]
+        return []
+    return [f"  {render_attack_path(conn, best)}",
+            f"  ({len(best) - 1} hop(s) — `yhwach path` for alternatives)"]
 
 
 def build_context(

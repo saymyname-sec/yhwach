@@ -341,6 +341,40 @@ def test_attack_path_block_in_context(eng) -> None:
     assert "svc_sql" in joined and "Domain Admins" in joined
 
 
+def test_json_handoff_has_attack_path_parity(eng) -> None:
+    """The --json handoff must carry the same path-to-DA the text handoff shows."""
+    import json as _json
+
+    from yhwach.context import build_context, build_context_json
+    db, eid, hid = eng
+    with yhdb.transaction(db) as conn:
+        conn.execute("UPDATE host SET stage='foothold' WHERE id=?", (hid,))
+        pu, _ = yhdb.add_principal(conn, eid, "svc_sql", type="user")
+        pg, _ = yhdb.add_principal(conn, eid, "Domain Admins", type="group")
+        yhdb.add_credential(conn, eid, "svc_sql", "pw", "password", "test")
+        yhdb.add_edge(conn, eid, f"host:{hid}", f"principal:{pu}", "HasSession")
+        yhdb.add_edge(conn, eid, f"principal:{pu}", f"principal:{pg}", "MemberOf")
+        text = build_context(conn, eid)
+        data = _json.loads(build_context_json(conn, eid))
+    assert "PATH TO OBJECTIVE" in text
+    assert data["attack_path"] is not None
+    # svc_sql is owned (we hold its credential), so the shortest route is the
+    # 1-hop svc_sql --MemberOf--> Domain Admins, not the 2-hop path from the host.
+    assert data["attack_path"]["hops"] == 1
+    assert "Domain Admins" in data["attack_path"]["route"]
+
+
+def test_recall_surfaces_schema_v1_counts(eng) -> None:
+    from yhwach.memory import build_recall
+    db, eid, hid = eng
+    with yhdb.transaction(db) as conn:
+        yhdb.add_software(conn, hid, "sudo", "1.8.31", kind="package", source="linpeas")
+        yhdb.add_share(conn, hid, "backups", access="READ,WRITE", source="netexec")
+        yhdb.add_principal(conn, eid, "svc_sql", type="user")
+        out = build_recall(conn, eid)
+    assert "exploitable_cves=" in out and "writable_shares=" in out and "principals=" in out
+
+
 def test_export_notes_writes_tree(eng, tmp_path) -> None:
     from yhwach import notes
     db, eid, hid = eng

@@ -251,6 +251,17 @@ def collect_recall(
         "tunnels": _scalar("SELECT COUNT(*) n FROM tunnel WHERE engagement_id = ?"),
         "proofs": _scalar("SELECT COUNT(*) n FROM proof p JOIN host h ON h.id = p.host_id "
                           "WHERE h.engagement_id = ?"),
+        # schema v1 attack-surface — the enrichment the world model now carries
+        "software": _scalar("SELECT COUNT(*) n FROM software s JOIN host h ON h.id = s.host_id "
+                            "WHERE h.engagement_id = ?"),
+        "vulns_exploitable": _scalar(
+            "SELECT COUNT(*) n FROM vulnerability WHERE engagement_id = ? AND exploit_available = 1"),
+        "principals": _scalar("SELECT COUNT(*) n FROM principal WHERE engagement_id = ?"),
+        "shares_writable": _scalar(
+            "SELECT COUNT(*) n FROM share sh JOIN host h ON h.id = sh.host_id "
+            "WHERE h.engagement_id = ? AND sh.access LIKE '%WRITE%'"),
+        "web_apps": _scalar("SELECT COUNT(*) n FROM web_app w JOIN host h ON h.id = w.host_id "
+                            "WHERE h.engagement_id = ?"),
     }
     pending = _scalar("SELECT COUNT(*) n FROM task WHERE engagement_id = ? AND status = 'pending'")
     total_events = _scalar("SELECT COUNT(*) n FROM event WHERE engagement_id = ?")
@@ -308,7 +319,10 @@ def build_recall(
            f"Hosts: {stage_str}",
            f"services={c['services']} surfaces={c['surfaces']} findings={c['findings']} "
            f"vault={c['credentials']} proofs={c['proofs']} tunnels={c['tunnels']} "
-           f"pending_tasks={d['pending_tasks']}"]
+           f"pending_tasks={d['pending_tasks']}",
+           f"software={c['software']} exploitable_cves={c['vulns_exploitable']} "
+           f"principals={c['principals']} writable_shares={c['shares_writable']} "
+           f"web_apps={c['web_apps']}"]
 
     if d["wins"]:
         out.append(f"\n-- WINS ({len(d['wins'])}) --")

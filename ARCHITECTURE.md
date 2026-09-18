@@ -140,6 +140,54 @@ Knowledge is declarative YAML, not prose. Adding a technique = adding a rule.
   invariant queryable (`yhwach gaps`); see the FSM section above.
 - **`engagement_notebook`** — reaching an objective always takes a note (Kapi's rule). The notebook is an **Obsidian vault**, written by the operator through the Obsidian MCP in full detail (commands, payloads, evidence), and it is the single source of truth for write-ups. Yhwach's DB is the queryable world model and never stores notes; `advance`/`cred` print a reminder, the persona (`persona/notebook.md`) carries the structure. See [persona/notebook.md](persona/notebook.md).
 
+## Attack-surface model (schema v1)
+
+The world model started as *what listens* (host / service / surface). Schema v1
+extends it to *what the next attack path is*, without changing the engine's
+shape:
+
+- **software / vulnerability** — versioned components (listening *and* post-foothold:
+  kernel, sudo, CMS) with CPE, and version→CVE hypotheses carrying a lifecycle
+  (`potential → confirmed → exploited`) plus exploit refs.
+- **principal / membership / privilege / edge** — the AD identity graph. `edge`
+  addresses nodes as `principal:<id>` / `host:<id>`; `db.shortest_path` (a plain
+  BFS, exposed as `yhwach path`) answers "route from what I own → Domain Admins".
+- **web_app / web_path / domain** — the web surface: tech stack, discovered
+  dirs/params, vhosts.
+- **host_interface / loot / share / password_policy / objective** — the per-host
+  "note everything" layer (multi-homing, files, SMB/NFS access, lockout policy that
+  gates safe spraying, point-bearing goals).
+
+Two design rules keep this from bloating the engine:
+
+1. **Tables are the record; findings are the trigger.** New facts are inserted as
+   rows, but where a fact should drive the next move an ingest path *also* emits a
+   tagged `finding` (`smb_signing_off`, `domain_users`, `admin_access`,
+   `writable_share`, …), so the existing `findings_include` planner chaining picks
+   it up with no new matcher.
+2. **DB drives the notebook.** `yhwach export-notes` regenerates the vault's
+   structured tables (and per-host notes) from these rows inside
+   `<!-- yhwach:auto -->` fences; the operator writes only prose. The DB stays the
+   single source of truth for facts, the vault for the write-up.
+
+## Knowledge (declarative, offline)
+
+Yhwach's knowledge is data, not code — four feeds, all bundled so an exam host
+needs no network:
+
+- **Playbook rules** (`playbooks/*.yaml`) — the technique catalog. schema-v1 facts
+  are activated by rules in `lateral.yaml` (writable_share, admin_access),
+  `web.yaml` (web_login/upload/git/api/backup), and `cve.yaml` (exploitable_cve).
+- **CVE knowledge base** (`data/cve_map.yaml`) — a curated CPE/version→CVE map.
+  `yhwach vulns` (yhwach/vulns.py) matches `software` rows offline, records
+  `vulnerability` rows, and emits `exploitable_cve` findings for the exploit rule.
+  Curated, not a blanket feed, so a match is a lead not noise.
+- **Reference packs** (`data/{default_creds,adcs_esc,gtfobins}.yaml`) — lookups the
+  operator queries with `yhwach ref`; also referenced from the login/privesc actions.
+- **Attack graph in the brief** — `yhwach next` renders the shortest `edge` path from
+  an owned node (foothold+ host, or a principal we hold a credential for) to
+  Domain/Enterprise Admins, so the goal is visible alongside the ranked candidates.
+
 ## Independence from host CLI
 
 Yhwach's persona is a strict system prompt bundled with the engine (`persona/operator.md`) and travels inside the `yhwach next --contract` handoff. Whatever CLI, host, or client the operator runs on, Yhwach's frame is what shapes the reasoning — the host is just a shell.

@@ -69,12 +69,27 @@ What works today:
   host stages (`foothold → looted → pivoted → done`) via `yhwach advance`; `yhwach proof` gates
   `foothold → looted` on a flag+screenshot, and `yhwach pivot` records a Ligolo tunnel (deploying
   the pre-staged agent) to gate `looted → pivoted` on real subnet reachability
+- **Attack-surface model** (schema v1) — software + CVE/vuln inventory (version→CVE with
+  exploit refs), the AD identity graph (principals, group memberships, privileges, and an
+  `edge` table with `yhwach path` shortest-path to Domain Admins), the web surface (apps,
+  tech stack, dirs/vhosts/params), and per-host loot / interfaces / SMB-NFS shares / objectives.
+  Fed by new ingest kinds — `netexec` (shares/users/admin/password-policy), `web`
+  (gobuster/ffuf/feroxbuster), `bloodhound` (graph rows), and nmap CPE + PEAS software — and
+  read back with `yhwach recon --host`. Spraying is gated on the recorded lockout policy.
+- **Declarative knowledge** — playbook rules (technique catalog) + an offline **CVE knowledge
+  base** (`yhwach vulns` matches software versions → `exploitable_cve` → `exploit_known_cve`
+  rule) + **reference packs** (`yhwach ref`: default-creds, AD CS ESC1–8, GTFObins). New rules
+  activate the schema-v1 facts (writable shares, admin access, web login/upload/git/api/backup).
+  The operator brief (`yhwach next`) now prints the shortest **path to Domain Admins** from what
+  you already hold.
 - **Engagement notebook** — the operator writes detailed notes to an **Obsidian vault** (the
   single source of truth) via the Obsidian MCP at every objective; Yhwach's DB stays the
-  queryable world model and never stores notes (see [persona/notebook.md](persona/notebook.md))
+  queryable world model and never stores notes. `yhwach export-notes` auto-scaffolds the vault's
+  structured tables (services/software, vulns, web, users & groups, shares, per-host) from the
+  world model so the operator writes only prose (see [persona/notebook.md](persona/notebook.md))
 - **Operator handoff** — `yhwach next --contract` emits persona + state + vault + P0 leads + dead
-  ends + enum gaps + ranked candidates + commands; `--no-persona` sends the frame's sha256 instead
-  of its body for cheap later turns, and `--json` emits the same slice as data
+  ends + enum gaps + path-to-DA + ranked candidates + commands; `--no-persona` sends the frame's
+  sha256 instead of its body for cheap later turns, and `--json` emits the same slice as data
 - **Report** — `yhwach report` renders a Markdown engagement report
 - **Calibration harness** — YAML fixtures + golden runner + `yhwach snapshot` (a real run becomes a test)
 - **MCP server** — `yhwach mcp` exposes the engine to Claude Code on Kali as tools
@@ -108,21 +123,31 @@ yhwach selftest      # golden fixtures
 
 # Drive an engagement (authorized targets only):
 yhwach engage  --lab lab01 --scope 10.10.10.0/24
-yhwach ingest  scan.xml --lab lab01            # nmap -oX output
+yhwach ingest  scan.xml --lab lab01            # nmap -oX output (-> services + software + CPE)
 # or delegate the scan to HexStrike:  yhwach enum --lab lab01 --target 10.10.10.0/24
 yhwach probe   --lab lab01                     # AI + traditional surfaces
 yhwach plan    --lab lab01                     # match playbooks -> ranked tasks
 yhwach next    --lab lab01 --contract          # operator brief for Claude Code
 yhwach run     --lab lab01 --task 1 --go       # run read-only recon; render exploits
 
+# Enrich the world model (schema v1):
+yhwach ingest  nxc.txt   --lab lab01 --kind netexec --host 10.10.10.15   # SMB shares/users/admin/policy
+yhwach ingest  ffuf.txt  --lab lab01 --kind web --host 10.10.10.15 --url http://10.10.10.15  # dirs/paths
+yhwach ingest  bh.json   --lab lab01 --kind bloodhound --host 10.10.10.72  # AD principal/priv/edge graph
+yhwach vulns   --lab lab01                     # version -> CVE (offline map) -> exploit_known_cve
+yhwach recon   --lab lab01 --host 10.10.10.15  # full per-host picture (services/software/web/shares/privs)
+yhwach path    --lab lab01 --from svc_sql --to 'Domain Admins'  # shortest attack-graph path
+yhwach ref     default-creds -q tomcat         # offline knowledge packs (default-creds | esc | gtfobins)
+
 # Post-foothold:
 yhwach advance --lab lab01 --host 10.10.10.15 --to foothold   # auto-notes the milestone
 yhwach cred    --lab lab01 --user svc_sql --secret 'S3cr3t!' --kind password
-yhwach spray   --lab lab01                     # reuse the vault across sprayable surfaces
+yhwach spray   --lab lab01                     # reuse the vault; warns on lockout policy
 yhwach proof   --lab lab01 --host 10.10.10.15 --screenshot flag.png  # -> looted (gated)
 yhwach pivot   --lab lab01 --via-host 10.10.10.15 --subnet 10.1.1.0/24  # -> pivoted
 
 yhwach findings --lab lab01
+yhwach export-notes --lab lab01                # auto-scaffold the Obsidian notebook from the DB
 yhwach report  --lab lab01 --out report.md
 
 # Operator memory — the loop that survives a lost context:

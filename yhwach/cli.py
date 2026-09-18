@@ -94,19 +94,26 @@ def engage(lab: str, scope: str, domain: str | None, dc_ip: str | None,
 @click.argument("file", type=click.Path(exists=True, dir_okay=False))
 @click.option("--lab", required=True, help="Lab name (must exist).")
 @click.option("--kind",
-              type=click.Choice(["nmap", "linpeas", "winpeas", "bloodhound", "certipy"]),
+              type=click.Choice(["nmap", "linpeas", "winpeas", "bloodhound", "certipy",
+                                 "netexec", "web"]),
               default="nmap", help="Parser kind.")
 @click.option("--host", "host_ip", default=None,
-              help="Host IP (required for linpeas/winpeas/bloodhound/certipy — findings are "
-                   "host-scoped; for bloodhound/certipy use the DC or CA).")
+              help="Host IP (required for linpeas/winpeas/bloodhound/certipy/netexec/web — "
+                   "facts are host-scoped; for bloodhound/certipy use the DC or CA).")
+@click.option("--url", "base_url", default=None,
+              help="Base URL for --kind web (e.g. http://10.0.0.5:80) — the web_app the "
+                   "discovered paths attach to.")
 @click.option("--db", "db_path", default=None, type=click.Path(),
               help="Override DB path.")
-def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | None) -> None:
+def ingest(file: str, lab: str, kind: str, host_ip: str | None, base_url: str | None,
+           db_path: str | None) -> None:
     """Parse a tool output file and update the world model.
 
-    nmap XML -> hosts + services. linpeas/winpeas -> privesc findings on --host
-    (also advances it to 'enumerated'). bloodhound -> AD findings + chaining tags
-    on --host (the DC); does not change the host stage.
+    nmap XML -> hosts + services + software (CPE). linpeas/winpeas -> privesc
+    findings + software on --host (also advances it to 'enumerated'). bloodhound ->
+    AD findings + the principal/privilege/edge graph on --host (the DC). netexec ->
+    SMB shares, users, admin edges, password policy on --host. web -> web_app +
+    paths (needs --url).
     """
     path = _db_path(db_path)
     if not path.exists():
@@ -141,7 +148,7 @@ def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | N
                 click.echo(f"[!] {len(gaps)} host(s) under-enumerated — `yhwach gaps --lab {lab}`")
             return
 
-        # Host-scoped findings (linpeas/winpeas privesc, bloodhound AD facts).
+        # Host-scoped ingestion (privesc, AD facts, SMB facts, web paths).
         if not host_ip:
             click.echo(f"[!] --host is required for {kind}.", err=True)
             sys.exit(2)
@@ -152,19 +159,45 @@ def ingest(file: str, lab: str, kind: str, host_ip: str | None, db_path: str | N
             sys.exit(2)
 
         text = Path(file).read_text(encoding="utf-8", errors="replace")
+
+        # Structured (non-finding-only) ingestion — NetExec SMB facts, web paths.
+        if kind == "netexec":
+            from yhwach.ingest import ingest_netexec
+            summ = ingest_netexec(conn, eng_id, hrow["id"], text)
+            yhdb.log_event(conn, eng_id, "ingest", {"kind": kind, "host": host_ip, **summ})
+            click.echo(f"[+] Ingested netexec on {host_ip}: {summ['shares']} share(s), "
+                       f"{summ['principals']} user(s), {summ['admin']} admin, "
+                       f"{summ['findings']} finding(s)")
+            return
+        if kind == "web":
+            if not base_url:
+                click.echo("[!] --url is required for --kind web.", err=True)
+                sys.exit(2)
+            from yhwach.ingest import ingest_web
+            summ = ingest_web(conn, hrow["id"], base_url, text)
+            yhdb.log_event(conn, eng_id, "ingest", {"kind": kind, "host": host_ip, **summ})
+            click.echo(f"[+] Ingested web on {base_url}: {summ['paths']} path(s), "
+                       f"{summ['interesting']} interesting")
+            return
+
         if kind == "bloodhound":
+            from yhwach.ingest import ingest_bloodhound_graph
             from yhwach.parsers.bloodhound import parse_bloodhound
             found = parse_bloodhound(text)
-            advanced_note = ""
+            graph = ingest_bloodhound_graph(conn, eng_id, text)
+            advanced_note = (f"; graph: {graph['principals']} principals, "
+                             f"{graph['privileges']} privs, {graph['edges']} edges")
         elif kind == "certipy":
             from yhwach.parsers.adcs import parse_certipy
             found = parse_certipy(text)
             advanced_note = ""
         else:
+            from yhwach.ingest import ingest_peas_software
             from yhwach.parsers.peas import parse_peas
             found = parse_peas(text, kind)
+            sw = ingest_peas_software(conn, hrow["id"], text, kind)
             yhdb.set_host_stage(conn, eng_id, host_ip, "enumerated")
-            advanced_note = "; host -> enumerated"
+            advanced_note = f"; {sw} software row(s); host -> enumerated"
         for f in found:
             yhdb.add_finding(conn, hrow["id"], None, f.cls, f.title, f.severity, f.evidence,
                              tag=f.tag)
@@ -731,7 +764,7 @@ def spray(lab: str, proto: str | None, db_path: str | None) -> None:
 
     Proposal-tier: active auth-testing, so Yhwach renders — the operator runs.
     """
-    from yhwach.spray import build_spray_plan
+    from yhwach.spray import build_spray_plan, lockout_note
 
     path = _db_path(db_path)
     if not path.exists():
@@ -743,10 +776,13 @@ def spray(lab: str, proto: str | None, db_path: str | None) -> None:
             click.echo(f"[!] Unknown lab '{lab}'.", err=True)
             sys.exit(2)
         cmds = build_spray_plan(conn, eng_id, proto_filter=proto)
+        note = lockout_note(conn, eng_id)
 
     if not cmds:
         click.echo("[!] Nothing to spray (empty vault or no sprayable surfaces).")
         return
+    if note:
+        click.echo(note)
     click.echo(f"== Spray plan for '{lab}' ({len(cmds)} commands) [propose — operator runs] ==")
     for c in cmds:
         click.echo(f"  $ {c}")
@@ -881,8 +917,6 @@ def report(lab: str, out_path: str | None, db_path: str | None) -> None:
         click.echo(md)
 
 
-
-
 @main.command()
 @click.option("--lab", required=True, help="Lab name.")
 @click.option("--result", required=True,
@@ -901,7 +935,7 @@ def report(lab: str, out_path: str | None, db_path: str | None) -> None:
 def outcome(lab: str, result: str, task_id: int | None, rule_id: str | None,
             host_ip: str | None, reason: str | None, evidence: str | None,
             db_path: str | None) -> None:
-    """Record how an attempt went — the engine's memory of what you already burned.
+    """Record how an attempt went â€” the engine's memory of what you already burned.
 
     `technique_state` only ever recorded success. This records the other three
     outcomes too, so a failed move leaves the queue, ranks lower if it ever
@@ -928,7 +962,7 @@ def outcome(lab: str, result: str, task_id: int | None, rule_id: str | None,
             sys.exit(2)
     click.echo(f"[+] {rep.render()}")
     if result == "success":
-        click.echo("[note] objective reached — write the note in the Obsidian vault now.")
+        click.echo("[note] objective reached â€” write the note in the Obsidian vault now.")
 
 
 @main.command()
@@ -940,7 +974,7 @@ def outcome(lab: str, result: str, task_id: int | None, rule_id: str | None,
 @click.option("--json", "as_json", is_flag=True, default=False, help="Emit JSON.")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
 def recall(lab: str, events: int, tasks: int, as_json: bool, db_path: str | None) -> None:
-    """Catch up on an engagement after a context reset — compact, persona-free.
+    """Catch up on an engagement after a context reset â€” compact, persona-free.
 
     Where am I, what did I already try (wins + dead ends), what is still open,
     what is next. This is the first command to run in a fresh operator session
@@ -977,7 +1011,7 @@ def gaps(lab: str, host_ip: str | None, show_all: bool, as_json: bool,
          db_path: str | None) -> None:
     """Show under-enumerated hosts and the exact scan that closes each gap.
 
-    Built from `scan_coverage` — what the ingested nmap runs actually covered,
+    Built from `scan_coverage` â€” what the ingested nmap runs actually covered,
     not what they found. A host is complete when it has a full-port TCP scan,
     service versions, and a UDP top-100 sweep.
     """
@@ -1001,6 +1035,193 @@ def gaps(lab: str, host_ip: str | None, show_all: bool, as_json: bool,
     click.echo(f"== Enumeration gaps for '{lab}' ({len(found)} host(s)) ==")
     for line in render_gaps(found):
         click.echo(line)
+
+
+@main.command("export-notes")
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--out", "out_dir", default=None, type=click.Path(),
+              help="Directory to write the notebook tree into (default: <lab>/notes).")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def export_notes(lab: str, out_dir: str | None, db_path: str | None) -> None:
+    """Auto-scaffold the Obsidian notebook from the world model.
+
+    Regenerates the standing notes (Services & Software, Vulnerabilities, Web,
+    Users & Groups, Shares) and one note per host â€” every table derived straight
+    from the DB, with `<!-- yhwach:auto -->` fences around generated blocks. The
+    operator writes only prose and syncs the tree into the vault via the Obsidian
+    MCP. The DB stays the single source of truth for structured facts.
+    """
+    from yhwach import notes
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        target = Path(out_dir) if out_dir else _artifact_dir(path, "notes")
+        written = notes.export_notes(conn, eng_id, target)
+    click.echo(f"[+] wrote {len(written)} note(s) to {target}")
+    for w in written:
+        click.echo(f"    {w}")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--host", "host_ip", required=True, help="Host IP to render.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def recon(lab: str, host_ip: str, db_path: str | None) -> None:
+    """Print the full recon picture for one host (everything the world model holds).
+
+    Services, software, vulns, web paths, shares, on-host privileges, loot,
+    interfaces, findings â€” the 'note everything on this host' view, straight from
+    the DB. Same rendering `export-notes` writes to the vault.
+    """
+    from yhwach import notes
+
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                            (eng_id, host_ip)).fetchone()
+        if hrow is None:
+            click.echo(f"[!] Host {host_ip} not found.", err=True)
+            sys.exit(2)
+        click.echo(notes.render_host_note(conn, hrow["id"]))
+
+
+@main.command()
+@click.argument("pack", type=click.Choice(["default-creds", "esc", "gtfobins"]))
+@click.option("--query", "-q", default=None, help="Filter to matching entries (substring).")
+def ref(pack: str, query: str | None) -> None:
+    """Query the bundled reference knowledge packs (offline, no engagement needed).
+
+    default-creds â€” well-known creds per product (try before spraying).
+    esc           â€” AD CS ESC1-8 catalog (requirement + abuse).
+    gtfobins      â€” SUID/sudo privesc one-liners for common binaries.
+    """
+    from yhwach.reference import render_pack
+
+    out = render_pack(pack, query)
+    if not out:
+        click.echo(f"[!] no {pack} entries matching '{query}'.", err=True)
+        sys.exit(1)
+    click.echo(out)
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def vulns(lab: str, db_path: str | None) -> None:
+    """Match recorded software versions against the offline CVE knowledge base.
+
+    Records `vulnerability` rows and tags hosts `exploitable_cve` where a matched
+    CVE has a known exploit (so `yhwach plan` surfaces `exploit_known_cve`). Fully
+    offline and deterministic â€” the map is curated (data/cve_map.yaml).
+    """
+    from yhwach.vulns import enrich
+
+    dbp = _db_path(db_path)
+    if not dbp.exists():
+        click.echo(f"[!] DB not found at {dbp}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(dbp) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        summ = enrich(conn, eng_id)
+        yhdb.log_event(conn, eng_id, "vulns",
+                       {"checked": summ["software_checked"], "matched": summ["matched"]})
+    click.echo(f"[+] Checked {summ['software_checked']} software row(s): "
+               f"{summ['matched']} CVE match(es), {summ['exploitable']} with a known exploit.")
+    for h in summ["hits"]:
+        click.echo(f"    {h}")
+    if summ["matched"]:
+        click.echo("    Re-run `yhwach plan` to queue exploit_known_cve; see `yhwach recon --host`.")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--from", "src", required=True,
+              help="Source node: a principal/host name, or an explicit 'principal:<id>'/'host:<id>'.")
+@click.option("--to", "dst", required=True, help="Target node (default target: 'Domain Admins').")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def path(lab: str, src: str, dst: str, db_path: str | None) -> None:
+    """Shortest attack-graph path between two nodes (owned -> objective).
+
+    Nodes may be given as names ('svc_sql', 'DC01', 'Domain Admins') â€” resolved to
+    a principal or host â€” or explicitly as 'principal:<id>' / 'host:<id>'.
+    """
+    dbp = _db_path(db_path)
+    if not dbp.exists():
+        click.echo(f"[!] DB not found at {dbp}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(dbp) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        s = _resolve_node(conn, eng_id, src)
+        d = _resolve_node(conn, eng_id, dst)
+        if s is None:
+            click.echo(f"[!] Could not resolve source '{src}'.", err=True)
+            sys.exit(2)
+        if d is None:
+            click.echo(f"[!] Could not resolve target '{dst}'.", err=True)
+            sys.exit(2)
+        result = yhdb.shortest_path(conn, eng_id, s, d)
+        if result is None:
+            click.echo(f"[-] No known path {src} -> {dst}. Enumerate more edges "
+                       "(bloodhound/netexec) or the path may not exist yet.")
+            return
+        click.echo(f"[+] {src} -> {dst} ({len(result) - 1} hop(s)):")
+        click.echo("    " + _fmt_path(conn, result))
+
+
+def _resolve_node(conn, eng_id: int, token: str) -> str | None:
+    """Resolve a node token to 'principal:<id>' / 'host:<id>'."""
+    if token.startswith(("principal:", "host:")):
+        return token
+    prow = conn.execute(
+        "SELECT id FROM principal WHERE engagement_id=? AND name=? COLLATE NOCASE ORDER BY id LIMIT 1",
+        (eng_id, token)).fetchone()
+    if prow:
+        return f"principal:{prow['id']}"
+    hrow = conn.execute(
+        "SELECT id FROM host WHERE engagement_id=? AND (ip=? OR hostname=? COLLATE NOCASE) LIMIT 1",
+        (eng_id, token, token)).fetchone()
+    if hrow:
+        return f"host:{hrow['id']}"
+    return None
+
+
+def _fmt_path(conn, nodes: list[str]) -> str:
+    """Render a node-id path as readable names with edge kinds between them."""
+    labels = []
+    for n in nodes:
+        kind, _, nid = n.partition(":")
+        if kind == "principal":
+            row = conn.execute("SELECT name FROM principal WHERE id=?", (nid,)).fetchone()
+            labels.append(row["name"] if row else n)
+        else:
+            row = conn.execute("SELECT hostname, ip FROM host WHERE id=?", (nid,)).fetchone()
+            labels.append((row["hostname"] or row["ip"]) if row else n)
+    parts = [labels[0]]
+    for i in range(1, len(nodes)):
+        e = conn.execute("SELECT kind FROM edge WHERE src=? AND dst=? LIMIT 1",
+                         (nodes[i - 1], nodes[i])).fetchone()
+        parts.append(f" --{e['kind'] if e else '?'}--> {labels[i]}")
+    return "".join(parts)
 
 
 @main.command()

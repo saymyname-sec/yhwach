@@ -22,6 +22,7 @@ class ParsedService:
     product: str | None = None
     version: str | None = None
     banner: str | None = None
+    cpe: str | None = None
 
 
 @dataclass
@@ -268,13 +269,17 @@ def _parse_root(root, *, include_open_filtered: bool = False) -> list[ParsedHost
                         continue
                     proto = port.get("protocol") or "tcp"
                     service_elem = port.find("service")
-                    product = version = banner = None
+                    product = version = banner = cpe = None
                     if service_elem is not None:
                         product = service_elem.get("product") or service_elem.get("name")
                         version = service_elem.get("version")
                         banner = service_elem.get("extrainfo")
+                        # First application/OS CPE nmap emitted for the service.
+                        cpe_elem = service_elem.find("cpe")
+                        if cpe_elem is not None and cpe_elem.text:
+                            cpe = cpe_elem.text.strip()
                     host.services.append(
-                        ParsedService(int(portid), proto, product, version, banner)
+                        ParsedService(int(portid), proto, product, version, banner, cpe)
                     )
 
         hosts.append(host)
@@ -336,15 +341,26 @@ def insert_hosts(
 
         for svc in parsed.services:
             conn.execute(
-                "INSERT INTO service (host_id, port, proto, product, version, banner, "
-                "discovered_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "INSERT INTO service (host_id, port, proto, product, version, cpe, banner, "
+                "discovered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(host_id, port, proto) DO UPDATE SET "
                 "product = COALESCE(excluded.product, service.product), "
                 "version = COALESCE(excluded.version, service.version), "
+                "cpe     = COALESCE(excluded.cpe,     service.cpe), "
                 "banner  = COALESCE(excluded.banner,  service.banner)",
-                (host_id, svc.port, svc.proto, svc.product, svc.version, svc.banner, now),
+                (host_id, svc.port, svc.proto, svc.product, svc.version, svc.cpe, svc.banner, now),
             )
             services_touched += 1
+            # Mirror a versioned service into the software inventory so the
+            # version -> CVE step has one place to look (listening + post-foothold).
+            if svc.product and svc.version:
+                svc_id = conn.execute(
+                    "SELECT id FROM service WHERE host_id = ? AND port = ? AND proto = ?",
+                    (host_id, svc.port, svc.proto),
+                ).fetchone()
+                _upsert_software(conn, host_id,
+                                 service_id=svc_id["id"] if svc_id else None,
+                                 name=svc.product, version=svc.version, cpe=svc.cpe, now=now)
 
         if meta is not None:
             from yhwach.db import record_coverage
@@ -357,6 +373,25 @@ def insert_hosts(
                 )
 
     return hosts_touched, services_touched
+
+
+def _upsert_software(conn, host_id, *, service_id, name, version, cpe, now):
+    """Idempotent software-row upsert (host+name+version). Kept local to avoid a
+    circular import of yhwach.db; mirrors db.add_software's dedupe key."""
+    existing = conn.execute(
+        "SELECT id FROM software WHERE host_id = ? AND name = ? AND version IS ?",
+        (host_id, name, version),
+    ).fetchone()
+    if existing is not None:
+        conn.execute("UPDATE software SET cpe = COALESCE(?, cpe), "
+                     "service_id = COALESCE(?, service_id), updated_at = ? WHERE id = ?",
+                     (cpe, service_id, now, existing["id"]))
+        return
+    conn.execute(
+        "INSERT INTO software (host_id, service_id, name, version, cpe, kind, source, "
+        "discovered_at) VALUES (?, ?, ?, ?, ?, 'service', 'nmap', ?)",
+        (host_id, service_id, name, version, cpe, now),
+    )
 
 
 def _now_utc() -> str:

@@ -228,3 +228,24 @@ def parse_peas(text: str, kind: str) -> list[ExtractedFinding]:
     if kind == "winpeas":
         return parse_winpeas(text)
     raise ValueError(f"unknown peas kind: {kind}")
+
+
+# name, version, software-kind — high-signal versioned components worth CVE-matching.
+def parse_peas_software(text: str, kind: str) -> list[tuple[str, str, str]]:
+    """Extract versioned software from PEAS output for the CVE pipeline.
+
+    Deliberately narrow: kernel + sudo on Linux (both classic local-root CVE
+    sources), Windows build on Windows. The operator adds the rest by hand."""
+    out: list[tuple[str, str, str]] = []
+    if kind == "linpeas":
+        m = re.search(r"Linux version (\d+\.\d+\.\d+[\w.\-]*)", text)
+        if m:
+            out.append(("Linux kernel", m.group(1), "kernel"))
+        m = re.search(r"[Ss]udo version (\d+\.\d+\.\d+[\w.\-]*)", text)
+        if m:
+            out.append(("sudo", m.group(1), "package"))
+    elif kind == "winpeas":
+        m = re.search(r"(Windows (?:Server )?\d{4}[\w ]*?)\s*(?:Build|\().*?(\d{4,5})", text)
+        if m:
+            out.append((m.group(1).strip(), m.group(2), "kernel"))
+    return out

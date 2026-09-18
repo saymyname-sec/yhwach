@@ -60,3 +60,34 @@ def build_spray_plan(
                 f"nxc {proto} {ip_list} -u {user} {auth} --continue-on-success"
             )
     return commands
+
+
+def lockout_note(conn: sqlite3.Connection, engagement_id: int) -> str | None:
+    """OPSEC gate for spraying: read the known password policy and warn when a
+    lockout threshold makes blind spraying dangerous.
+
+    Returns None when there is a confirmed no-lockout policy (safe to spray) or a
+    warning string otherwise — unknown policy is treated as risky, since spraying
+    into an unknown lockout can lock out the domain."""
+    rows = conn.execute(
+        "SELECT domain, lockout_threshold FROM password_policy "
+        "WHERE engagement_id = ? ORDER BY id DESC",
+        (engagement_id,),
+    ).fetchall()
+    if not rows:
+        return ("[OPSEC] No password policy recorded — spraying blind risks lockout. "
+                "Enumerate it first (`nxc smb <dc> -u <user> -p <pass> --pass-pol`) "
+                "and ingest with --kind netexec.")
+    # Use the most recently learned policy with a non-null threshold.
+    for r in rows:
+        thr = r["lockout_threshold"]
+        if thr is None:
+            continue
+        if thr == 0:
+            return None  # no lockout — safe
+        return (f"[OPSEC] Lockout threshold = {thr} (domain {r['domain'] or '?'}). "
+                f"Keep attempts per account below {thr} and account for the reset window; "
+                "prefer one carefully chosen password across many users over many "
+                "passwords against one user.")
+    return ("[OPSEC] Password policy recorded but lockout threshold unknown — "
+            "treat spraying as risky until confirmed.")

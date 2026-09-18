@@ -173,10 +173,14 @@ def tool_report(db_path: Path | str, lab: str) -> str:
 
 
 def tool_spray(db_path: Path | str, lab: str) -> str:
+    from yhwach.spray import lockout_note
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
         cmds = build_spray_plan(conn, eid)
-    return "\n".join(cmds) if cmds else "nothing to spray (empty vault or no sprayable surfaces)"
+        note = lockout_note(conn, eid)
+    if not cmds:
+        return "nothing to spray (empty vault or no sprayable surfaces)"
+    return (f"{note}\n" if note else "") + "\n".join(cmds)
 
 
 def tool_add_cred(db_path: Path | str, lab: str, user: str, secret: str,
@@ -265,12 +269,14 @@ def tool_advance(db_path: Path | str, lab: str, host: str, stage: str) -> str:
 
 
 def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
-                host: str | None = None) -> str:
+                host: str | None = None, url: str | None = None) -> str:
     """Ingest a tool output FILE (on the operator host) into the world model.
 
-    kind=nmap: nmap XML -> hosts + services. kind=linpeas|winpeas: privesc
-    findings on `host` (advances it to 'enumerated'). kind=bloodhound: AD
-    findings + chaining tags on `host` (the DC); no stage change. All set the
+    kind=nmap: hosts + services + software (CPE). kind=linpeas|winpeas: privesc
+    findings + software on `host` (advances it to 'enumerated'). kind=bloodhound:
+    AD findings + the principal/privilege/edge graph on `host` (the DC).
+    kind=netexec: SMB shares, users, admin edges, password policy on `host`.
+    kind=web: web_app + discovered paths (needs `url`). All set the
     `findings_include` chaining tags their parser detects."""
     from yhwach.parsers.nmap import insert_hosts, parse_nmap
 
@@ -288,9 +294,9 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             gaps = enum_gaps(conn, eid)
             tail = f"; {len(gaps)} host(s) under-enumerated (yhwach_gaps)" if gaps else ""
             return f"nmap ingested: {h} hosts, {s} services; coverage {cov}{tail}"
-        if kind not in ("linpeas", "winpeas", "bloodhound", "certipy"):
-            raise ValueError(
-                f"unknown kind '{kind}' (use nmap|linpeas|winpeas|bloodhound|certipy)")
+        valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
+        if kind not in valid:
+            raise ValueError(f"unknown kind '{kind}' (use nmap|{'|'.join(valid)})")
         if not host:
             raise ValueError(f"host is required for {kind}")
         hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
@@ -298,18 +304,39 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
         if hrow is None:
             raise ValueError(f"host {host} not found — ingest an nmap scan first")
         text = Path(file).read_text(encoding="utf-8", errors="replace")
+
+        if kind == "netexec":
+            from yhwach.ingest import ingest_netexec
+            summ = ingest_netexec(conn, eid, hrow["id"], text)
+            yhdb.log_event(conn, eid, "ingest", {"kind": kind, "host": host, **summ})
+            return (f"netexec on {host}: {summ['shares']} share(s), {summ['principals']} user(s), "
+                    f"{summ['admin']} admin, {summ['findings']} finding(s)")
+        if kind == "web":
+            if not url:
+                raise ValueError("url is required for kind=web")
+            from yhwach.ingest import ingest_web
+            summ = ingest_web(conn, hrow["id"], url, text)
+            yhdb.log_event(conn, eid, "ingest", {"kind": kind, "host": host, **summ})
+            return f"web on {url}: {summ['paths']} path(s), {summ['interesting']} interesting"
+
         note = ""
         if kind == "bloodhound":
+            from yhwach.ingest import ingest_bloodhound_graph
             from yhwach.parsers.bloodhound import parse_bloodhound
             found = parse_bloodhound(text)
+            g = ingest_bloodhound_graph(conn, eid, text)
+            note = (f"; graph: {g['principals']} principals, {g['privileges']} privs, "
+                    f"{g['edges']} edges")
         elif kind == "certipy":
             from yhwach.parsers.adcs import parse_certipy
             found = parse_certipy(text)
         else:
+            from yhwach.ingest import ingest_peas_software
             from yhwach.parsers.peas import parse_peas
             found = parse_peas(text, kind)
+            sw = ingest_peas_software(conn, hrow["id"], text, kind)
             yhdb.set_host_stage(conn, eid, host, "enumerated")
-            note = "; host -> enumerated"
+            note = f"; {sw} software row(s); host -> enumerated"
         for f in found:
             yhdb.add_finding(conn, hrow["id"], None, f.cls, f.title, f.severity, f.evidence,
                              tag=f.tag)
@@ -486,6 +513,81 @@ def tool_consume(db_path: Path | str, lab: str, technique: str,
     return f"technique '{technique}' consumed for '{lab}' — re-run plan to drop it"
 
 
+def tool_ref(db_path: Path | str, pack: str, query: str | None = None) -> str:
+    """Query a bundled reference knowledge pack (offline; db_path ignored).
+    pack = default-creds | esc | gtfobins. `query` filters to matching entries."""
+    from yhwach.reference import render_pack
+
+    out = render_pack(pack, query)
+    return out or f"no {pack} entries matching '{query}'"
+
+
+def tool_vulns(db_path: Path | str, lab: str) -> str:
+    """Match recorded software versions against the offline CVE knowledge base;
+    record vulnerability rows + `exploitable_cve` findings. Offline/deterministic."""
+    from yhwach.vulns import enrich
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        summ = enrich(conn, eid)
+        yhdb.log_event(conn, eid, "vulns",
+                       {"checked": summ["software_checked"], "matched": summ["matched"]})
+    head = (f"checked {summ['software_checked']} software row(s): {summ['matched']} CVE "
+            f"match(es), {summ['exploitable']} exploitable")
+    return head + ("\n  " + "\n  ".join(summ["hits"]) if summ["hits"] else "")
+
+
+def tool_recon(db_path: Path | str, lab: str, host: str) -> str:
+    """Full recon picture for one host: services, software, vulns, web, shares,
+    on-host privileges, loot, interfaces, findings — everything the world model
+    holds. The 'note everything on this host' read."""
+    from yhwach import notes
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                            (eid, host)).fetchone()
+        if hrow is None:
+            raise ValueError(f"host {host} not found")
+        return notes.render_host_note(conn, hrow["id"])
+
+
+def tool_path(db_path: Path | str, lab: str, src: str, dst: str = "Domain Admins") -> str:
+    """Shortest attack-graph path between two nodes (owned -> objective).
+
+    src/dst are names ('svc_sql', 'DC01', 'Domain Admins') or explicit
+    'principal:<id>' / 'host:<id>'. Answers 'what's my route to DA from here?'."""
+    from yhwach.cli import _fmt_path, _resolve_node
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        s = _resolve_node(conn, eid, src)
+        d = _resolve_node(conn, eid, dst)
+        if s is None:
+            raise ValueError(f"could not resolve source '{src}'")
+        if d is None:
+            raise ValueError(f"could not resolve target '{dst}'")
+        result = yhdb.shortest_path(conn, eid, s, d)
+        if result is None:
+            return (f"no known path {src} -> {dst}; enumerate more edges "
+                    "(bloodhound/netexec) or it may not exist yet")
+        return f"{src} -> {dst} ({len(result) - 1} hop(s)):\n  {_fmt_path(conn, result)}"
+
+
+def tool_export_notes(db_path: Path | str, lab: str, out_dir: str | None = None) -> str:
+    """Auto-scaffold the Obsidian notebook from the world model: standing notes
+    (Services & Software, Vulnerabilities, Web, Users & Groups, Shares) + one per
+    host, every table derived from the DB. Operator syncs the tree into the vault."""
+    from yhwach import notes
+    from yhwach.engine import artifact_dir
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        target = Path(out_dir) if out_dir else artifact_dir(db_path, "notes")
+        written = notes.export_notes(conn, eid, target)
+    return f"wrote {len(written)} note(s) to {target}:\n  " + "\n  ".join(written)
+
+
 # Registry of (name, fn, description) for the server to expose.
 TOOL_SPECS = [
     ("yhwach_engage", tool_engage,
@@ -506,8 +608,10 @@ TOOL_SPECS = [
      "Query before attacking anything new."),
     ("yhwach_advance", tool_advance, "Advance a host's FSM stage (foothold/looted/pivoted/...)."),
     ("yhwach_ingest", tool_ingest,
-     "Ingest a tool-output file into the world model (kind=nmap|linpeas|winpeas; "
-     "linpeas/winpeas need a host and set chaining tags)."),
+     "Ingest a tool-output file into the world model (kind=nmap|linpeas|winpeas|"
+     "bloodhound|certipy|netexec|web). nmap adds software+CPE; bloodhound builds the "
+     "principal/privilege/edge graph; netexec adds SMB shares/users/admin/policy; web "
+     "adds web_app+paths (needs url). Host-scoped kinds need a host and set chaining tags."),
     ("yhwach_enum", tool_enum,
      "Run nmap through HexStrike against a target and ingest the result (delegated enumeration)."),
     ("yhwach_probe", tool_probe,
@@ -532,4 +636,19 @@ TOOL_SPECS = [
      "UDP top-100), from recorded scan coverage."),
     ("yhwach_consume", tool_consume,
      "Mark a technique consumed so the planner stops proposing it this engagement."),
+    ("yhwach_vulns", tool_vulns,
+     "Match recorded software versions against the offline CVE knowledge base; record "
+     "vulnerabilities + exploitable_cve findings. Run after ingesting versions."),
+    ("yhwach_ref", tool_ref,
+     "Query a bundled reference pack (offline): default-creds | esc | gtfobins, with an "
+     "optional query filter. Well-known creds, AD CS ESC catalog, GTFObins privesc."),
+    ("yhwach_recon", tool_recon,
+     "Full recon picture for one host (services, software, vulns, web, shares, "
+     "on-host privileges, loot, interfaces, findings) — read before attacking it."),
+    ("yhwach_path", tool_path,
+     "Shortest attack-graph path between two nodes (owned -> Domain Admins / objective). "
+     "Names or 'principal:<id>'/'host:<id>'."),
+    ("yhwach_export_notes", tool_export_notes,
+     "Auto-scaffold the Obsidian notebook (standing notes + per-host) from the world "
+     "model; operator syncs the tree into the vault via the Obsidian MCP."),
 ]

@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS service (
     proto        TEXT    NOT NULL,        -- tcp | udp
     product      TEXT,
     version      TEXT,
+    cpe          TEXT,                   -- cpe:2.3:... from nmap -sV; drives CVE matching
     banner       TEXT,
     discovered_at TEXT    NOT NULL,
     UNIQUE(host_id, port, proto)
@@ -213,6 +214,259 @@ CREATE TABLE IF NOT EXISTS event (
     rules_hash     TEXT,                  -- reserved (not populated yet)
     payload_json   TEXT    NOT NULL
 );
+
+-- ===========================================================================
+-- Attack-surface enrichment (schema v1)
+-- Everything below expands the world model from "what listens" to "what the next
+-- attack path is": versioned software + CVEs, the AD identity/privilege graph,
+-- the web surface, and per-host loot/interfaces/objectives. These tables are the
+-- queryable record; where a fact should drive the next move, an interpret
+-- extractor also emits a tagged `finding` so the existing planner picks it up.
+-- ===========================================================================
+
+-- ---------------------------------------------------------------------------
+-- Software inventory — anything versioned on a host, listening or not.
+-- `service` records what listens; `software` also captures post-foothold finds
+-- (kernel, sudo, installed packages, a CMS behind a web port) — the raw material
+-- for version -> CVE matching and privesc.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS software (
+    id            INTEGER PRIMARY KEY,
+    host_id       INTEGER NOT NULL REFERENCES host(id),
+    service_id    INTEGER REFERENCES service(id),   -- set when tied to a listening service
+    name          TEXT    NOT NULL,      -- 'Apache ActiveMQ' | 'sudo' | 'Linux kernel' | 'WordPress'
+    version       TEXT,
+    cpe           TEXT,                  -- cpe:2.3:a:apache:activemq:5.17.4 — drives CVE match
+    kind          TEXT    NOT NULL DEFAULT 'service',  -- service|package|kernel|runtime|cms|driver|lib
+    source        TEXT,                  -- nmap|banner|linpeas|winpeas|dpkg|manual
+    evidence      TEXT,
+    discovered_at TEXT    NOT NULL,
+    updated_at    TEXT,
+    UNIQUE(host_id, name, version)
+);
+CREATE INDEX IF NOT EXISTS idx_software_host ON software(host_id);
+
+-- ---------------------------------------------------------------------------
+-- Vulnerabilities — version -> CVE hypotheses with a lifecycle. Distinct from
+-- `finding`: a finding is a confirmed defect/lead the operator stands behind; a
+-- vulnerability starts as a `potential` match and is promoted to a finding + task
+-- once confirmed. Keeps the CVE noise out of the findings ledger until it's real.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS vulnerability (
+    id                INTEGER PRIMARY KEY,
+    engagement_id     INTEGER NOT NULL REFERENCES engagement(id),
+    host_id           INTEGER NOT NULL REFERENCES host(id),
+    software_id       INTEGER REFERENCES software(id),
+    service_id        INTEGER REFERENCES service(id),
+    cve               TEXT,              -- CVE-2023-46604 (or a vendor advisory id)
+    title             TEXT,
+    cvss              REAL,
+    state             TEXT    NOT NULL DEFAULT 'potential',  -- potential|confirmed|exploited|patched|false_positive
+    exploit_ref       TEXT,              -- searchsploit id | msf module | nuclei template | URL
+    exploit_available INTEGER DEFAULT 0,
+    source            TEXT,              -- version_match|nuclei|searchsploit|nvd|manual
+    discovered_at     TEXT    NOT NULL,
+    updated_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_vuln_host ON vulnerability(host_id, state);
+
+-- ---------------------------------------------------------------------------
+-- Principals — accounts, groups, computers. The identity layer credentials and
+-- privileges hang off: a credential is a secret FOR a principal, and a principal
+-- can hold several (password + NT hash + kerberos + ssh key). This is what the
+-- BloodHound / enum4linux / DCSync data has had nowhere to land.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS principal (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    name          TEXT    NOT NULL,      -- sAMAccountName / local user / group name
+    domain        TEXT,                  -- aldinervaide.com | WORKGROUP | <hostname> for local
+    type          TEXT    NOT NULL DEFAULT 'user',  -- user|group|computer|service|local
+    sid           TEXT,
+    rid           INTEGER,
+    enabled       INTEGER DEFAULT 1,
+    flags         TEXT,                  -- comma list: dont_require_preauth,adminCount,unconstrained_deleg,passwd_notreqd,spn
+    spn           TEXT,
+    description   TEXT,
+    home_host_id  INTEGER REFERENCES host(id),   -- for local accounts / where first seen
+    source        TEXT,                  -- bloodhound|enum4linux|rid_brute|dcsync|manual
+    discovered_at TEXT    NOT NULL,
+    updated_at    TEXT,
+    UNIQUE(engagement_id, name, domain, type)
+);
+CREATE INDEX IF NOT EXISTS idx_principal_eng ON principal(engagement_id, type);
+
+-- Group membership (principal -> group; both rows in `principal`).
+CREATE TABLE IF NOT EXISTS membership (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    member_id     INTEGER NOT NULL REFERENCES principal(id),
+    group_id      INTEGER NOT NULL REFERENCES principal(id),
+    source        TEXT,
+    discovered_at TEXT    NOT NULL,
+    UNIQUE(member_id, group_id)
+);
+
+-- Privileges / rights a principal holds; host-scoped when local, NULL host = domain-wide.
+CREATE TABLE IF NOT EXISTS privilege (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    principal_id  INTEGER REFERENCES principal(id),
+    host_id       INTEGER REFERENCES host(id),   -- NULL = domain-wide
+    right         TEXT    NOT NULL,      -- local_admin|SeImpersonate|SeBackupPrivilege|sudo_all|docker|DCSync|GenericAll|WriteDacl|ForceChangePassword|ESC1|...
+    target        TEXT,                  -- what the right is over (principal name, cert template, share)
+    source        TEXT,
+    discovered_at TEXT    NOT NULL,
+    UNIQUE(engagement_id, principal_id, host_id, right, target)
+);
+
+-- Attack-graph edges — reachability + escalation between nodes. A node is
+-- addressed as 'principal:<id>' or 'host:<id>'. One recursive query over this
+-- table answers "shortest path from what I own -> Domain Admin / the objective".
+CREATE TABLE IF NOT EXISTS edge (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    src           TEXT    NOT NULL,      -- 'principal:12' | 'host:3'
+    dst           TEXT    NOT NULL,
+    kind          TEXT    NOT NULL,      -- AdminTo|HasSession|MemberOf|CanRDP|CanPSRemote|CredReuse|ESC1|GenericAll|TunnelReachable|...
+    confidence    TEXT    DEFAULT 'confirmed',  -- confirmed|likely|theoretical
+    source        TEXT,
+    discovered_at TEXT    NOT NULL,
+    UNIQUE(engagement_id, src, dst, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_edge_src ON edge(engagement_id, src);
+
+-- ---------------------------------------------------------------------------
+-- Web surface — a real model on top of a `web` surface: the app, its vhosts,
+-- and every path/route found by content discovery. `service`/`surface` say a web
+-- port exists; these say what's ON it and where to attack.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS web_app (
+    id            INTEGER PRIMARY KEY,
+    host_id       INTEGER NOT NULL REFERENCES host(id),
+    service_id    INTEGER REFERENCES service(id),
+    surface_id    INTEGER REFERENCES surface(id),
+    base_url      TEXT    NOT NULL,      -- http://192.168.239.10:80
+    vhost         TEXT,                  -- Host header when virtual-hosted
+    scheme        TEXT,                  -- http|https
+    title         TEXT,
+    server        TEXT,                  -- 'nginx 1.28.3'
+    tech          TEXT,                  -- framework/CMS + versions (JSON or comma list): 'WordPress 6.4, PHP 8.2'
+    waf           TEXT,
+    favicon_hash  TEXT,
+    notes         TEXT,
+    discovered_at TEXT    NOT NULL,
+    updated_at    TEXT,
+    UNIQUE(host_id, base_url, vhost)
+);
+
+CREATE TABLE IF NOT EXISTS web_path (
+    id            INTEGER PRIMARY KEY,
+    web_app_id    INTEGER NOT NULL REFERENCES web_app(id),
+    path          TEXT    NOT NULL,
+    method        TEXT    DEFAULT 'GET',
+    status        INTEGER,
+    length        INTEGER,
+    kind          TEXT,                  -- login|upload|admin|api|backup|config|source|redirect|dir|other
+    auth_required INTEGER DEFAULT 0,
+    params        TEXT,                  -- discovered query params / form fields (injection surface)
+    interesting   INTEGER DEFAULT 0,
+    source        TEXT,                  -- gobuster|ffuf|feroxbuster|dirb|nikto|manual
+    notes         TEXT,
+    discovered_at TEXT    NOT NULL,
+    UNIQUE(web_app_id, path, method)
+);
+CREATE INDEX IF NOT EXISTS idx_webpath_app ON web_path(web_app_id, interesting);
+
+-- Domains / vhosts / subdomains discovered (DNS, cert SANs, vhost fuzzing, LDAP).
+CREATE TABLE IF NOT EXISTS domain (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    name          TEXT    NOT NULL,      -- careers.forge.local | dev.example.com | aldinervaide.com
+    type          TEXT    NOT NULL DEFAULT 'vhost',  -- vhost|subdomain|ad_domain|dns
+    ip            TEXT,
+    host_id       INTEGER REFERENCES host(id),
+    source        TEXT,                  -- vhost_fuzz|cert|dns|ldap|manual
+    discovered_at TEXT    NOT NULL,
+    UNIQUE(engagement_id, name, type)
+);
+
+-- ---------------------------------------------------------------------------
+-- Host enrichment — the "note everything on each host" layer.
+-- ---------------------------------------------------------------------------
+
+-- Interfaces: multi-homing as rows, not prose. Feeds the Network Map + pivots.
+CREATE TABLE IF NOT EXISTS host_interface (
+    id            INTEGER PRIMARY KEY,
+    host_id       INTEGER NOT NULL REFERENCES host(id),
+    ip            TEXT    NOT NULL,
+    mac           TEXT,
+    segment       TEXT,                  -- CIDR or label ('edge' | '172.16.239.0/24')
+    is_primary    INTEGER DEFAULT 0,
+    source        TEXT,                  -- nmap|ip_a|arp|manual
+    discovered_at TEXT    NOT NULL,
+    UNIQUE(host_id, ip)
+);
+
+-- Loot: files/keys/dumps found on a host, and whether they carry a secret.
+CREATE TABLE IF NOT EXISTS loot (
+    id              INTEGER PRIMARY KEY,
+    engagement_id   INTEGER NOT NULL REFERENCES engagement(id),
+    host_id         INTEGER REFERENCES host(id),
+    path            TEXT,                -- remote path where found (C:\helpdesk\app.py)
+    local_path      TEXT,                -- where saved on Kali
+    type            TEXT,                -- config|key|db|source|dump|hash|note|binary
+    contains_secret INTEGER DEFAULT 0,
+    credential_id   INTEGER REFERENCES credential(id),
+    summary         TEXT,
+    discovered_at   TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_loot_host ON loot(host_id);
+
+-- Password policy — gates SAFE spraying. Spraying blind into a lockout is a
+-- self-own; the ranker should consult this before proposing a spray.
+CREATE TABLE IF NOT EXISTS password_policy (
+    id                 INTEGER PRIMARY KEY,
+    engagement_id      INTEGER NOT NULL REFERENCES engagement(id),
+    domain             TEXT,
+    host_id            INTEGER REFERENCES host(id),
+    min_length         INTEGER,
+    lockout_threshold  INTEGER,          -- 0 = no lockout
+    lockout_window_min INTEGER,
+    complexity         INTEGER,
+    source             TEXT,
+    discovered_at      TEXT    NOT NULL
+);
+
+-- Objectives — the point-bearing goals, tied to proof + host.points_value.
+CREATE TABLE IF NOT EXISTS objective (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    host_id       INTEGER REFERENCES host(id),
+    kind          TEXT    NOT NULL DEFAULT 'flag',  -- flag|data|access|domain_admin
+    label         TEXT    NOT NULL,      -- 'local.txt' | 'proof.txt' | 'exfil customer DB'
+    points        INTEGER DEFAULT 0,
+    captured      INTEGER DEFAULT 0,
+    proof_id      INTEGER REFERENCES proof(id),
+    notes         TEXT,
+    discovered_at TEXT    NOT NULL
+);
+
+-- SMB / NFS shares — the lateral-movement + loot surface NetExec enumerates.
+-- `access` reflects the CURRENT principal's rights (READ / WRITE / READ,WRITE);
+-- a writable share is a foothold/relay lead, a readable one is loot.
+CREATE TABLE IF NOT EXISTS share (
+    id            INTEGER PRIMARY KEY,
+    host_id       INTEGER NOT NULL REFERENCES host(id),
+    name          TEXT    NOT NULL,      -- C$ | NETLOGON | backups | /export/home (NFS)
+    proto         TEXT    NOT NULL DEFAULT 'smb',  -- smb|nfs
+    access        TEXT,                  -- READ | WRITE | READ,WRITE | none
+    remark        TEXT,
+    source        TEXT,                  -- netexec|smbclient|enum4linux|showmount|manual
+    discovered_at TEXT    NOT NULL,
+    UNIQUE(host_id, name, proto)
+);
+CREATE INDEX IF NOT EXISTS idx_share_host ON share(host_id);
 
 CREATE INDEX IF NOT EXISTS idx_event_engagement_ts ON event(engagement_id, ts);
 CREATE INDEX IF NOT EXISTS idx_host_stage ON host(engagement_id, stage);

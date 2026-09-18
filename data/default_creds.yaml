@@ -1,0 +1,54 @@
+# Yhwach — default / well-known credential reference.
+# Consulted for login surfaces (web_login rule) and appliance foothold. Try these
+# BEFORE spraying — they are free and lockout-cheap. `yhwach ref default-creds`.
+# product is matched case-insensitively as a substring of the query.
+
+- product: tomcat
+  creds: ["tomcat:tomcat", "admin:admin", "tomcat:s3cret", "manager:manager"]
+  note: "/manager/html, /host-manager/html — deploy a WAR for RCE"
+- product: jenkins
+  creds: ["admin:admin", "admin:password"]
+  note: "Script Console at /script -> Groovy RCE once authenticated"
+- product: gitlab
+  creds: ["root:5iveL!fe"]
+  note: "very old default; modern installs force a reset on first boot"
+- product: grafana
+  creds: ["admin:admin"]
+  note: "first-login change is often skipped"
+- product: rabbitmq
+  creds: ["guest:guest"]
+  note: "management UI on 15672"
+- product: activemq
+  creds: ["admin:admin", "system:manager"]
+  note: "web console 8161; also credentials.properties on disk"
+- product: postgres
+  creds: ["postgres:postgres", "postgres:"]
+- product: mysql
+  creds: ["root:", "root:root"]
+- product: mongodb
+  creds: [":"]
+  note: "legacy installs bind unauth on 27017"
+- product: elasticsearch
+  creds: ["elastic:changeme"]
+- product: jboss
+  creds: ["admin:admin", "admin:vagrant"]
+  note: "/jmx-console, /web-console -> deploy for RCE"
+- product: wildfly
+  creds: ["admin:admin"]
+- product: kibana
+  creds: ["elastic:changeme", "kibana:changeme"]
+- product: splunk
+  creds: ["admin:changeme"]
+- product: nexus
+  creds: ["admin:admin123"]
+- product: sonarqube
+  creds: ["admin:admin"]
+- product: ssh
+  creds: ["root:root", "root:toor", "admin:admin", "pi:raspberry", "vagrant:vagrant"]
+  note: "appliance/IoT defaults; also try the app's own service account"
+- product: ollama
+  creds: [":"]
+  note: "no auth by default — the API is open; not a credential, a design default"
+- product: printer
+  creds: ["admin:admin", "admin:", "admin:password", "admin:0000"]
+  note: "HP/other EWS; check for LDAP pass-back to recover a domain cred"

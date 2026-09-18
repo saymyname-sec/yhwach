@@ -1,0 +1,36 @@
+# Yhwach — AD CS ESC catalog. Reference for interpreting certipy `find` output and
+# choosing the abuse. `yhwach ref esc [--query esc1]`. The certipy parser tags
+# adcs_vuln; this maps the specific ESC to its abuse so the operator picks fast.
+
+- id: ESC1
+  title: "Template allows requester-supplied SAN + client-auth EKU"
+  requirement: "Enroll right + ENROLLEE_SUPPLIES_SUBJECT + Client Authentication EKU"
+  abuse: "certipy req -ca <CA> -template <T> -upn administrator@<domain> -> auth as DA"
+- id: ESC2
+  title: "Template with Any Purpose (or no) EKU"
+  requirement: "Enroll right + Any Purpose EKU"
+  abuse: "request a cert usable for any purpose; use as ESC3 enrollment agent or direct auth"
+- id: ESC3
+  title: "Enrollment Agent template"
+  requirement: "Certificate Request Agent EKU"
+  abuse: "get an agent cert, then request on-behalf-of a privileged user"
+- id: ESC4
+  title: "Vulnerable template access control (write over template)"
+  requirement: "Write/GenericAll over a certificate template object"
+  abuse: "reconfigure the template to be ESC1, exploit, then restore"
+- id: ESC5
+  title: "Vulnerable PKI object access control"
+  requirement: "Control over CA object / CA server computer / related AD objects"
+  abuse: "compromise the PKI object chain (often reduces to host takeover)"
+- id: ESC6
+  title: "EDITF_ATTRIBUTESUBJECTALTNAME2 on the CA"
+  requirement: "CA flag set — SAN honored for ANY template"
+  abuse: "request any enrollable template with a spoofed SAN -> DA"
+- id: ESC7
+  title: "Vulnerable CA access control"
+  requirement: "ManageCA / ManageCertificates right on the CA"
+  abuse: "grant self ManageCertificates -> approve a failed request / enable SAN"
+- id: ESC8
+  title: "NTLM relay to AD CS HTTP enrollment (web enrollment)"
+  requirement: "Web enrollment endpoint reachable + a coercible machine account"
+  abuse: "coerce (PetitPotam) + ntlmrelayx to /certsrv -> cert for the DC$ -> DCSync"

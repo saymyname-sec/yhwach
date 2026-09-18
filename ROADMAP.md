@@ -2,8 +2,8 @@
 
 ## Status
 
-**Done and validated on a live challenge lab — Iron Crown (381 tests):**
-- ✅ World model (SQLite, 14 tables) + nmap ingestion + host FSM
+**Done and validated on a live challenge lab — Iron Crown:**
+- ✅ World model (SQLite, 28 tables — attempt ledger + scan coverage, and the v1 attack-surface set: software/vuln, the AD identity+privilege+edge graph, web surface, host loot/interfaces/shares/objectives) + nmap ingestion + host FSM
 - ✅ AI-surface probes (Ollama / OpenAI-compat / chatbot / MCP / Gradio / A2A / vector DB)
 - ✅ Traditional-surface detection (Jenkins / GitLab / SMB / LDAP / MSSQL / WinRM / SSH / web /
   message brokers)

@@ -18,6 +18,7 @@ host on ingest — that's where these attacks target.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 
 from yhwach.interpret import ExtractedFinding
 
@@ -94,3 +95,125 @@ def parse_bloodhound(text: str) -> list[ExtractedFinding]:
             continue
         out.append(_fact_finding(kind, f.get("principal"), f.get("detail")))
     return out
+
+
+# ---------------------------------------------------------------------------
+# Structured graph extraction — the same input, but yielding principal / privilege
+# / edge rows so the world model gets the AD *structure*, not only findings.
+# Names are resolved to principal ids by the ingest handler.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BhPrincipal:
+    name: str
+    domain: str | None = None
+    type: str = "user"          # user | group | computer
+    flags: str | None = None    # spn,dont_require_preauth,unconstrained_deleg,adminCount
+    spn: str | None = None
+
+
+@dataclass
+class BhGraph:
+    principals: list[BhPrincipal] = field(default_factory=list)
+    # (principal_name, right, target)
+    privileges: list[tuple[str, str, str | None]] = field(default_factory=list)
+    # (src_name, dst_name, kind) — names resolved to principal ids on ingest
+    edges: list[tuple[str, str, str]] = field(default_factory=list)
+
+
+# fact kind -> principal flag it implies (when the fact is a property of an account)
+_FLAG_FOR = {
+    "kerberoastable": "spn",
+    "asreproastable": "dont_require_preauth",
+    "unconstrained_delegation": "unconstrained_deleg",
+    "constrained_delegation": "constrained_deleg",
+}
+# fact kind -> (right, edge_kind) for graph-shaped facts
+_RIGHT_FOR = {
+    "dcsync": "DCSync",
+    "acl_abuse": "GenericAll",
+    "gpp_password": None,
+}
+
+
+def _split_name(principal: str | None) -> tuple[str, str | None]:
+    """'svc_sql@CORP.LOCAL' / 'CORP\\svc_sql' -> (name, domain)."""
+    if not principal:
+        return "(unknown)", None
+    p = principal.strip()
+    if "@" in p:
+        n, d = p.split("@", 1)
+        return n, d or None
+    if "\\" in p:
+        d, n = p.split("\\", 1)
+        return n, d or None
+    return p, None
+
+
+def parse_bloodhound_graph(text: str) -> BhGraph:
+    """Extract principals / privileges / edges from BloodHound output.
+
+    Complements parse_bloodhound (which yields findings): this yields the graph
+    rows. Safe to call on the same input; returns an empty graph on junk."""
+    g = BhGraph()
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return g
+
+    if isinstance(data, dict) and "data" in data and "meta" in data:
+        _graph_from_sharphound(data, g)
+        return g
+
+    facts = data.get("facts") if isinstance(data, dict) else data
+    if not isinstance(facts, list):
+        return g
+    for f in facts:
+        if not isinstance(f, dict) or not f.get("kind"):
+            continue
+        _graph_from_fact(f["kind"], f.get("principal"), f.get("detail"), g)
+    return g
+
+
+def _graph_from_fact(kind: str, principal: str | None, detail: str | None, g: BhGraph) -> None:
+    name, domain = _split_name(principal)
+    ptype = "computer" if "delegation" in kind else "user"
+    if kind in _FLAG_FOR:
+        spn = detail if kind == "kerberoastable" else None
+        g.principals.append(BhPrincipal(name, domain, ptype, flags=_FLAG_FOR[kind], spn=spn))
+        return
+    if kind in _RIGHT_FOR:
+        g.principals.append(BhPrincipal(name, domain, "user"))
+        right = _RIGHT_FOR[kind]
+        if right:
+            g.privileges.append((name, right, detail))
+        return
+    if kind == "da_path":
+        g.principals.append(BhPrincipal(name, domain, "user"))
+        g.edges.append((name, "Domain Admins", "PathToDA"))
+
+
+def _graph_from_sharphound(data: dict, g: BhGraph) -> None:
+    kind = (data.get("meta", {}) or {}).get("type", "")
+    for obj in data.get("data", []) or []:
+        props = (obj.get("Properties") or {}) if isinstance(obj, dict) else {}
+        raw = props.get("name") or props.get("distinguishedname") or "(object)"
+        name, domain = _split_name(raw)
+        flags: list[str] = []
+        if kind == "users":
+            if props.get("hasspn"):
+                flags.append("spn")
+            if props.get("dontreqpreauth"):
+                flags.append("dont_require_preauth")
+            if props.get("admincount"):
+                flags.append("adminCount")
+            g.principals.append(BhPrincipal(
+                name, domain, "user", ",".join(flags) or None,
+                spn=(props.get("serviceprincipalnames") or [None])[0]
+                if isinstance(props.get("serviceprincipalnames"), list) else None))
+        elif kind == "computers":
+            if props.get("unconstraineddelegation"):
+                flags.append("unconstrained_deleg")
+            g.principals.append(BhPrincipal(name, domain, "computer", ",".join(flags) or None))
+        elif kind == "groups":
+            g.principals.append(BhPrincipal(name, domain, "group"))

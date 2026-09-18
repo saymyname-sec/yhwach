@@ -1,0 +1,4 @@
+[+] connect from 172.16.232.10:51544
+[task] agent=data-validator action=full-batch-validation
+[task] connection_string=Server=labdb01.kethalis.corp,1433;Database=kethalis_deploy;User Id=sa;Password=K3thalis-SQL-SA!2026;TrustServerCertificate=true
+[task] registry_admin token=R3g!Adm1n#A2A2025

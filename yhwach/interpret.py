@@ -79,6 +79,20 @@ def _ollama_version(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _a2a_capture(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Captured A2A task traffic containing a DB connection string / creds ->
+    tag a2a_creds_captured (obj3/obj4)."""
+    m = re.search(r"(?:User\s*Id|uid)\s*=\s*([^;\s]+).{0,80}?(?:Password|pwd)\s*=\s*([^;\s]+)",
+                  output, re.IGNORECASE | re.DOTALL)
+    if not m:
+        return None
+    return ExtractedFinding(
+        "LLM06", "A2A task traffic leaks a database credential", "critical",
+        f"captured connection string exposes {m.group(1)} on {ctx.get('IP', ctx.get('URL','?'))} "
+        "via a redirected agent task",
+        tag="a2a_creds_captured")
+
+
 def _rag_import(output: str, ctx: dict) -> ExtractedFinding | None:
     """A successful authenticated /api/import -> tag rag_import_ok (obj8).
 
@@ -552,6 +566,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "probe_n8n_version": _n8n_version,
     "n8n_ni8mare_file_read": _n8n_env_secret,
     "rag_authenticated_import": _rag_import,
+    "a2a_capture_task_creds": _a2a_capture,
     "enumerate_models": _openai_models,
     "mcp_tools_list": _mcp_tools,
     "jenkins_auth_check": _jenkins_api,

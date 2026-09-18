@@ -245,3 +245,10 @@ def test_rag_import_tags_write_primitive() -> None:
     fs = interpret_all("rag_authenticated_import", _read("rag_import.json"),
                        {"URL": "http://10.0.0.55:3000"})
     assert fs and fs[0].tag == "rag_import_ok" and fs[0].cls == "LLM06"
+
+
+def test_a2a_task_capture_tags_creds() -> None:
+    fs = interpret_all("a2a_capture_task_creds", _read("a2a_task_capture.txt"),
+                       {"IP": "172.16.232.10"})
+    assert fs and fs[0].tag == "a2a_creds_captured" and fs[0].severity == "critical"
+    assert "sa" in fs[0].evidence

@@ -747,3 +747,14 @@ def test_chatbot_memory_recall_rule(tmp_db: Path) -> None:
         match_rules(conn, eng, rules)
         ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
     assert "chatbot_memory_recall_leak" in ids
+
+
+def test_a2a_task_capture_rule(tmp_db: Path) -> None:
+    """An a2a surface offers the rogue-agent register + task credential capture."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="a2a")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "a2a_task_credential_capture" in ids

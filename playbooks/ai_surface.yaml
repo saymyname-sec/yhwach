@@ -514,3 +514,23 @@
   source: 'synthetic_siege . recall_conversation cross-session memory search leaked the portal admin cred'
   technique: memory_recall_leak
   authorized_only: true
+
+# --- A2A task credential capture via rogue-agent register / peer poisoning (obj3/4) ---
+# Register or overwrite an agent so the orchestrator routes a peer's periodic
+# task to our endpoint (or DNS-poison the target agent's hostname). The captured
+# task body carries a DB connection string / registry creds (LLM01 + LLM06).
+- id: a2a_task_credential_capture
+  when: { surface: a2a }
+  class: ai
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: a2a_register_rogue_agent
+    - action: a2a_capture_task_creds
+  maps: [LLM01, LLM06]
+  points: 15
+  risk: propose
+  routes: /osai-a2a
+  source: 'synthetic_siege . rogue-agent register + task redirect captured the MSSQL sa + registry creds (obj3/obj4)'
+  technique: a2a_task_capture
+  authorized_only: true

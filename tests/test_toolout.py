@@ -239,3 +239,9 @@ def test_bloodhound_shadow_cred_target() -> None:
     sc = next(f for f in fs if f.tag == "shadow_cred_target")
     assert sc.severity == "critical" and sc.cls == "T1556"
     assert "KeyCredentialLink" in sc.title
+
+
+def test_rag_import_tags_write_primitive() -> None:
+    fs = interpret_all("rag_authenticated_import", _read("rag_import.json"),
+                       {"URL": "http://10.0.0.55:3000"})
+    assert fs and fs[0].tag == "rag_import_ok" and fs[0].cls == "LLM06"

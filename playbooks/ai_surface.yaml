@@ -443,3 +443,56 @@
   routes: /osai-cloud-loot
   source: 'osai/09 . aws_ml_enum.sh'
   authorized_only: true
+
+# --- RAG read_page gate bypass via import retrieval-poisoning (synthetic_siege obj8/9) ---
+# A RAG assistant whose read_page(slug) tool only returns a body when the slug
+# appears as a private_handle in the CURRENT retriever output. Recon the corpus
+# + the (auth-gated) import endpoint first.
+- id: rag_surface_recon
+  when: { surface: rag }
+  class: ai
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: enumerate_rag_corpus
+    - action: probe_rag_import_auth
+  maps: [LLM06, LLM01]
+  points: 15
+  risk: read_only
+  routes: /osai-rag-attack
+  source: 'synthetic_siege . RAG corpus + import-endpoint recon (Kethalis Retrieval Assistant)'
+  authorized_only: true
+
+# We hold a recovered credential -> authenticate to /api/import (obj8). The
+# import primitive is what makes the retrieval-poisoning unlock possible.
+- id: rag_authenticated_import
+  when: { surface: rag, vault: nonempty }
+  class: ai
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: rag_authenticated_import
+  maps: [LLM06, CWE-284]
+  points: 15
+  risk: propose
+  routes: /osai-rag-attack
+  source: 'synthetic_siege . authenticated /api/import (HTTP Basic svc account) = obj8'
+  technique: rag_import
+  authorized_only: true
+
+# The import succeeded (rag_import_ok) -> drag a hidden internal doc into
+# retriever output so its slug becomes a private_handle, unlocking read_page (obj9).
+- id: rag_readpage_poison_unlock
+  when: { findings_include: rag_import_ok }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: rag_readpage_retrieval_poison
+  maps: [LLM01, LLM06]
+  points: 15
+  risk: propose
+  routes: /osai-rag-attack
+  source: 'synthetic_siege . import a mirror doc to force the target private_handle into retrieval, then read_page'
+  technique: rag_readpage_bypass
+  authorized_only: true

@@ -79,6 +79,23 @@ def _ollama_version(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _rag_import(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A successful authenticated /api/import -> tag rag_import_ok (obj8).
+
+    The write primitive is what enables the retrieval-poisoning read_page unlock,
+    so a confirmed import unlocks the poison rule."""
+    data = _first_json(output)
+    ok = isinstance(data, dict) and (
+        data.get("status") == "imported" or "nearest_neighbors" in data or data.get("slug"))
+    if not ok:
+        return None
+    return ExtractedFinding(
+        "LLM06", "RAG /api/import authenticated write", "high",
+        f"authenticated import accepted on {ctx.get('URL','?')} — the write primitive enables "
+        "retrieval poisoning to unlock read_page on hidden internal docs",
+        tag="rag_import_ok")
+
+
 def _n8n_version(output: str, ctx: dict) -> ExtractedFinding | None:
     """n8n version -> tag n8n_ni8mare when < 1.121.0 (CVE-2026-21858 "Ni8mare").
 
@@ -534,6 +551,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "probe_ollama_version": _ollama_version,
     "probe_n8n_version": _n8n_version,
     "n8n_ni8mare_file_read": _n8n_env_secret,
+    "rag_authenticated_import": _rag_import,
     "enumerate_models": _openai_models,
     "mcp_tools_list": _mcp_tools,
     "jenkins_auth_check": _jenkins_api,

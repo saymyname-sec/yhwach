@@ -712,3 +712,27 @@ def test_n8n_ni8mare_chain(tmp_db: Path) -> None:
         ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
     assert "n8n_auth_jwt_forge" in ids
     assert "n8n_credential_store_decrypt" in ids
+
+
+def test_rag_readpage_bypass_chain(tmp_db: Path) -> None:
+    """A rag surface offers recon; with a vault cred it offers the authenticated
+    import (obj8); a rag_import_ok finding unlocks the read_page retrieval-poison
+    (obj9)."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="rag")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "rag_surface_recon" in ids
+    assert "rag_authenticated_import" not in ids  # no cred yet
+    with yhdb.transaction(tmp_db) as conn:
+        yhdb.add_credential(conn, eng, "svc_wiki", "W1k1", "password", "rag")
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "rag_authenticated_import" in ids
+    _add_finding(tmp_db, eng, "rag_import_ok")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "rag_readpage_poison_unlock" in ids

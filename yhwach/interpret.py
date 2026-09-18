@@ -79,6 +79,22 @@ def _ollama_version(output: str, ctx: dict) -> ExtractedFinding | None:
     return None
 
 
+def _gitlab_pat(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A minted GitLab PAT -> tag gitlab_token (unlocks the CI-exfil chain)."""
+    data = _first_json(output)
+    tok = data.get("token") if isinstance(data, dict) else None
+    if not (isinstance(tok, str) and tok.startswith("glpat-")):
+        m = re.search(r"\bglpat-[A-Za-z0-9._-]{15,}", output)
+        tok = m.group(0) if m else None
+    if not tok:
+        return None
+    return ExtractedFinding(
+        "CWE-200", "GitLab personal access token minted", "high",
+        f"PAT {tok[:12]}… on {ctx.get('URL','?')} — read internal projects, CI variables, "
+        "and the container registry",
+        tag="gitlab_token")
+
+
 def _encrypted_privkey(output: str, ctx: dict) -> ExtractedFinding | None:
     """A looted *encrypted* private key -> tag encrypted_private_key.
 
@@ -585,6 +601,7 @@ _EXTRACTORS: dict[str, _Extractor] = {
     "rag_authenticated_import": _rag_import,
     "a2a_capture_task_creds": _a2a_capture,
     "inspect_private_key": _encrypted_privkey,
+    "gitlab_create_pat": _gitlab_pat,
     "enumerate_models": _openai_models,
     "mcp_tools_list": _mcp_tools,
     "jenkins_auth_check": _jenkins_api,

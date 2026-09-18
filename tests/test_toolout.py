@@ -264,3 +264,9 @@ def test_encrypted_ssh_key_tag() -> None:
 def test_unencrypted_key_not_tagged() -> None:
     plain = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z9\n-----END RSA PRIVATE KEY-----"
     assert interpret_all("inspect_private_key", plain, {"IP": "x"}) == []
+
+
+def test_gitlab_pat_tags_token() -> None:
+    fs = interpret_all("gitlab_create_pat", _read("gitlab_pat.json"),
+                       {"URL": "http://10.0.0.40"})
+    assert fs and fs[0].tag == "gitlab_token"

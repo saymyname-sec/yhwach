@@ -821,3 +821,23 @@ def test_encrypted_key_crack_chain(tmp_db: Path) -> None:
         match_rules(conn, eng, rules)
         ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
     assert "encrypted_ssh_key_crack" in ids
+
+
+def test_gitlab_poison_and_registry_chain(tmp_db: Path) -> None:
+    """A gitlab surface offers open registration; a gitlab_token unlocks the
+    registry-layer loot; a classifier_repo unlocks training-data poisoning."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="gitlab")
+    rules = load_rules(default_playbook_dir())
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "gitlab_open_registration" in ids
+    assert "gitlab_registry_layer_secret" not in ids
+    _add_finding(tmp_db, eng, "gitlab_token")
+    _add_finding(tmp_db, eng, "classifier_repo")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "gitlab_registry_layer_secret" in ids
+    assert "gitlab_classifier_training_poison" in ids

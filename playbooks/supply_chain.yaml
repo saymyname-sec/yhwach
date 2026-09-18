@@ -149,3 +149,55 @@
   source: 'shadow-supply chain 5 . modify .gitlab-ci.yml to dump env vars (VAULT_CI_TOKEN)'
   technique: gitlab_ci_exfil
   authorized_only: true
+
+# --- GitLab open-registration -> PAT -> classifier poisoning + registry loot (obj10) ---
+# Self-registration is often enabled and auto-grants Reporter/Developer on
+# internal groups. Register, mint a PAT (unlocks the CI-exfil chain), and pull
+# the container registry (secrets survive in earlier image layers before an rm).
+- id: gitlab_open_registration
+  when: { surface: gitlab }
+  class: ai
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: gitlab_open_register
+    - action: gitlab_create_pat
+  maps: [CWE-1188, CWE-200]
+  points: 10
+  risk: propose
+  routes: /osai-supplychain
+  source: 'synthetic_siege . open registration auto-grants Reporter on internal groups; mint a PAT'
+  authorized_only: true
+
+- id: gitlab_registry_layer_secret
+  when: { surface: gitlab, findings_include: gitlab_token }
+  class: ai
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: gitlab_registry_pull_layers
+  maps: [CWE-538, CWE-200]
+  points: 10
+  risk: propose
+  routes: /osai-supplychain
+  source: 'synthetic_siege . a COPY+rm secret (id_ed25519.enc) survives in the earlier registry layer'
+  technique: registry_layer_secret
+  authorized_only: true
+
+# A repo whose pipeline reclassifies docs SENSITIVE/NON-SENSITIVE and publishes
+# the NON-SENSITIVE set -> poison the training data so a withheld cred doc is
+# relabelled and published (LLM04 data poisoning). classifier_repo is context-set.
+- id: gitlab_classifier_training_poison
+  when: { surface: gitlab, findings_include: classifier_repo }
+  class: ai
+  likelihood: M
+  time_cost: slow
+  emits:
+    - action: gitlab_training_data_poison
+  maps: [LLM04, LLM03]
+  points: 15
+  risk: propose
+  routes: /osai-supplychain
+  source: 'synthetic_siege . poison clinical_docs_train.jsonl so flagged_doc reclassifies NON-SENSITIVE -> published'
+  technique: classifier_poison
+  authorized_only: true

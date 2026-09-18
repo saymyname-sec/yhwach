@@ -1,0 +1,4 @@
+╔══════════╣ Superusers
+uid=1001(deploy) gid=1001(deploy) groups=1001(deploy),109(docker)
+╔══════════╣ Sudo
+deploy may not run sudo

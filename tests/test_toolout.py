@@ -276,3 +276,8 @@ def test_git_import_pipeline_tag() -> None:
     fs = interpret_all("inspect_workflow_config", _read("workflow_git_import.txt"),
                        {"IP": "192.168.232.30"})
     assert fs and fs[0].tag == "git_import_pipeline" and fs[0].severity == "critical"
+
+
+def test_linpeas_docker_group_tag() -> None:
+    tags = {f.tag for f in parse_linpeas(_read("linpeas_docker.txt"))}
+    assert "docker_group" in tags

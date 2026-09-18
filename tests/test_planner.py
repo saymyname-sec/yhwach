@@ -853,3 +853,15 @@ def test_gitea_git_import_poison_chain(tmp_db: Path) -> None:
         match_rules(conn, eng, rules)
         ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
     assert "gitea_deploy_poison_rce" in ids
+
+
+def test_docker_group_root_chain(tmp_db: Path) -> None:
+    """A docker_group finding unlocks the docker-to-root privesc."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="ssh")
+    rules = load_rules(default_playbook_dir())
+    _add_finding(tmp_db, eng, "docker_group")
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "docker_group_root" in ids

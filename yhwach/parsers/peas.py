@@ -59,6 +59,13 @@ def parse_linpeas(text: str) -> list[ExtractedFinding]:
         out.append(ExtractedFinding(
             "CWE-522", "Private SSH key found on host", "high", "reuse for lateral SSH"))
 
+    # Membership of the docker group is root-equivalent (mount host / in a container).
+    if re.search(r"(?i)groups?\b[^\n]*\bdocker\b|\bdocker\b[^\n]*\bgroup\b|"
+                 r"member of the docker group", text):
+        out.append(ExtractedFinding(
+            "CWE-250", "User is in the docker group (root-equivalent)", "high",
+            "mount host / into a container to read/write any file as root", tag="docker_group"))
+
     # AWS credentials on disk / in env -> tag for the cloud chaining rules.
     if re.search(r"aws_access_key_id|\.aws/credentials|AKIA[0-9A-Z]{16}", text):
         out.append(ExtractedFinding(

@@ -790,3 +790,18 @@ def test_seimpersonate_potato_chain(tmp_db: Path) -> None:
         match_rules(conn, eng, rules)
         ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
     assert "seimpersonate_potato_system" in ids
+
+
+def test_windows_credential_hunt_chain(tmp_db: Path) -> None:
+    """winPEAS tags unlock the KeePass open, CredMan dump, and autorun-secret rules."""
+    from yhwach.playbooks import default_playbook_dir, load_rules
+    eng = _seed_surface(tmp_db, kind="winrm", os="windows")
+    rules = load_rules(default_playbook_dir())
+    for tag in ("keepass_kdbx", "dpapi_master_key", "autorun_secret"):
+        _add_finding(tmp_db, eng, tag)
+    with yhdb.transaction(tmp_db) as conn:
+        match_rules(conn, eng, rules)
+        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 200)]
+    assert "keepass_kdbx_open" in ids
+    assert "credential_manager_dump" in ids
+    assert "autorun_credential_leak" in ids

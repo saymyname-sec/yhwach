@@ -168,6 +168,24 @@ def parse_winpeas(text: str) -> list[ExtractedFinding]:
             "decrypt DPAPI blobs (Credential Manager / cookies) with the master key",
             tag="dpapi_master_key"))
 
+    # A KeePass database on disk -> tag keepass_kdbx (P0 lead). KDBX4 (v40000) is
+    # NOT supported by keepass2john; open with pykeepass once the master is found.
+    if re.search(r"\.kdbx\b", text, re.I):
+        out.append(ExtractedFinding(
+            "CWE-522", "KeePass database (.kdbx) on disk", "high",
+            "open with pykeepass; KDBX4 (v40000) is unsupported by keepass2john. Master often "
+            "in Credential Manager or an HKCU\\Run -pw: argument",
+            tag="keepass_kdbx"))
+
+    # An autorun/Run command line that carries a secret as an argument (e.g. a
+    # KeePass launcher with -pw:<master>) -> tag autorun_secret.
+    if re.search(r"(?i)(?:HKCU|HKLM).{0,80}\\Run\b", text) and \
+            re.search(r"(?i)-pw:|/pass(?:word)?[:=]|--password", text):
+        out.append(ExtractedFinding(
+            "CWE-522", "Secret leaked in an autorun command line", "high",
+            "an HKCU/HKLM Run entry passes a password as an argument (e.g. KeePass -pw:)",
+            tag="autorun_secret"))
+
     return out
 
 

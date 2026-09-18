@@ -128,7 +128,7 @@ def test_excessive_agency_toolcall_success() -> None:
 def test_winpeas_privesc_multi_tag() -> None:
     tags = {f.tag for f in parse_winpeas(_read("winpeas_privesc.txt"))}
     assert {"writable_scheduled_task", "lsa_defaultpassword", "dpapi_master_key",
-            "seimpersonate"}.issubset(tags)
+            "seimpersonate", "keepass_kdbx", "autorun_secret"}.issubset(tags)
 
 
 def test_linpeas_supplychain_tags() -> None:

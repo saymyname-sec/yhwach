@@ -18,3 +18,9 @@
 ÉÍÍÍÍ¹ Token privileges
     SeImpersonatePrivilege: Enabled
     SeChangeNotifyPrivilege: Enabled
+
+ÉÍÍÍÍ¹ Analyzing KeePass Files
+    C:\Users\michael.torres\Documents\KeePass\IT-Service-Accounts.kdbx
+ÉÍÍÍÍ¹ Autorun Applications
+    HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+        KethalisVault: "C:\Program Files\KeePass\KeePass.exe" "C:\...\Kethalis-IT.kdbx" -pw:Kethalis-SOC-Vault!2026

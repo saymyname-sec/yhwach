@@ -32,7 +32,7 @@ loop:
     yhwach_ingest <file> --kind nmap|linpeas|winpeas|bloodhound|certipy --host <ip>
     yhwach_run --task N --go [--hexstrike-url ...]   # read-only auto-runs; findings+tags extracted
     yhwach_cred · yhwach_proof · yhwach_pivot · yhwach_advance · yhwach_consume
-  write the Obsidian note (obsidian MCP) at this objective — full detail
+  write the local vault note (/home/kapi/osai/ObisidanOSAI/<lab>/) at this objective — full detail
   yhwach_plan                       # re-rank from the advanced world model
 ```
 Every pivot opens unscanned hosts → `yhwach_enum` the new subnet → straight back into the loop.
@@ -74,12 +74,16 @@ persona already directs this; `yhwach_pivot` renders the svcmon deploy.
   it refuses without a real screenshot. Capture the screenshot as you take the flag.
 - The report must copy-paste reproduce → the Obsidian Attack Chain note carries verbatim commands.
 
-## Notebook = the Obsidian vault (write-up single source of truth)
-Yhwach's DB is the world model; **notes live in Obsidian, written by YOU via the obsidian MCP** — never
-in the DB. At every objective (finding, foothold, loot, PoC, pivot) write the detailed note:
-`mcp__obsidian__vault_*` → the Local REST API on the host (`https://192.168.190.1:27124`). Structure
-(index / per-host / Attack Chain / Credentials / Findings / Network Map / Next Steps) mirrors
-`persona/notebook.md`. Screenshots via `~/osai/bin/osai-screenshot.sh`. `yhwach advance`/`cred`/`proof`
+## Notebook = a LOCAL Obsidian vault (no MCP); yhwach = atoms, vault = prose
+yhwach.db is the SINGLE SOURCE OF TRUTH for ATOMS (hosts/creds/findings+tags/proofs/objectives) —
+record them there first (`yhwach cred`/`proof`/`ingest`). The **narrative** write-ups live in a local
+Obsidian vault: plain files under `/home/kapi/osai/ObisidanOSAI/<lab>/`, written with the file tools
+(there is NO obsidian MCP). Structure (index / _RESUME / overview / attack-chain / credentials /
+network-map / next-steps / exhausted-approaches / hosts/ / findings/ / chains/ / checkpoints/) mirrors
+`persona/notebook.md` and is scaffolded by `notekit/scaffold_vault.sh`. Screenshots via
+`notekit/shot.sh` (burns UTC+local date/time into every proof). The 10-min heartbeat
+(`notekit/heartbeat.py`) regenerates `_RESUME.md` from yhwach + flags evidence debt.
+`yhwach advance`/`cred`/`proof`
 print a reminder. Every scored proof MUST have a screenshot in the vault — unscreenshotted = 0.
 
 ## AI OWASP TOP 10 — what you're hunting (class → skill)
@@ -136,7 +140,7 @@ loot command it interrupts with the checklist above — it survives context comp
 - **BloodHound MCP** (read-only) — ask in natural language for paths to DA / Kerberoastable / DCSync /
   ACL edges; feed the answers to `yhwach_ingest --kind bloodhound` AND `/osai-ad-attack`. Query the MCP
   before writing `jq` against raw zips.
-- **obsidian** (`mcp__obsidian__vault_*`) — the notebook (see above). PREFER it always.
+- **notebook** — a LOCAL Obsidian vault (`/home/kapi/osai/ObisidanOSAI/<lab>/`), written with the file tools; no MCP. Toolkit: `notekit/{scaffold_vault.sh,gen_resume.py,heartbeat.py,shot.sh}`.
 - MCP servers are themselves attack surface (tool poisoning, CVE-2025-49596) — run only vetted servers.
   Each server's schemas load every turn — keep only lean servers connected.
 
@@ -173,7 +177,7 @@ out-of-scope target before any traffic. HexStrike and Metasploit honor scope.txt
   `screenshots/` · scripts/PoCs → `scripts/`.
 - **World model (authoritative):** Yhwach's SQLite DB (`state/yhwach.db`) — hosts, services, surfaces,
   findings, creds, tasks, tunnels, proofs. Query with `yhwach_status`/`yhwach_report`, not hand-kept files.
-- **Write-ups:** the Obsidian vault via the obsidian MCP (mirror, not source).
+- **Write-ups:** a LOCAL Obsidian vault (`/home/kapi/osai/ObisidanOSAI/<lab>/`, no MCP) — prose + `_RESUME.md`; atoms live in yhwach.db.
 - `scope.txt` stays local. The engagement tree stays on LOCAL disk (hgfs has no symlinks); never write it to the share.
 
 ## OPSEC (NOT scored — practice only)

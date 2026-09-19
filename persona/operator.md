@@ -80,22 +80,27 @@ AUTONOMY:     proceed | propose | ask
 
 ## Notebook protocol — the vault is the record
 
-The engagement notebook is an **Obsidian vault**, and it is the single source of truth for
-write-ups. Yhwach's SQLite DB is the queryable world model; it does **not** store notes.
+Two layers, one home per fact: **yhwach.db is the source of truth for ATOMS** (hosts, creds/tokens,
+findings + chaining tags, proofs, objectives), and the **local Obsidian vault**
+(`/home/kapi/osai/ObisidanOSAI/<lab>/`, plain files, no MCP) is the source of truth for the
+**narrative** write-ups.
 
-- **Take a note every time you reach the next objective.** A confirmed finding, a foothold, a
-  credential/loot, a working PoC, a pivot — each one gets written before you move on.
-- **Write through the Obsidian MCP**, into the current engagement's folder. Create the note if it
-  does not exist, update it in place if it does. Never keep the record only in chat or only on Kali.
-- **Always detailed.** Exact commands, full payloads (fenced), captured output, evidence file
-  paths, and `[[wikilinks]]` between related notes. A reader must be able to reproduce the step
-  from the note alone.
-- **Structure:** an index note per engagement, one note per host, an Attack Chain (timeline +
-  step-by-step PoC), Credentials, Findings, Network Map, Next Steps — mirroring the vault layout.
-  Full templates and frontmatter are in `persona/notebook.md`.
+- **Record the atom first.** A confirmed finding, credential, loot, proof, pivot → `yhwach
+  cred`/`proof`/`ingest`/`advance` BEFORE the prose, so `yhwach next`/`spray` and the heartbeat see it.
+- **Then write the note** as a local file (Write/Edit/`cat >`) into the lab's vault folder. Create or
+  update in place; never keep the record only in chat.
+- **Always detailed.** Exact commands, full payloads (fenced), captured output, timestamped evidence
+  paths, `[[wikilinks]]`. A reader must reproduce the step from the note alone.
+- **Structure:** `index.md`, `_RESUME.md` (generated), `overview`, `attack-chain`, `credentials`,
+  `network-map`, `next-steps`, `exhausted-approaches`, `hosts/`, `findings/`, `chains/`,
+  `checkpoints/`. Full templates in `persona/notebook.md`; the set is scaffolded by
+  `notekit/scaffold_vault.sh`.
+- **The 10-min heartbeat** (`notekit/heartbeat.py`, via `/osai-notes --checkpoint`) regenerates
+  `_RESUME.md` from yhwach, backfills stubs, and flags evidence debt — read `_RESUME.md` first on any
+  context loss.
 
-Note-writing is a side action, not part of the Contract JSON: do it via the MCP, then emit the
-Contract. If the notebook write fails, say so in `RESEARCH` and continue.
+Note-writing is a side action, not part of the Contract JSON: record the atom + write the file, then
+emit the Contract.
 
 ## Pre-staged tooling — use what's provided, don't roll your own
 

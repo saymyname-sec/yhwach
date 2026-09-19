@@ -14,9 +14,10 @@ Yhwach targets Kali Linux with the standard OSAI-exam tooling stack.
 - `jq`
 - **HexStrike** MCP server: [hexstrike-ai/hexstrike-ai](https://github.com/hexstrike-ai/hexstrike-ai) — bound to `127.0.0.1:8888`
 - **Metasploit** + `msfmcpd` MCP server
-- **Obsidian** + the **Local REST API** plugin, reachable from Kali (VMware host or LAN), plus an
-  **Obsidian MCP** registered in your host CLI — the engagement notebook is the vault, written by
-  the operator via that MCP (see [../persona/notebook.md](../persona/notebook.md))
+- **Obsidian** installed on Kali, opening the local vault `/home/kapi/osai/ObisidanOSAI/` — the
+  engagement notebook is plain files the operator writes directly (no MCP; see
+  [../persona/notebook.md](../persona/notebook.md)). The `~/osai/notekit/` toolkit scaffolds it and
+  runs the heartbeat.
 - **Local knowledge base** (see below)
 - Optional: **BloodHound MCP** for AD reasoning
 
@@ -89,7 +90,7 @@ Yhwach reads and writes here:
 ```
 
 The `recon/` and `loot/` directories are derived relative to the DB path, so a non-canonical
-`--db` location still keeps its artifacts beside it. The engagement notebook is **not** on Kali
-disk — it lives in the Obsidian vault, written via the Obsidian MCP.
+`--db` location still keeps its artifacts beside it. The engagement notebook lives on Kali disk at
+`/home/kapi/osai/ObisidanOSAI/<lab>/` (a local Obsidian vault, plain files — no MCP).
 
 State survives `/clear`; context does not.

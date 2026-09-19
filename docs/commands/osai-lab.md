@@ -34,7 +34,7 @@ Repeat until out of scored objectives or ~2h left (then `/osai-report`):
    · `yhwach_run --task N --go` (read-only auto-runs, findings + tags extracted) · `yhwach_cred` ·
    `yhwach_proof --host <ip> --screenshot <path>` on flags · `yhwach_pivot --via-host <ip> --subnet <cidr>`
    on new subnets · `yhwach_advance` / `yhwach_consume`.
-4. **Write the Obsidian note** for this objective (obsidian MCP), in full detail.
+4. **Write the vault note** for this objective (local files under /home/kapi/osai/ObisidanOSAI/<lab>/), in full detail.
 5. **`yhwach_plan`** to re-rank, then back to `yhwach_next`.
 
 ## Rules

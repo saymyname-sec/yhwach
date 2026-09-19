@@ -20,8 +20,8 @@
 - ✅ Proof capture: `yhwach proof` binds a flag + screenshot and gates `foothold → looted` on
       that evidence (the engine refuses `looted` without a proof screenshot)
 - ✅ HexStrike as the delegated enumeration backend (`yhwach enum`, loopback-guarded)
-- ✅ Engagement notebook: the operator writes detailed notes to an Obsidian vault (single source
-      of truth) via the Obsidian MCP at every objective; notes never live in the DB
+- ✅ Engagement notebook: the operator writes detailed notes as plain files in a local Obsidian
+      vault (no MCP); yhwach.db owns the atoms, the vault owns the narrative + a generated _RESUME.md
 - ✅ Markdown report generation
 - ✅ Calibration harness: fixtures + golden runner + `snapshot`
 - ✅ Yhwach-as-MCP server for Claude Code (`yhwach mcp`; Path A in docs/deploy.md)
@@ -145,7 +145,7 @@ say so.
       Metasploit through HexStrike, read the vector-DB detection rules first, keep HexStrike loopback.
 - [x] **Configurable timeouts**: `YHWACH_RUN_TIMEOUT` (per-action) and `YHWACH_HEXSTRIKE_TIMEOUT`.
 - [x] **Newbie setup guide**: [docs/setup.md](docs/setup.md) — Kali prep, toolchain, HexStrike
-      (loopback + firewall), Obsidian + Local REST API, MCP registration, pre-staged tooling, smoke test.
+      (loopback + firewall), local Obsidian vault + notekit heartbeat, pre-staged tooling, smoke test.
 
 **Deliberately not built (documented decisions, not open TODOs):**
 - FSM `scanned→enumerated` predicate (`has_full_tcp AND udp_top100_done`): the data model doesn't

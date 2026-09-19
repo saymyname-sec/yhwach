@@ -61,23 +61,25 @@ or, editing the config directly:
 
 If you prefer to keep everything in Bash: `yhwach next` prints the Autonomy Contract to stdout; the operator reads it and acts. No LLM call from Yhwach's side. Simpler, but the reasoning inherits the host CLI's persona (which is exactly the drift Yhwach exists to prevent). Use this when experimenting or when the MCP is not yet wired.
 
-## The engagement notebook — Obsidian MCP
+## The engagement notebook — a LOCAL Obsidian vault (no MCP)
 
-The notebook is an **Obsidian vault**, and it is the single source of truth for write-ups. Yhwach
-does not store or render notes; the operator (Claude Code) writes them directly through an
-**Obsidian MCP** at every objective. Register that MCP alongside Yhwach's:
+The narrative notebook is a **local Obsidian vault**: plain markdown files under
+`/home/kapi/osai/ObisidanOSAI/<lab>/` on Kali, written with the normal file tools. There is no
+Obsidian MCP — install Obsidian on Kali and open that folder to view it. The split:
 
-1. In Obsidian, enable the **Local REST API** community plugin and copy its API key. Note the
-   host/port it binds to (default `127.0.0.1:27124` HTTPS / `27123` HTTP; on a VMware setup it may
-   bind to the host-only adapter so Kali can reach it).
-2. Register an Obsidian MCP server in Claude Code (e.g. `obsidian-mcp` or any MCP that wraps the
-   Local REST API), passing the API key and base URL via env — **never commit the key**.
-3. The operator persona (`persona/operator.md`, full structure in `persona/notebook.md`) tells the
-   model to create/update the index, per-host, Attack Chain, Credentials, Findings, Network Map,
-   and Next Steps notes — in full detail — as the engagement progresses.
+- **yhwach.db** owns the ATOMS (hosts/creds/findings+tags/proofs/objectives) — recorded via
+  `yhwach cred`/`proof`/`ingest`.
+- **The vault** owns the NARRATIVE (chains, PoC, per-host/finding detail) plus a generated
+  `_RESUME.md` (the context-recovery seed). Structure in `persona/notebook.md`.
 
-`yhwach advance` and `yhwach cred` print a reminder at each objective, and `yhwach next
---contract` carries a standing NOTEBOOK directive, so the write-up keeps pace with the run.
+The operator toolkit lives at `~/osai/notekit/`:
+
+1. `scaffold_vault.sh <lab>` — create the note-set (run by `/osai-engage`).
+2. `gen_resume.py` / `heartbeat.py` — the 10-min reconciliation heartbeat regenerates `_RESUME.md`
+   from yhwach, backfills stubs, and flags evidence debt.
+3. `shot.sh <host>_<slug> <host>` — a proof screenshot with UTC+local date/time burned in.
+
+`yhwach next --contract` carries a standing NOTEBOOK directive, so the write-up keeps pace with the run.
 
 ## Verifying independence
 

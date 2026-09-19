@@ -10,7 +10,7 @@ Obsidian notebook wired through an MCP, and Claude Code able to call Yhwach as M
 |---|---|---|
 | Kali (VM) | Yhwach, HexStrike, the offensive toolchain | the engine + tool execution |
 | Kali | Claude Code | the **operator** (reasons over Yhwach's handoff, drives the MCPs) |
-| Your host / another VM | Obsidian + Local REST API plugin | the engagement **notebook** (single source of truth) |
+| Kali (VM) | Obsidian (opens the local vault) | the engagement **notebook** — narrative prose + a generated `_RESUME.md` |
 
 > Authorized use only — see [../AUTHORIZATION.md](../AUTHORIZATION.md). Everything below assumes lab
 > targets you own or are licensed to test.
@@ -117,34 +117,31 @@ yhwach enum   --lab test --target 127.0.0.1        # runs nmap via HexStrike, in
 
 If `enum` says "HexStrike not reachable", HexStrike isn't running on `127.0.0.1:8888`.
 
-## 5. Obsidian notebook (Local REST API)
+## 5. Obsidian notebook (local vault, no MCP)
 
-The engagement notebook is an Obsidian vault the operator writes via an MCP. On the machine running
-Obsidian:
+The engagement notebook is a **local Obsidian vault** — plain markdown files on Kali the operator
+writes directly (no plugin, no MCP, no API key):
 
-1. Install Obsidian, open (or create) your engagements vault.
-2. Settings → Community plugins → browse → install **Local REST API** → enable it.
-3. In the plugin settings, **copy the API key** and note the host/port (default `https://127.0.0.1:27124`,
-   HTTP `27123`). On a VM setup, bind it to the host-only adapter so Kali can reach it, and note
-   that address.
+1. `sudo apt install -y obsidian` (or the AppImage), then open the vault folder
+   `/home/kapi/osai/ObisidanOSAI/`.
+2. The `~/osai/notekit/` toolkit does the rest: `/osai-engage` runs `scaffold_vault.sh <lab>` to
+   create the note-set, and the 10-min heartbeat (`heartbeat.py`) keeps `_RESUME.md` + the rollups
+   in sync with yhwach.
+3. Proof screenshots come from `notekit/shot.sh` (UTC+local date/time burned into every image).
 
-Keep the API key secret — you'll pass it to the MCP via an env var (step 6), never in a file you commit.
+Nothing to keep secret here — the vault is local files; yhwach.db holds the atoms.
 
 ## 6. Register the MCP servers in Claude Code (on Kali)
 
-Claude Code is the operator. Give it three MCPs: **Yhwach** (the engine), **Obsidian** (the
-notebook), and optionally **BloodHound** (AD path reasoning).
+Claude Code is the operator. Give it **Yhwach** (the engine) and optionally **BloodHound** (AD path
+reasoning). The notebook needs no MCP — it's local files written with the file tools.
 
 ```bash
 # Yhwach — set the lab DB once via the env; then all yhwach_* tools use it
 YHWACH_DB=~/osai/current/state/yhwach.db claude mcp add yhwach -- yhwach mcp
 
-# Obsidian — use any MCP that wraps the Local REST API; pass the key + base URL via env.
-# (example shape — check your chosen server's README for exact args)
-claude mcp add obsidian \
-  -e OBSIDIAN_API_KEY=<paste-your-key> \
-  -e OBSIDIAN_BASE_URL=https://127.0.0.1:27124 \
-  -- <obsidian-mcp-command>
+# (No Obsidian MCP — the vault is local files under /home/kapi/osai/ObisidanOSAI/, and the
+#  ~/osai/notekit/ toolkit scaffolds + reconciles it.)
 
 # BloodHound (optional) — an MCP that runs your BloodHound/Cypher queries.
 # Yhwach ingests its output: yhwach ingest --kind bloodhound --host <DC> <facts.json>
@@ -216,7 +213,7 @@ yhwach report  --lab lab01 --out report.md
 ```
 
 From Claude Code, the same loop runs via the `yhwach_*` MCP tools, and Claude writes the write-up
-to Obsidian via the Obsidian MCP at every objective.
+as local files in the vault (`/home/kapi/osai/ObisidanOSAI/<lab>/`) at every objective.
 
 ## 10. Troubleshooting
 

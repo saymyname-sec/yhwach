@@ -58,9 +58,10 @@ What works today:
   host stages (`foothold → looted → pivoted → done`) via `yhwach advance`; `yhwach proof` gates
   `foothold → looted` on a flag+screenshot, and `yhwach pivot` records a Ligolo tunnel (deploying
   the pre-staged agent) to gate `looted → pivoted` on real subnet reachability
-- **Engagement notebook** — the operator writes detailed notes to an **Obsidian vault** (the
-  single source of truth) via the Obsidian MCP at every objective; Yhwach's DB stays the
-  queryable world model and never stores notes (see [persona/notebook.md](persona/notebook.md))
+- **Engagement notebook** — the operator writes detailed notes as plain files in a **local Obsidian
+  vault** (no MCP) at every objective; yhwach.db is the source of truth for atoms
+  (hosts/creds/findings/proofs), the vault for the narrative + a generated `_RESUME.md`, kept in sync
+  by a 10-min reconciliation heartbeat (see [persona/notebook.md](persona/notebook.md))
 - **Operator handoff** — `yhwach next --contract` emits persona + state + ranked candidates + commands
 - **Report** — `yhwach report` renders a Markdown engagement report
 - **Calibration harness** — YAML fixtures + golden runner + `yhwach snapshot` (a real run becomes a test)
@@ -113,9 +114,9 @@ yhwach findings --lab lab01
 yhwach report  --lab lab01 --out report.md
 ```
 
-At every objective, the operator writes the detailed write-up into the Obsidian vault via the
-Obsidian MCP — the notebook is the vault, not the DB. Run `yhwach mcp` to expose the engine to
-Claude Code on Kali as MCP tools (`pip install -e ".[mcp]"`). See [docs/deploy.md](docs/deploy.md).
+At every objective, the operator writes the detailed write-up as plain files into a local Obsidian
+vault (no MCP) — the notebook is the vault, atoms are in yhwach.db. Run `yhwach mcp` to expose the
+engine to Claude Code on Kali as MCP tools (`pip install -e ".[mcp]"`). See [docs/deploy.md](docs/deploy.md).
 
 Yhwach never auto-runs exploitation — it proposes, and the operator (you, or Claude Code
 on Kali) executes with judgment.

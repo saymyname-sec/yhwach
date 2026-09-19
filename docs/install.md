@@ -43,7 +43,7 @@ Verify:
 ```bash
 yhwach --version
 yhwach persona           # prints the operator persona in effect + its hash
-pytest -q                # 274 tests
+pytest -q                # 381 tests
 yhwach selftest          # golden fixtures
 ```
 

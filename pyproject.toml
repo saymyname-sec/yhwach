@@ -57,6 +57,8 @@ packages = ["yhwach"]
 "persona/notebook.md" = "yhwach/_notebook.md"
 "playbooks" = "yhwach/_playbooks"
 "tests/fixtures" = "yhwach/_fixtures"
+"data/cve_map.yaml" = "yhwach/_cve_map.yaml"
+"data" = "yhwach/_data"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -22,6 +22,7 @@ class ParsedService:
     product: str | None = None
     version: str | None = None
     banner: str | None = None
+    cpe: str | None = None
 
 
 @dataclass
@@ -30,6 +31,128 @@ class ParsedHost:
     hostname: str | None = None
     os_hint: str | None = None
     services: list[ParsedService] = field(default_factory=list)
+
+
+@dataclass
+class ScanCoverage:
+    """One protocol's port coverage in a single nmap run."""
+    proto: str            # tcp | udp
+    ports: str            # the range as reported: '1-65535', '1-1000', 'top-100'
+    port_count: int = 0
+    full_range: bool = False
+
+
+@dataclass
+class ScanMeta:
+    """Run-level facts about *what was scanned* — not what was found.
+
+    The world model used to be blind here: a `-p 1-1000` scan and a `-p-` scan
+    produced identical host rows, so 'enumerated' could never be checked against
+    reality. This is the missing half.
+    """
+    args: str | None = None
+    version_scan: bool = False
+    coverage: list[ScanCoverage] = field(default_factory=list)
+
+
+FULL_TCP_PORTS = 65535
+
+_ARGS_RE = re.compile(r"\bas:\s*(?P<args>nmap .+?)\s*$", re.IGNORECASE)
+_TOPPORTS_RE = re.compile(r"--top-ports\s+(\d+)")
+_PORTSPEC_RE = re.compile(r"(?:^|\s)-p\s*(?P<spec>[-\dTU:,*]+)")
+
+
+def _count_port_spec(spec: str) -> tuple[int, bool]:
+    """(port_count, is_full_range) for an nmap port spec like '1-65535' or '22,80'.
+
+    Unparseable fragments are skipped rather than guessed at — an unknown spec
+    reports what it could count, and `full_range` only ever goes True on real
+    1-65535 coverage.
+    """
+    total = 0
+    for part in spec.split(","):
+        part = part.strip().lstrip("TU:")
+        if not part:
+            continue
+        if "-" in part:
+            lo, _, hi = part.partition("-")
+            lo_i = int(lo) if lo.strip().isdigit() else 1
+            hi_i = int(hi) if hi.strip().isdigit() else FULL_TCP_PORTS
+            if hi_i >= lo_i:
+                total += hi_i - lo_i + 1
+        elif part.isdigit():
+            total += 1
+    return total, total >= FULL_TCP_PORTS
+
+
+def _meta_from_args(args: str) -> ScanMeta:
+    """Derive coverage from an nmap command line (the only source for `-oN`)."""
+    meta = ScanMeta(args=args.strip())
+    meta.version_scan = bool(re.search(r"(?:^|\s)-(?:sV|A)\b", args))
+    proto = "udp" if re.search(r"(?:^|\s)-sU\b", args) else "tcp"
+
+    top = _TOPPORTS_RE.search(args)
+    if top:
+        n = int(top.group(1))
+        meta.coverage.append(ScanCoverage(proto, f"top-{n}", n, False))
+        return meta
+    spec = _PORTSPEC_RE.search(args)
+    if spec:
+        raw = spec.group("spec")
+        if raw.strip() == "-":
+            meta.coverage.append(ScanCoverage(proto, "1-65535", FULL_TCP_PORTS, True))
+        else:
+            count, full = _count_port_spec(raw)
+            if count:
+                meta.coverage.append(ScanCoverage(proto, raw, count, full))
+        return meta
+    # No port flag at all: nmap's default is its top 1000.
+    meta.coverage.append(ScanCoverage(proto, "top-1000", 1000, False))
+    return meta
+
+
+def parse_scan_meta(text: str) -> ScanMeta:
+    """Extract run-level scan coverage from nmap XML (`-oX`) or normal (`-oN`) output.
+
+    XML is authoritative: `<scaninfo>` states the exact range per protocol, and a
+    `method="probed"` service element proves a version scan ran even when the
+    args are absent. Normal output only carries the command line, so coverage is
+    derived from the flags.
+    """
+    head = text.lstrip()[:256].lower()
+    if head.startswith("<?xml") or "<nmaprun" in head:
+        try:
+            root = ET.fromstring(text)
+        except ET.ParseError:
+            return ScanMeta()
+        args = root.get("args")
+        meta = ScanMeta(args=args)
+        meta.version_scan = bool(args and re.search(r"(?:^|\s)-(?:sV|A)\b", args))
+        if not meta.version_scan:
+            # A probed service element is proof of -sV even if args are missing.
+            meta.version_scan = any(
+                s.get("method") == "probed" for s in root.iter("service"))
+        for si in root.findall("scaninfo"):
+            proto = si.get("protocol") or "tcp"
+            services = si.get("services") or ""
+            if not services:
+                continue
+            count, full = _count_port_spec(services)
+            num = si.get("numservices")
+            if num and num.isdigit():
+                count = max(count, int(num))
+                full = full or count >= FULL_TCP_PORTS
+            meta.coverage.append(ScanCoverage(proto, services, count, full))
+        if not meta.coverage and args:
+            derived = _meta_from_args(args)
+            meta.coverage = derived.coverage
+        return meta
+
+    for line in text.splitlines()[:5]:
+        m = _ARGS_RE.search(line)
+        if m:
+            return _meta_from_args(m.group("args"))
+    return ScanMeta()
 
 
 def parse_nmap_xml(
@@ -146,13 +269,17 @@ def _parse_root(root, *, include_open_filtered: bool = False) -> list[ParsedHost
                         continue
                     proto = port.get("protocol") or "tcp"
                     service_elem = port.find("service")
-                    product = version = banner = None
+                    product = version = banner = cpe = None
                     if service_elem is not None:
                         product = service_elem.get("product") or service_elem.get("name")
                         version = service_elem.get("version")
                         banner = service_elem.get("extrainfo")
+                        # First application/OS CPE nmap emitted for the service.
+                        cpe_elem = service_elem.find("cpe")
+                        if cpe_elem is not None and cpe_elem.text:
+                            cpe = cpe_elem.text.strip()
                     host.services.append(
-                        ParsedService(int(portid), proto, product, version, banner)
+                        ParsedService(int(portid), proto, product, version, banner, cpe)
                     )
 
         hosts.append(host)
@@ -164,11 +291,18 @@ def insert_hosts(
     conn: sqlite3.Connection,
     engagement_id: int,
     hosts: list[ParsedHost],
+    meta: ScanMeta | None = None,
 ) -> tuple[int, int]:
     """Insert parsed hosts + services into the DB.
 
     Idempotent per (engagement, ip) for hosts and per (host, port, proto) for services.
     Returns (hosts_touched, services_touched).
+
+    With `meta` (from `parse_scan_meta`), the run's scan coverage — the port
+    range it actually covered and whether it carried `-sV` — is recorded against
+    every host it touched, which is what makes under-enumeration queryable
+    (`yhwach gaps`). Coverage is a property of the *run*, so it applies to each
+    host in that run's output.
     """
     now = _now_utc()
     hosts_touched = 0
@@ -207,17 +341,57 @@ def insert_hosts(
 
         for svc in parsed.services:
             conn.execute(
-                "INSERT INTO service (host_id, port, proto, product, version, banner, "
-                "discovered_at) VALUES (?, ?, ?, ?, ?, ?, ?) "
+                "INSERT INTO service (host_id, port, proto, product, version, cpe, banner, "
+                "discovered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT(host_id, port, proto) DO UPDATE SET "
                 "product = COALESCE(excluded.product, service.product), "
                 "version = COALESCE(excluded.version, service.version), "
+                "cpe     = COALESCE(excluded.cpe,     service.cpe), "
                 "banner  = COALESCE(excluded.banner,  service.banner)",
-                (host_id, svc.port, svc.proto, svc.product, svc.version, svc.banner, now),
+                (host_id, svc.port, svc.proto, svc.product, svc.version, svc.cpe, svc.banner, now),
             )
             services_touched += 1
+            # Mirror a versioned service into the software inventory so the
+            # version -> CVE step has one place to look (listening + post-foothold).
+            if svc.product and svc.version:
+                svc_id = conn.execute(
+                    "SELECT id FROM service WHERE host_id = ? AND port = ? AND proto = ?",
+                    (host_id, svc.port, svc.proto),
+                ).fetchone()
+                _upsert_software(conn, host_id,
+                                 service_id=svc_id["id"] if svc_id else None,
+                                 name=svc.product, version=svc.version, cpe=svc.cpe, now=now)
+
+        if meta is not None:
+            from yhwach.db import record_coverage
+
+            for cov in meta.coverage:
+                record_coverage(
+                    conn, host_id, proto=cov.proto, ports=cov.ports,
+                    port_count=cov.port_count, full_range=cov.full_range,
+                    version_scan=meta.version_scan, source=meta.args,
+                )
 
     return hosts_touched, services_touched
+
+
+def _upsert_software(conn, host_id, *, service_id, name, version, cpe, now):
+    """Idempotent software-row upsert (host+name+version). Kept local to avoid a
+    circular import of yhwach.db; mirrors db.add_software's dedupe key."""
+    existing = conn.execute(
+        "SELECT id FROM software WHERE host_id = ? AND name = ? AND version IS ?",
+        (host_id, name, version),
+    ).fetchone()
+    if existing is not None:
+        conn.execute("UPDATE software SET cpe = COALESCE(?, cpe), "
+                     "service_id = COALESCE(?, service_id), updated_at = ? WHERE id = ?",
+                     (cpe, service_id, now, existing["id"]))
+        return
+    conn.execute(
+        "INSERT INTO software (host_id, service_id, name, version, cpe, kind, source, "
+        "discovered_at) VALUES (?, ?, ?, ?, ?, 'service', 'nmap', ?)",
+        (host_id, service_id, name, version, cpe, now),
+    )
 
 
 def _now_utc() -> str:

@@ -7,12 +7,19 @@
 Yhwach is the source of truth (a SQLite world model), not ad-hoc files. It never calls a model —
 **you are the operator it hands off to.** Each turn, the shape of work is:
 
-**`yhwach_next` → reason → act → fold the result back → `yhwach_plan` → repeat.**
+**`yhwach_next` → reason → act → fold the result back → `yhwach_outcome` → `yhwach_plan` → repeat.**
 
 `yhwach_next` returns, in one compact block: the **operator persona** (your reasoning frame — follow
 it), the **P0 LEADS** (high-value cred/DA paths — do these first), and the **EV-ranked candidates**
 with concrete commands. That block *is* your Autonomy Contract frame — don't re-derive it.
 
+- **Lost your context? `yhwach_recall` first.** After a `/compact`, a new session, or a handover, it
+  replays the engagement in a few hundred tokens: state, what you already TRIED (wins **and** dead
+  ends), open P0 leads, enum gaps, next moves. Your chat history is not the record — the DB is.
+- **Report every resolved move with `yhwach_outcome`** (`success|fail|blocked|partial` + one line of
+  why). Success consumes the technique; a fail/blocked retires the task, decays its EV and pins it to
+  the DEAD ENDS block of every later handoff. An unrecorded attempt is one you will repeat.
+- Once the persona is in your context, take later handoffs cheap: `yhwach_next(persona=false)`.
 - The `yhwach` MCP resolves the DB from `YHWACH_DB=~/osai/current/state/yhwach.db` (set in the MCP env).
 - Start/resume entirely via MCP: **`yhwach_engage`** (lab + scope [+ domain/dc]) then `yhwach_status`.
   Just tell Claude the lab + IPs in plain English — it calls the tools itself; no bash needed.
@@ -20,20 +27,24 @@ with concrete commands. That block *is* your Autonomy Contract frame — don't r
 
 ## The loop (Yhwach-driven)
 ```
+yhwach_recall                       # resuming / after a compaction? start here
 yhwach_status                       # where are we? (resume-safe)
 yhwach_enum <target>                # nmap via HexStrike -> ingested  (or ingest a scan file)
+yhwach_gaps                         # any host not full-ported / no -sV / no UDP? fix it NOW
 yhwach_probe                        # detect AI + traditional surfaces
 yhwach_plan                         # rank tasks from the world model
 loop:
-  yhwach_next                       # P0 leads + persona + ranked candidates + commands
+  yhwach_next                       # P0 leads + dead ends + persona + ranked candidates + commands
     → OBSERVE/ORIENT/DECIDE/ACT/ASSESS; pick the top move, say why
+    → never re-propose anything under DEAD ENDS
   execute it → HexStrike MCP · a /osai-* skill · the metasploit MCP
   fold results back into Yhwach:
     yhwach_ingest <file> --kind nmap|linpeas|winpeas|bloodhound|certipy --host <ip>
     yhwach_run --task N --go [--hexstrike-url ...]   # read-only auto-runs; findings+tags extracted
     yhwach_cred · yhwach_proof · yhwach_pivot · yhwach_advance · yhwach_consume
+  yhwach_outcome --task N --result success|fail|blocked|partial --why '<one line>'   # ALWAYS
   write the local vault note (/home/kapi/osai/ObisidanOSAI/<lab>/) at this objective — full detail
-  yhwach_plan                       # re-rank from the advanced world model
+  yhwach_plan                       # re-rank (failed moves are decayed and dropped)
 ```
 Every pivot opens unscanned hosts → `yhwach_enum` the new subnet → straight back into the loop.
 
@@ -165,8 +176,11 @@ command** — a repo search takes 20s; a wrong command wastes exam minutes.
   ZERO model tokens. `grep -c` first; never read a >~200-line file whole. Feed structured output to
   `yhwach_ingest`, not the chat.
 - **Context is disposable; Yhwach's DB + the Obsidian vault are the memory.** When context gets heavy →
-  **`/clear`**, then **`yhwach_status` + `yhwach_next`** rehydrate you in a few hundred tokens. Clear
-  aggressively; continuity comes from Yhwach, not the window.
+  **`/clear`**, then **`yhwach_recall`** rehydrates you in a few hundred tokens — state, wins, dead
+  ends, open leads, enum gaps, next moves — and `yhwach_next(persona=false)` gives you the ranked
+  candidates without re-sending the 7 KB frame. Clear aggressively; continuity comes from Yhwach, not
+  the window. The one thing `/clear` *can* destroy is the memory of a failed attempt — which is why
+  `yhwach_outcome` is not optional.
 
 ## Scope — `~/osai/current/state/scope.txt`, one address/CIDR per line, source of truth
 Nothing outside it gets touched. `yhwach engage --scope` validates it; `yhwach enum` refuses an
@@ -176,8 +190,9 @@ out-of-scope target before any traffic. HexStrike and Metasploit honor scope.txt
 - Scans → `~/osai/current/recon/<host>-<tool>.txt` · loot/exfil → `loot/` · screenshots →
   `screenshots/` · scripts/PoCs → `scripts/`.
 - **World model (authoritative):** Yhwach's SQLite DB (`state/yhwach.db`) — hosts, services, surfaces,
-  findings, creds, tasks, tunnels, proofs. Query with `yhwach_status`/`yhwach_report`, not hand-kept files.
-- **Write-ups:** a LOCAL Obsidian vault (`/home/kapi/osai/ObisidanOSAI/<lab>/`, no MCP) — prose + `_RESUME.md`; atoms live in yhwach.db.
+  findings, creds, tasks, tunnels, proofs, **attempts** and **scan coverage**. Query with
+  `yhwach_recall`/`yhwach_status`/`yhwach_report`, not hand-kept files.
+- **Write-ups:** a LOCAL Obsidian vault (`/home/kapi/osai/ObisidanOSAI/<lab>/`, no MCP) — prose + `_RESUME.md`; atoms live in yhwach.db. `yhwach export-notes` scaffolds the DB-derived tables as local files.
 - `scope.txt` stays local. The engagement tree stays on LOCAL disk (hgfs has no symlinks); never write it to the share.
 
 ## OPSEC (NOT scored — practice only)

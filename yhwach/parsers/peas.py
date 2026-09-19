@@ -21,6 +21,51 @@ _GTFO_SUID = {
 }
 
 
+_CHECKPOINT_FILE_RE = re.compile(r"(?i)(/[\w./-]*\.(?:pt|pth|ckpt)\b|[\w./-]*pytorch_model\.bin)")
+_TRAINING_FILE_RE = re.compile(
+    r"(?i)(adapter_config\.json|adapter_model[\w.]*|trainer_state\.json|training_args[\w.]*"
+    r"|/[\w./-]*(?:datasets?|fine[_-]?tun\w*)/[\w./-]*)")
+# linPEAS marks what a low-priv user can write; a writable checkpoint is the
+# difference between "interesting" and "RCE on the next model load".
+_WRITABLE_RE = re.compile(r"(?i)writable|rwx|[ -]rw.rw|\bw\b")
+
+
+def _model_artifacts(text: str) -> list[ExtractedFinding]:
+    """Checkpoint / training artifacts in a PEAS file listing -> chaining tags.
+
+    One pass over the output; stops as soon as both chains have a witness."""
+    out: list[ExtractedFinding] = []
+    ckpt: tuple[str, bool] | None = None
+    train: str | None = None
+
+    for line in text.splitlines():
+        if ckpt is None:
+            m = _CHECKPOINT_FILE_RE.search(line)
+            if m:
+                ckpt = (m.group(1), bool(_WRITABLE_RE.search(line)))
+        if train is None:
+            m = _TRAINING_FILE_RE.search(line)
+            if m:
+                train = m.group(1)
+        if ckpt is not None and train is not None:
+            break
+
+    if ckpt is not None:
+        path, writable = ckpt
+        out.append(ExtractedFinding(
+            "CWE-502", "Pickle-backed model checkpoint on host", "high" if writable else "medium",
+            f"{path[:90]}"
+            + (" (writable — overwrite it and the next torch.load() is RCE)" if writable
+               else " — check write access; torch.load() unpickles it on the model server"),
+            tag="model_checkpoint_load"))
+    if train is not None:
+        out.append(ExtractedFinding(
+            "LLM03", "Training / fine-tuning artifacts on host", "medium",
+            f"{train[:90]} — dataset, LoRA adapter or tokenizer poisoning against the next run",
+            tag="training_pipeline"))
+    return out
+
+
 def parse_linpeas(text: str) -> list[ExtractedFinding]:
     out: list[ExtractedFinding] = []
 
@@ -98,6 +143,13 @@ def parse_linpeas(text: str) -> list[ExtractedFinding]:
             "CWE-1104", "Python requirements file present", "low",
             "audit requirements.txt for typosquats / unpinned internal packages",
             tag="python_requirements"))
+
+    # ML artifacts on disk. A .pt/.pth/.ckpt checkpoint is a pickle archive: if
+    # a model server torch.load()s it, overwriting the file is RCE as that
+    # service (the poisoned-checkpoint chain). Training/LoRA artifacts open the
+    # pipeline-poisoning chain instead. .safetensors is deliberately excluded —
+    # not being a pickle is the whole point of that format.
+    out += _model_artifacts(text)
 
     # A writable MCP client config -> CVE-2025-6514 mcp-remote OAuth RCE.
     for line in text.splitlines():
@@ -202,3 +254,24 @@ def parse_peas(text: str, kind: str) -> list[ExtractedFinding]:
     if kind == "winpeas":
         return parse_winpeas(text)
     raise ValueError(f"unknown peas kind: {kind}")
+
+
+# name, version, software-kind — high-signal versioned components worth CVE-matching.
+def parse_peas_software(text: str, kind: str) -> list[tuple[str, str, str]]:
+    """Extract versioned software from PEAS output for the CVE pipeline.
+
+    Deliberately narrow: kernel + sudo on Linux (both classic local-root CVE
+    sources), Windows build on Windows. The operator adds the rest by hand."""
+    out: list[tuple[str, str, str]] = []
+    if kind == "linpeas":
+        m = re.search(r"Linux version (\d+\.\d+\.\d+[\w.\-]*)", text)
+        if m:
+            out.append(("Linux kernel", m.group(1), "kernel"))
+        m = re.search(r"[Ss]udo version (\d+\.\d+\.\d+[\w.\-]*)", text)
+        if m:
+            out.append(("sudo", m.group(1), "package"))
+    elif kind == "winpeas":
+        m = re.search(r"(Windows (?:Server )?\d{4}[\w ]*?)\s*(?:Build|\().*?(\d{4,5})", text)
+        if m:
+            out.append((m.group(1).strip(), m.group(2), "kernel"))
+    return out

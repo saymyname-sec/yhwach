@@ -217,3 +217,98 @@ def test_next_context_inlines_vault(tmp_db: Path) -> None:
     ctx = tool_next(tmp_db, "m")
     assert "## VAULT" in ctx
     assert "svc_portal" in ctx and "P0rt@l!Svc#2025" in ctx
+
+
+# --- operator memory + coverage (MCP parity) --------------------------------
+
+def test_outcome_fail_removes_the_task_and_marks_a_dead_end(tmp_db: Path) -> None:
+    from yhwach.mcp_tools import tool_outcome, tool_recall
+
+    _seed(tmp_db)
+    tool_plan(tmp_db, "m")
+    with yhdb.transaction(tmp_db) as conn:
+        tid = int(conn.execute("SELECT id FROM task LIMIT 1").fetchone()["id"])
+    out = tool_outcome(tmp_db, "m", "fail", task_id=tid, why="endpoint 404s")
+    assert "fail" in out and "abandoned" in out
+    assert "no pending tasks" in tool_next(tmp_db, "m").lower() or \
+           "RANKED CANDIDATES (0)" in tool_next(tmp_db, "m")
+    recall = tool_recall(tmp_db, "m")
+    assert "DEAD ENDS" in recall and "endpoint 404s" in recall
+
+
+def test_outcome_success_consumes_the_technique(tmp_db: Path) -> None:
+    from yhwach.mcp_tools import tool_outcome
+
+    _seed(tmp_db)
+    tool_plan(tmp_db, "m")
+    out = tool_outcome(tmp_db, "m", "success", rule_id="ollama_unauth_api",
+                       host="10.0.0.5", why="model list leaked a key")
+    assert "consumed" in out
+    assert "matched 0" in tool_plan(tmp_db, "m")
+
+
+def test_recall_is_compact_and_persona_free(tmp_db: Path) -> None:
+    from yhwach.mcp_tools import tool_recall
+
+    _seed(tmp_db)
+    out = tool_recall(tmp_db, "m")
+    assert "YHWACH RECALL" in out
+    assert "Silence is not a valid state" not in out   # no persona body
+    assert len(out) < 4000
+
+
+def test_next_persona_false_swaps_the_body_for_a_digest(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    full = tool_next(tmp_db, "m")
+    cheap = tool_next(tmp_db, "m", persona=False)
+    assert "Silence is not a valid state" in full      # a persona-body marker
+    assert "Silence is not a valid state" not in cheap
+    assert "persona omitted — sha256:" in cheap
+    assert len(cheap) < len(full) / 2
+    assert "## RANKED CANDIDATES" in cheap     # the state slice is untouched
+
+
+def test_next_json_format_is_parseable(tmp_db: Path) -> None:
+    import json
+
+    _seed(tmp_db)
+    tool_plan(tmp_db, "m")
+    data = json.loads(tool_next(tmp_db, "m", fmt="json"))
+    assert data["engagement"]["lab"] == "m"
+    assert len(data["persona_sha256"]) == 12
+    assert data["candidates"][0]["rule_id"] == "ollama_unauth_api"
+    assert data["candidates"][0]["commands"][0]["cmd"]
+
+
+def test_gaps_tool_reports_under_enumeration(tmp_db: Path) -> None:
+    from yhwach.mcp_tools import tool_gaps
+
+    _seed(tmp_db)
+    out = tool_gaps(tmp_db, "m")
+    assert "10.0.0.5" in out and "no scan coverage recorded" in out
+
+
+def test_ingest_reports_coverage_and_gaps(tmp_db: Path, tmp_path: Path) -> None:
+    _seed(tmp_db)
+    xml = tmp_path / "scan.xml"
+    xml.write_text(
+        '<?xml version="1.0"?><nmaprun args="nmap -p- -sV -oX - 10.0.0.5">'
+        '<scaninfo type="syn" protocol="tcp" numservices="65535" services="1-65535"/>'
+        '<host><status state="up"/><address addr="10.0.0.5" addrtype="ipv4"/>'
+        '<ports><port protocol="tcp" portid="22"><state state="open"/>'
+        '<service name="ssh"/></port></ports></host></nmaprun>', encoding="utf-8")
+    out = tool_ingest(tmp_db, "m", str(xml))
+    assert "coverage tcp 1-65535" in out
+    assert "under-enumerated" in out          # UDP sweep still missing
+
+
+def test_advance_to_enumerated_warns_about_gaps(tmp_db: Path) -> None:
+    _seed(tmp_db)
+    out = tool_advance(tmp_db, "m", "10.0.0.5", "enumerated")
+    assert "enumerated" in out
+    assert "NOT fully enumerated" in out
+
+
+def test_new_tools_are_registered(tmp_db: Path) -> None:
+    names = {name for name, _fn, _desc in TOOL_SPECS}
+    assert {"yhwach_recall", "yhwach_outcome", "yhwach_gaps"} <= names

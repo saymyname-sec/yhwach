@@ -18,7 +18,7 @@ def _now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _event_summary(kind: str, payload_json: str | None) -> str:
+def event_summary(kind: str, payload_json: str | None) -> str:
     """One-line, human summary of an event's payload for the timeline."""
     try:
         p = json.loads(payload_json) if payload_json else {}
@@ -40,6 +40,9 @@ def _event_summary(kind: str, payload_json: str | None) -> str:
         return f"{p.get('host', '?')} (screenshot)"
     if kind == "tunnel":
         return f"{p.get('subnet', '?')} via {p.get('via', '?')}"
+    if kind == "attempt":
+        base = f"{p.get('rule', '?')} @ {p.get('host', '-')} -> {p.get('result', '?')}"
+        return base + (f" ({p['reason']})" if p.get("reason") else "")
     return ", ".join(f"{k}={v}" for k, v in list(p.items())[:3])[:80]
 
 
@@ -189,6 +192,27 @@ def build_report(conn: sqlite3.Connection, engagement_id: int) -> str:
             out.append(f"| {t['subnet']} | {t['via_ip'] or '-'} | {t['kind']} |")
         out.append("")
 
+    # --- Attempts (the ledger: what was tried, and what came of it) ---
+    # A report that only lists what worked reads as luck. The dead ends are the
+    # methodology — and they are also what a re-test needs in order not to
+    # repeat the engagement.
+    attempts = conn.execute(
+        "SELECT a.attempted_at, a.playbook_rule_id AS rule_id, a.result, a.reason, "
+        "h.ip AS ip FROM attempt a LEFT JOIN host h ON h.id = a.host_id "
+        "WHERE a.engagement_id = ? ORDER BY a.id",
+        (engagement_id,),
+    ).fetchall()
+    if attempts:
+        landed = sum(1 for a in attempts if a["result"] == "success")
+        out.append(f"## Attempts ({len(attempts)}; {landed} landed)")
+        out.append("")
+        out.append("| Time (UTC) | Host | Technique | Result | Why |")
+        out.append("|---|---|---|---|---|")
+        for a in attempts:
+            out.append(f"| {a['attempted_at']} | {a['ip'] or '-'} | {a['rule_id'] or '-'} | "
+                       f"{a['result']} | {a['reason'] or ''} |")
+        out.append("")
+
     # --- Timeline (from the append-only event log) ---
     events = conn.execute(
         "SELECT ts, kind, payload_json FROM event WHERE engagement_id = ? "
@@ -201,7 +225,7 @@ def build_report(conn: sqlite3.Connection, engagement_id: int) -> str:
         out.append("| Time (UTC) | Event | Detail |")
         out.append("|---|---|---|")
         for e in events:
-            out.append(f"| {e['ts']} | {e['kind']} | {_event_summary(e['kind'], e['payload_json'])} |")
+            out.append(f"| {e['ts']} | {e['kind']} | {event_summary(e['kind'], e['payload_json'])} |")
         out.append("")
 
     out.append("---")

@@ -859,6 +859,28 @@ def consume(technique: str, lab: str, host_ip: str | None, db_path: str | None) 
 
 @main.command()
 @click.option("--lab", required=True, help="Lab name.")
+@click.option("--section", default=None,
+              type=click.Choice(["reach", "hold", "surfaces", "unlocks", "unexplored", "objectives"]),
+              help="Only this section of the brief.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def brief(lab: str, section: str | None, db_path: str | None) -> None:
+    """The AI-legible engagement map: REACH / HOLD / SURFACES / UNLOCKS / UNEXPLORED /
+    OBJECTIVES. Read this to reason over the memory; yhwach decides nothing."""
+    from yhwach.brief import build_brief
+    path = _db_path(db_path)
+    if not path.exists():
+        click.echo(f"[!] DB not found at {path}.", err=True)
+        sys.exit(2)
+    with yhdb.transaction(path) as conn:
+        eng_id = yhdb.engagement_id_for(conn, lab)
+        if eng_id is None:
+            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
+            sys.exit(2)
+        click.echo(build_brief(conn, eng_id, section=section))
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
 def findings(lab: str, db_path: str | None) -> None:
     """List recorded findings, most severe first."""

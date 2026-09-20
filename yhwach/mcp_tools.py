@@ -150,6 +150,15 @@ def tool_gaps(db_path: Path | str, lab: str, host: str | None = None) -> str:
                       *render_gaps(found)])
 
 
+def tool_brief(db_path: Path | str, lab: str, section: str | None = None) -> str:
+    """The AI-legible engagement map (REACH/HOLD/SURFACES/UNLOCKS/UNEXPLORED/OBJECTIVES).
+    Read this to reason over the memory; yhwach decides nothing."""
+    from yhwach.brief import build_brief
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        return build_brief(conn, eid, section=section)
+
+
 def tool_findings(db_path: Path | str, lab: str) -> str:
     order = ("CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
              "WHEN 'medium' THEN 2 ELSE 3 END")
@@ -596,6 +605,9 @@ TOOL_SPECS = [
     ("yhwach_status", tool_status, "Engagement scoreboard: hosts by stage, services, tasks, vault."),
     ("yhwach_plan", tool_plan, "Match playbooks against the world model; populate the task queue."),
     ("yhwach_next", tool_next, "The operator context block (persona + state + ranked candidates + commands)."),
+    ("yhwach_brief", tool_brief,
+     "The AI-legible engagement map: REACH / HOLD / SURFACES / UNLOCKS / UNEXPLORED / OBJECTIVES. "
+     "Read this to reason over the memory and find the path; yhwach decides nothing."),
     ("yhwach_findings", tool_findings, "Recorded findings, most severe first."),
     ("yhwach_report", tool_report, "Full Markdown engagement report."),
     ("yhwach_spray", tool_spray, "Credential-spray commands (vault creds x sprayable surfaces)."),

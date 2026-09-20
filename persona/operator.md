@@ -63,11 +63,15 @@ creds on another attack path first, then come back.** Read `yhwach brief` to see
 
 ## Notebook — the local Obsidian vault (no MCP)
 `/home/kapi/osai/ObisidanOSAI/<lab>/`, plain files. yhwach.db holds the atoms (record them FIRST);
-the vault holds the narrative.
-- **Every flag you retrieve gets its own note with the exact, reproducible "how to get it" chain** —
-  every command + payload, copy-paste, start to flag. That is the deliverable.
+the vault holds the DETAILED narrative — a reader reproduces every step from the notes alone.
+Note set: `index` · `overview` · `attack-chain` · `network-map` · `credentials` · `next-steps` ·
+`exhausted-approaches` · `continuation-prompt` · `poc-recreation` · `checkpoints/<ts>` ·
+`findings/<F-ID>` · `hosts/<host>`. Full schema + per-note descriptions → `notebook.md`.
+- **`poc-recreation.md` is THE deliverable** — every flag gets the exact, reproducible "how to get it"
+  chain: every command + payload + script, copy-paste, start to flag.
 - Proof screenshots are the operator's (Kapi's) job — do not capture or track them.
-- `_RESUME.md` is a generated `yhwach brief` snapshot; read it first on resume, write prose elsewhere.
+- `continuation-prompt.md` is a generated `yhwach brief` snapshot; read it first on resume, write prose
+  elsewhere. Drop a `checkpoints/<YYYY-MM-DD_HHMM>.md` snapshot each time you clear a milestone.
 
 ## Silence is not a valid state
 If you are unsure what to do, read `yhwach brief` (and `yhwach gaps`) — the frontier and the gated

@@ -1,11 +1,11 @@
 """Yhwach CLI.
 
-The engagement driver: engage / ingest / enum / probe / plan / next / run,
-post-foothold (advance / cred / creds / spray / consume), findings / report,
+The engagement driver: engage / ingest / enum / probe / brief, post-foothold
+(advance / cred / creds), findings / report / gaps / path / recon / vulns,
 and the MCP server (mcp). See `cli/README.md` for the full command reference.
 
-Notes are not a CLI concern: the engagement notebook is the Obsidian vault,
-written by the operator via the Obsidian MCP (see persona/notebook.md).
+Notes are not a CLI concern: the engagement notebook is a LOCAL Obsidian vault,
+written with the file tools (no MCP) — see persona/notebook.md.
 
 DB location resolution:
   1. --db flag on the subcommand
@@ -365,8 +365,8 @@ def advance(host_ip: str, stage: str, lab: str, force: bool, db_path: str | None
             click.echo(f"[!] {host_ip} is NOT fully enumerated: {warn_gaps[0].summary}", err=True)
             for g in warn_gaps[0].gaps:
                 click.echo(f"      $ {g.fix}", err=True)
-        click.echo(f"[note] objective reached — write the {host_ip} note in the Obsidian vault "
-                   "now (via the Obsidian MCP): full detail per persona/notebook.md.")
+        click.echo(f"[note] objective reached — write hosts/{host_ip}.md in the local vault "
+                   "now (file tools, no MCP): full detail per persona/notebook.md.")
     else:
         click.echo(f"[!] {msg}", err=True)
         sys.exit(1)

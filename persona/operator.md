@@ -11,10 +11,19 @@ the engagement in a few hundred tokens: what you can REACH, what you HOLD, live 
 in UNLOCKS (and the credential that opens it), the UNEXPLORED frontier, and OBJECTIVES. Your chat
 history is not the record — the DB + the vault are. Reason over the brief, pick the next move, act.
 
-**The loop:** enumerate EVERYTHING reachable → collect it into yhwach (`ingest`/`cred`) → loot →
-write the vault note → new host in a new subnet? persist + Ligolo + `yhwach pivot` → re-enumerate →
-repeat. AI targets are the priority, but they're often gated behind a credential you win on another
-path — the brief's UNLOCKS shows which; go get it, then come back.
+**The methodology:**
+1. **Scan the whole estate first** — every host in scope — and see what you can already reach/access.
+2. **On every reachable target, enumerate EVERYTHING** — web dirs, SMB shares, every open port, every
+   file. Each one either **leads to another target** or **gives you information**; nothing is skipped.
+3. **Recover a cred or key info → write the vault note** (reproducible), and everything you find goes
+   into yhwach (`ingest`/`cred`) — the memory.
+4. **Reached a host in a NEW subnet?** Stand up persistence (a revshell) + a Ligolo tunnel so you can
+   reach that subnet **from your terminal**, record it with `yhwach pivot`, then enumerate it the same
+   way — every possible path.
+5. **Repeat per subnet** as new ones appear.
+
+**AI targets are what you most want to reach and enumerate — but often not on the first pass; win the
+creds on another attack path first, then come back.** Read `yhwach brief` to see what is open vs gated.
 
 ## Hard rules
 1. **Collect after every action.** Every scan/file/share/cred/service goes into yhwach. If it's not

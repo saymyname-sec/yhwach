@@ -10,19 +10,13 @@ regression. A rule change that would have mis-ranked a past scenario fails CI.
 """
 from __future__ import annotations
 
-import contextlib
 import json
-import os
-import tempfile
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
 
 from yhwach import db as yhdb
-from yhwach.planner import match_rules, top_tasks
-from yhwach.playbooks import Rule, default_playbook_dir, load_rules
 
 
 def _now() -> str:
@@ -131,70 +125,6 @@ def snapshot_world_model(conn, engagement_id: int) -> dict:
             "hosts": hosts_out,
         },
     }
-
-
-@dataclass
-class EvalResult:
-    name: str
-    passed: bool
-    failures: list[str] = field(default_factory=list)
-    top_actual: str | None = None
-
-
-def evaluate_fixture(
-    conn,
-    engagement_id: int,
-    expected: dict,
-    rules: list[Rule],
-    *,
-    name: str = "?",
-) -> EvalResult:
-    """Run the planner and check ranked output against golden expectations."""
-    match_rules(conn, engagement_id, rules)
-    tasks = top_tasks(conn, engagement_id, limit=50)
-    task_rules = [t["playbook_rule_id"] for t in tasks]
-    actual_top = task_rules[0] if task_rules else None
-    failures: list[str] = []
-
-    expected = expected or {}
-    top = expected.get("top_hypothesis") or {}
-    top_rid = top.get("playbook_rule_id")
-    if top_rid and actual_top != top_rid:
-        failures.append(f"top_hypothesis expected '{top_rid}', got '{actual_top}'")
-
-    want_auto = expected.get("autonomy")
-    if want_auto and tasks and tasks[0]["autonomy"] != want_auto:
-        failures.append(f"top autonomy expected '{want_auto}', got '{tasks[0]['autonomy']}'")
-
-    for rid in expected.get("must_include_hypotheses", []):
-        if rid not in task_rules:
-            failures.append(f"missing expected hypothesis '{rid}'")
-
-    for rid in expected.get("must_not_include", []):
-        if rid in task_rules:
-            failures.append(f"forbidden hypothesis present '{rid}'")
-
-    return EvalResult(name=name, passed=not failures, failures=failures, top_actual=actual_top)
-
-
-def run_fixture_file(path: Path | str, *, rules: list[Rule] | None = None) -> EvalResult:
-    """Load a fixture, seed a fresh temp DB, evaluate. Self-contained."""
-    if rules is None:
-        rules = load_rules(default_playbook_dir())
-    fixture = load_fixture(path)
-    name = fixture.get("name", Path(path).stem)
-
-    fd, tmp = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    try:
-        yhdb.init(tmp, if_exists="replace")
-        with yhdb.transaction(tmp) as conn:
-            eng_id = seed_world_model(conn, fixture)
-            return evaluate_fixture(conn, eng_id, fixture.get("expected", {}), rules, name=name)
-    finally:
-        for p in (tmp, tmp + "-wal", tmp + "-shm"):
-            with contextlib.suppress(OSError):
-                os.unlink(p)
 
 
 def default_fixtures_dir() -> Path:

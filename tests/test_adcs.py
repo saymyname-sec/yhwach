@@ -4,13 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from click.testing import CliRunner
-
 from yhwach import db as yhdb
-from yhwach.cli import main
 from yhwach.parsers.adcs import parse_certipy
-from yhwach.planner import match_rules, top_tasks
-from yhwach.playbooks import default_playbook_dir, load_rules
 
 _VULN = json.dumps({"Certificate Templates": {"0": {
     "Template Name": "VulnUser", "Enabled": True,
@@ -42,15 +37,3 @@ def _seed_ca(tmp_db: Path) -> int:
     return eng
 
 
-def test_certipy_ingest_chains_to_adcs_abuse(tmp_db: Path, tmp_path: Path) -> None:
-    eng = _seed_ca(tmp_db)
-    p = tmp_path / "certipy.json"
-    p.write_text(_VULN)
-    r = CliRunner().invoke(main, ["ingest", str(p), "--lab", "adcs", "--kind", "certipy",
-                                  "--host", "10.0.0.10", "--db", str(tmp_db)])
-    assert r.exit_code == 0 and "adcs_vuln" in r.output
-    rules = load_rules(default_playbook_dir())
-    with yhdb.transaction(tmp_db) as conn:
-        match_rules(conn, eng, rules)
-        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
-    assert "adcs_esc_abuse" in ids

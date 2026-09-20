@@ -25,7 +25,6 @@ from yhwach import __version__
 from yhwach import db as yhdb
 from yhwach.coverage import enum_gaps, render_gaps
 from yhwach.engine import artifact_dir as _artifact_dir
-from yhwach.engine import execute_task
 from yhwach.parsers.nmap import insert_hosts, parse_nmap
 from yhwach.probes import PROBES_BY_PORT, new_session, run_probes
 
@@ -236,11 +235,9 @@ def status(lab: str, db_path: str | None) -> None:
             "JOIN host h ON h.id = s.host_id WHERE h.engagement_id = ?",
             (eng_id,),
         ).fetchone()["n"]
-        task_counts = conn.execute(
-            "SELECT status, COUNT(*) AS n FROM task "
-            "WHERE engagement_id = ? GROUP BY status",
-            (eng_id,),
-        ).fetchall()
+        vault_total = conn.execute(
+            "SELECT COUNT(*) AS n FROM credential WHERE engagement_id = ?", (eng_id,),
+        ).fetchone()["n"]
 
     click.echo(f"== Engagement '{lab}' (id={eng_id}) ==")
     click.echo("Hosts by stage:")
@@ -248,12 +245,8 @@ def status(lab: str, db_path: str | None) -> None:
         click.echo("  (none)")
     for row in stage_counts:
         click.echo(f"  {row['stage']:<15} {row['n']}")
-    click.echo(f"Services: {service_total}")
-    click.echo("Tasks:")
-    if not task_counts:
-        click.echo("  (none)")
-    for row in task_counts:
-        click.echo(f"  {row['status']:<15} {row['n']}")
+    click.echo(f"Services: {service_total}   Vault: {vault_total}")
+    click.echo("(read `yhwach brief` to reason over the full map)")
 
 
 @main.command()
@@ -340,228 +333,6 @@ def enum(lab: str, target: str, ports: str | None, hexstrike_url: str | None,
 
 
 @main.command()
-@click.option("--lab", required=True, help="Lab name (must exist).")
-@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def plan(lab: str, db_path: str | None) -> None:
-    """Match playbook rules against the world model; populate the task queue.
-
-    Deterministic — no LLM. Reads playbooks/*.yaml, matches each rule's `when`
-    clause against current surfaces, and upserts an EV-scored task per match.
-    """
-    from yhwach.planner import match_rules
-    from yhwach.playbooks import default_playbook_dir, load_rules
-
-    path = _db_path(db_path)
-    if not path.exists():
-        click.echo(f"[!] DB not found at {path}; run `yhwach engage` first.", err=True)
-        sys.exit(2)
-
-    rules = load_rules(default_playbook_dir())
-
-    with yhdb.transaction(path) as conn:
-        eng_id = yhdb.engagement_id_for(conn, lab)
-        if eng_id is None:
-            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
-            sys.exit(2)
-        report = match_rules(conn, eng_id, rules)
-
-    click.echo(f"[+] Rules loaded: {len(rules)}")
-    click.echo(f"[+] Rules matched: {report.rules_matched}")
-    click.echo(f"[+] Tasks: {report.tasks_created} new, {report.tasks_updated} updated")
-    if report.rules_skipped_consumed:
-        click.echo("[i] Skipped (technique already consumed): "
-                   + ", ".join(report.rules_skipped_consumed))
-    if report.surfaces_filtered_denylist:
-        click.echo(f"[i] Filtered {report.surfaces_filtered_denylist} surface(s) on "
-                   "denylisted (dev-artifact) hosts")
-    if report.rules_skipped_unsupported:
-        click.echo(
-            "[i] Skipped (unsupported when-keys, land in a later phase): "
-            + ", ".join(report.rules_skipped_unsupported)
-        )
-
-
-@main.command("next")
-@click.option("--lab", required=True, help="Lab name.")
-@click.option("--limit", default=5, show_default=True, type=int,
-              help="How many top tasks to show.")
-@click.option("--host", "host_ip", default=None, help="Focus on one host IP.")
-@click.option("--contract", is_flag=True, default=False,
-              help="Emit the full operator context block (persona + state + "
-                   "candidates) for Claude Code to reason over into an Autonomy Contract.")
-@click.option("--no-persona", "no_persona", is_flag=True, default=False,
-              help="Cheap turn: with --contract, send the persona's sha256 instead of its "
-                   "body. Use once the frame is already in the operator's context.")
-@click.option("--json", "as_json", is_flag=True, default=False,
-              help="Emit the handoff as JSON (implies --contract; persona by digest).")
-@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def next_cmd(lab: str, limit: int, host_ip: str | None, contract: bool,
-             no_persona: bool, as_json: bool, db_path: str | None) -> None:
-    """Show the top EV-ranked pending tasks, or (--contract) the operator context.
-
-    Default: a compact ranked list. With --contract: the full persona + state +
-    candidate block the operator reasons over. Yhwach never calls a model itself.
-    """
-    from yhwach.context import build_context, build_context_json
-    from yhwach.planner import top_tasks
-
-    path = _db_path(db_path)
-    if not path.exists():
-        click.echo(f"[!] DB not found at {path}.", err=True)
-        sys.exit(2)
-
-    with yhdb.transaction(path) as conn:
-        eng_id = yhdb.engagement_id_for(conn, lab)
-        if eng_id is None:
-            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
-            sys.exit(2)
-
-        if as_json:
-            click.echo(build_context_json(conn, eng_id, host_ip=host_ip, limit=limit))
-            return
-        if contract:
-            block = build_context(conn, eng_id, host_ip=host_ip, limit=limit,
-                                  persona=not no_persona)
-            click.echo(block)
-            return
-
-        tasks = top_tasks(conn, eng_id, limit, host_ip=host_ip)
-
-    if not tasks:
-        click.echo("[!] No pending tasks. Run `yhwach probe` then `yhwach plan` first.")
-        return
-
-    click.echo(f"== Top {len(tasks)} tasks for '{lab}' (by EV) ==")
-    for i, t in enumerate(tasks, 1):
-        click.echo(
-            f"{i}. [task #{t['id']}] EV={t['ev_score']:<6} [{t['autonomy']:<7}] "
-            f"{t['host_ip']} {t['surface_kind']} -> {t['playbook_rule_id']} ({t['kind']})"
-        )
-        click.echo(f"     {t['rationale']}  (run: yhwach run --lab {lab} --task {t['id']} --go)")
-
-
-@main.command()
-@click.option("--lab", required=True, help="Lab name (must exist).")
-@click.option("--out", "out_path", default=None, type=click.Path(),
-              help="Write the fixture YAML here (default: stdout).")
-@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def snapshot(lab: str, out_path: str | None, db_path: str | None) -> None:
-    """Dump the current world model as a fixture YAML (for the regression corpus).
-
-    Run this after a lab so the scenario becomes a permanent golden test. Add an
-    `expected:` block by hand (or your correction) to turn it into an assertion.
-    """
-    import yaml as _yaml
-
-    from yhwach.fixtures import snapshot_world_model
-
-    path = _db_path(db_path)
-    if not path.exists():
-        click.echo(f"[!] DB not found at {path}.", err=True)
-        sys.exit(2)
-
-    with yhdb.transaction(path) as conn:
-        eng_id = yhdb.engagement_id_for(conn, lab)
-        if eng_id is None:
-            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
-            sys.exit(2)
-        snap = snapshot_world_model(conn, eng_id)
-
-    snap["expected"] = {
-        "autonomy": None,
-        "top_hypothesis": {"playbook_rule_id": None},
-        "must_include_hypotheses": [],
-        "must_not_include": [],
-    }
-    text = _yaml.safe_dump(snap, sort_keys=False, allow_unicode=True)
-    if out_path:
-        Path(out_path).write_text(text, encoding="utf-8")
-        click.echo(f"[+] wrote {out_path} — fill in the `expected:` block to make it a golden test")
-    else:
-        click.echo(text)
-
-
-@main.command()
-@click.option("--fixtures", "fixtures_dir", default=None, type=click.Path(),
-              help="Fixtures dir (default: repo tests/fixtures).")
-def selftest(fixtures_dir: str | None) -> None:
-    """Run all golden fixtures and report pass/fail. Exits non-zero on any failure."""
-    from yhwach.fixtures import default_fixtures_dir, run_fixture_file
-
-    d = Path(fixtures_dir) if fixtures_dir else default_fixtures_dir()
-    files = sorted(d.rglob("*.yaml"))
-    if not files:
-        click.echo(f"[!] No *.yaml fixtures in {d}.", err=True)
-        sys.exit(2)
-
-    failed = 0
-    for f in files:
-        res = run_fixture_file(f)
-        mark = "PASS" if res.passed else "FAIL"
-        click.echo(f"[{mark}] {res.name}  (top={res.top_actual})")
-        for msg in res.failures:
-            click.echo(f"        - {msg}")
-        failed += 0 if res.passed else 1
-
-    total = len(files)
-    click.echo(f"[=] {total - failed}/{total} fixtures passed.")
-    if failed:
-        sys.exit(1)
-
-
-@main.command()
-@click.option("--risk", type=click.Choice(["read_only", "propose", "destructive"]), default=None,
-              help="Filter by risk.")
-def actions(risk: str | None) -> None:
-    """List the registered actions (emits -> concrete commands)."""
-    from yhwach.actions import ACTION_REGISTRY
-
-    for aid in sorted(ACTION_REGISTRY):
-        a = ACTION_REGISTRY[aid]
-        if risk and a.risk != risk:
-            continue
-        runflag = "run" if (a.risk == "read_only" and a.runnable) else "render-only"
-        click.echo(f"{aid:<28} {a.risk:<12} {runflag}")
-        if a.note:
-            click.echo(f"    note: {a.note}")
-
-
-@main.command()
-@click.option("--lab", required=True, help="Lab name.")
-@click.option("--task", "task_id", required=True, type=int, help="Task id (from `yhwach next`).")
-@click.option("--go", is_flag=True, default=False,
-              help="Execute read-only actions and capture output to loot/ (default: render only).")
-@click.option("--hexstrike-url", default=None,
-              help="Run read-only actions through HexStrike (delegated) instead of locally; "
-                   f"e.g. {_HEXSTRIKE_DEFAULT}. Only used with --go.")
-@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def run(lab: str, task_id: int, go: bool, hexstrike_url: str | None, db_path: str | None) -> None:
-    """Render (and with --go, execute read-only) the actions for a task.
-
-    Proposal-tier and render-only actions are printed for the operator to run,
-    never auto-executed — Yhwach proposes, the operator exploits. Shares the
-    execution core with the `yhwach_run` MCP tool (see engine.execute_task).
-    With --hexstrike-url, read-only actions run through HexStrike.
-    """
-    path = _db_path(db_path)
-    if not path.exists():
-        click.echo(f"[!] DB not found at {path}.", err=True)
-        sys.exit(2)
-
-    with yhdb.transaction(path) as conn:
-        eng_id = yhdb.engagement_id_for(conn, lab)
-        if eng_id is None:
-            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
-            sys.exit(2)
-
-    lines, ok = execute_task(path, eng_id, task_id, go=go, hexstrike_url=hexstrike_url)
-    for ln in lines:
-        click.echo(ln)
-    if not ok:
-        sys.exit(2)
-
-
-@main.command()
 @click.option("--host", "host_ip", required=True, help="Host IP.")
 @click.option("--to", "stage", required=True,
               type=click.Choice(yhdb.STAGES + ["blocked"]),
@@ -599,70 +370,6 @@ def advance(host_ip: str, stage: str, lab: str, force: bool, db_path: str | None
     else:
         click.echo(f"[!] {msg}", err=True)
         sys.exit(1)
-
-
-@main.command()
-@click.option("--lab", required=True, help="Lab name.")
-@click.option("--host", "host_ip", required=True, help="Host IP the flag was captured on.")
-@click.option("--screenshot", "screenshot_path", required=True, type=click.Path(),
-              help="Path to the proof screenshot (must exist).")
-@click.option("--flag", "flag_path", default=None, type=click.Path(),
-              help="Path to the flag/proof file (optional).")
-@click.option("--flag-content", default=None, help="The flag text itself (optional).")
-@click.option("--no-advance", is_flag=True, default=False,
-              help="Record the proof but do not advance the host to 'looted'.")
-@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def proof(lab: str, host_ip: str, screenshot_path: str, flag_path: str | None,
-          flag_content: str | None, no_advance: bool, db_path: str | None) -> None:
-    """Bind a flag + screenshot to a host, then advance it to 'looted'.
-
-    The screenshot is the evidence that gates `foothold -> looted`; Yhwach
-    refuses if the file does not exist. If a --flag file is given, its content
-    is stored. Capture the screenshot as you take the flag, then mirror it into
-    the Obsidian vault.
-    """
-    path = _db_path(db_path)
-    if not path.exists():
-        click.echo(f"[!] DB not found at {path}.", err=True)
-        sys.exit(2)
-
-    shot = Path(os.path.expanduser(screenshot_path))
-    if not shot.is_file():
-        click.echo(f"[!] Screenshot not found: {shot} — a proof needs a real screenshot.",
-                   err=True)
-        sys.exit(2)
-
-    if flag_content is None and flag_path:
-        fp = Path(os.path.expanduser(flag_path))
-        if fp.is_file():
-            flag_content = fp.read_text(encoding="utf-8", errors="replace").strip()
-
-    with yhdb.transaction(path) as conn:
-        eng_id = yhdb.engagement_id_for(conn, lab)
-        if eng_id is None:
-            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
-            sys.exit(2)
-        hrow = conn.execute("SELECT id FROM host WHERE engagement_id = ? AND ip = ?",
-                            (eng_id, host_ip)).fetchone()
-        if hrow is None:
-            click.echo(f"[!] Host {host_ip} not found; ingest a scan first.", err=True)
-            sys.exit(2)
-        pid = yhdb.add_proof(conn, hrow["id"], flag_path or "-", str(shot),
-                             flag_content=flag_content)
-        yhdb.log_event(conn, eng_id, "proof",
-                       {"host": host_ip, "screenshot": str(shot), "flag": flag_path or None})
-        advanced = False
-        if not no_advance:
-            advanced, msg = yhdb.set_host_stage(conn, eng_id, host_ip, "looted")
-            if advanced:
-                yhdb.log_event(conn, eng_id, "stage", {"host": host_ip, "stage": "looted"})
-
-    click.echo(f"[+] Proof #{pid} recorded for {host_ip} (screenshot: {shot.name}).")
-    if not no_advance:
-        click.echo(f"[+] {host_ip} -> looted" if advanced
-                   else f"[i] stage unchanged ({msg}).")
-    click.echo("[note] mirror the screenshot into the Obsidian vault and bind it to the host "
-               "note + Attack Chain step it proves (via the Obsidian MCP).")
 
 
 @main.command()
@@ -755,41 +462,6 @@ def cred(lab: str, identifier: str, secret: str | None, kind: str, source: str,
 
 @main.command()
 @click.option("--lab", required=True, help="Lab name.")
-@click.option("--proto", default=None,
-              type=click.Choice(["smb", "winrm", "ssh", "ldap", "mssql", "rdp"]),
-              help="Restrict to one protocol.")
-@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def spray(lab: str, proto: str | None, db_path: str | None) -> None:
-    """Render credential-spray commands (vault creds x sprayable surfaces).
-
-    Proposal-tier: active auth-testing, so Yhwach renders — the operator runs.
-    """
-    from yhwach.spray import build_spray_plan, lockout_note
-
-    path = _db_path(db_path)
-    if not path.exists():
-        click.echo(f"[!] DB not found at {path}.", err=True)
-        sys.exit(2)
-    with yhdb.transaction(path) as conn:
-        eng_id = yhdb.engagement_id_for(conn, lab)
-        if eng_id is None:
-            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
-            sys.exit(2)
-        cmds = build_spray_plan(conn, eng_id, proto_filter=proto)
-        note = lockout_note(conn, eng_id)
-
-    if not cmds:
-        click.echo("[!] Nothing to spray (empty vault or no sprayable surfaces).")
-        return
-    if note:
-        click.echo(note)
-    click.echo(f"== Spray plan for '{lab}' ({len(cmds)} commands) [propose — operator runs] ==")
-    for c in cmds:
-        click.echo(f"  $ {c}")
-
-
-@main.command()
-@click.option("--lab", required=True, help="Lab name.")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
 def creds(lab: str, db_path: str | None) -> None:
     """List the credential vault."""
@@ -822,39 +494,6 @@ def creds(lab: str, db_path: str | None) -> None:
         if src_ip:
             src = f"{src} @ {src_ip}"
         click.echo(f"  {r['identifier']:<20} {r['kind']:<10} {sec:<40} ({src})")
-
-
-@main.command()
-@click.argument("technique")
-@click.option("--lab", required=True, help="Lab name.")
-@click.option("--host", "host_ip", default=None, help="Host where it landed (optional).")
-@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def consume(technique: str, lab: str, host_ip: str | None, db_path: str | None) -> None:
-    """Mark a technique consumed — the planner will stop proposing it this engagement.
-
-    TECHNIQUE is a rule id or a rule's `technique:` key. Use after a technique
-    lands: OSAI labs don't reuse infra flaws, so re-proposing it wastes turns.
-    """
-    from yhwach.primitives import mark_technique_consumed
-
-    path = _db_path(db_path)
-    if not path.exists():
-        click.echo(f"[!] DB not found at {path}.", err=True)
-        sys.exit(2)
-    with yhdb.transaction(path) as conn:
-        eng_id = yhdb.engagement_id_for(conn, lab)
-        if eng_id is None:
-            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
-            sys.exit(2)
-        host_id = None
-        if host_ip:
-            r = conn.execute(
-                "SELECT id FROM host WHERE engagement_id = ? AND ip = ?", (eng_id, host_ip)
-            ).fetchone()
-            host_id = r["id"] if r else None
-        mark_technique_consumed(conn, eng_id, technique, host_id)
-    click.echo(f"[+] Technique '{technique}' marked consumed for '{lab}'. "
-               "Re-run `yhwach plan` to drop it from the queue.")
 
 
 @main.command()
@@ -937,89 +576,6 @@ def report(lab: str, out_path: str | None, db_path: str | None) -> None:
         click.echo(f"[+] wrote {out_path}")
     else:
         click.echo(md)
-
-
-@main.command()
-@click.option("--lab", required=True, help="Lab name.")
-@click.option("--result", required=True,
-              type=click.Choice(list(yhdb.ATTEMPT_RESULTS)),
-              help="How the move went. success consumes the technique; fail/blocked "
-                   "retire the task and decay its EV; partial keeps it queued.")
-@click.option("--task", "task_id", default=None, type=int,
-              help="Task id from `yhwach next` (carries the host + rule).")
-@click.option("--rule", "rule_id", default=None,
-              help="playbook_rule_id, for a move run outside the task queue.")
-@click.option("--host", "host_ip", default=None, help="Target host IP (with --rule).")
-@click.option("--why", "reason", default=None,
-              help="One line: WHY it went that way. This is what your future self reads.")
-@click.option("--evidence", default=None, help="Loot path / Obsidian ref / output excerpt.")
-@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def outcome(lab: str, result: str, task_id: int | None, rule_id: str | None,
-            host_ip: str | None, reason: str | None, evidence: str | None,
-            db_path: str | None) -> None:
-    """Record how an attempt went â€” the engine's memory of what you already burned.
-
-    `technique_state` only ever recorded success. This records the other three
-    outcomes too, so a failed move leaves the queue, ranks lower if it ever
-    returns, and shows up as a DEAD END in the next handoff. An unrecorded
-    attempt is an attempt you will repeat after your context is compacted.
-    """
-    from yhwach.memory import record_outcome
-
-    path = _db_path(db_path)
-    if not path.exists():
-        click.echo(f"[!] DB not found at {path}.", err=True)
-        sys.exit(2)
-    with yhdb.transaction(path) as conn:
-        eng_id = yhdb.engagement_id_for(conn, lab)
-        if eng_id is None:
-            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
-            sys.exit(2)
-        try:
-            rep = record_outcome(
-                conn, eng_id, result=result, task_id=task_id, rule_id=rule_id,
-                host_ip=host_ip, reason=reason, evidence=evidence)
-        except ValueError as e:
-            click.echo(f"[!] {e}", err=True)
-            sys.exit(2)
-    click.echo(f"[+] {rep.render()}")
-    if result == "success":
-        click.echo("[note] objective reached â€” write the note in the Obsidian vault now.")
-
-
-@main.command()
-@click.option("--lab", required=True, help="Lab name.")
-@click.option("--events", default=8, show_default=True, type=int,
-              help="How many recent events to replay.")
-@click.option("--tasks", default=3, show_default=True, type=int,
-              help="How many ranked next moves to preview.")
-@click.option("--json", "as_json", is_flag=True, default=False, help="Emit JSON.")
-@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def recall(lab: str, events: int, tasks: int, as_json: bool, db_path: str | None) -> None:
-    """Catch up on an engagement after a context reset â€” compact, persona-free.
-
-    Where am I, what did I already try (wins + dead ends), what is still open,
-    what is next. This is the first command to run in a fresh operator session
-    or after a /compact: it costs a few hundred tokens instead of a full handoff.
-    """
-    import json as _json
-
-    from yhwach.memory import build_recall, collect_recall
-
-    path = _db_path(db_path)
-    if not path.exists():
-        click.echo(f"[!] DB not found at {path}.", err=True)
-        sys.exit(2)
-    with yhdb.transaction(path) as conn:
-        eng_id = yhdb.engagement_id_for(conn, lab)
-        if eng_id is None:
-            click.echo(f"[!] Unknown lab '{lab}'.", err=True)
-            sys.exit(2)
-        if as_json:
-            click.echo(_json.dumps(
-                collect_recall(conn, eng_id, events=events, tasks=tasks), indent=2))
-            return
-        click.echo(build_recall(conn, eng_id, events=events, tasks=tasks))
 
 
 @main.command()

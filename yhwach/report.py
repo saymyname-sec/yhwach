@@ -36,8 +36,6 @@ def event_summary(kind: str, payload_json: str | None) -> str:
     if kind == "credential":
         return f"{p.get('id', '?')} ({p.get('kind', '?')})" \
                + (f" @ {p['host']}" if p.get("host") else "")
-    if kind == "proof":
-        return f"{p.get('host', '?')} (screenshot)"
     if kind == "tunnel":
         return f"{p.get('subnet', '?')} via {p.get('via', '?')}"
     if kind == "attempt":
@@ -157,24 +155,6 @@ def build_report(conn: sqlite3.Connection, engagement_id: int) -> str:
             for f in hfnd:
                 out.append(f"- **Finding:** [{f['severity'].upper()}] {f['class']} {f['title']}")
         out.append("")
-
-    # --- Proofs ---
-    proofs = conn.execute(
-        "SELECT h.ip AS ip, p.flag_path, p.screenshot_path, p.scored "
-        "FROM proof p JOIN host h ON h.id = p.host_id WHERE h.engagement_id = ? ORDER BY h.ip",
-        (engagement_id,),
-    ).fetchall()
-    out.append("## Proofs")
-    out.append("")
-    if not proofs:
-        out.append("_None captured._")
-    else:
-        out.append("| Host | Flag | Screenshot | Scored |")
-        out.append("|---|---|---|---|")
-        for p in proofs:
-            out.append(f"| {p['ip']} | {p['flag_path']} | {p['screenshot_path']} | "
-                       f"{'yes' if p['scored'] else 'no'} |")
-    out.append("")
 
     # --- Reachability / pivots ---
     tunnels = conn.execute(

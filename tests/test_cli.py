@@ -59,63 +59,6 @@ def test_status(tmp_db: Path) -> None:
 
 # --- planning / handoff -----------------------------------------------------
 
-def test_plan_next_run(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    assert _run(["plan", "--lab", "L", "--db", str(tmp_db)]).exit_code == 0
-    nxt = _run(["next", "--lab", "L", "--db", str(tmp_db)])
-    assert "ollama_unauth_api" in nxt.output
-    contract = _run(["next", "--lab", "L", "--contract", "--db", str(tmp_db)])
-    assert "## FRAME" in contract.output
-    rr = _run(["run", "--lab", "L", "--task", str(_task_id(tmp_db)), "--db", str(tmp_db)])
-    assert rr.exit_code == 0 and "$ curl" in rr.output   # rendered, not executed
-
-
-def test_run_unknown_task_exits_2(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    r = _run(["run", "--lab", "L", "--task", "999", "--db", str(tmp_db)])
-    assert r.exit_code == 2 and "not found" in r.output
-
-
-def test_actions_list() -> None:
-    r = _run(["actions"])
-    assert r.exit_code == 0 and "probe_ollama_models" in r.output
-
-
-# --- post-foothold ----------------------------------------------------------
-
-def test_advance_looted_gated_by_proof(tmp_db: Path, tmp_path: Path) -> None:
-    _seed(tmp_db)
-    assert _run(["advance", "--lab", "L", "--host", "10.0.0.5", "--to", "foothold",
-                 "--db", str(tmp_db)]).exit_code == 0
-    refused = _run(["advance", "--lab", "L", "--host", "10.0.0.5", "--to", "looted",
-                    "--db", str(tmp_db)])
-    assert refused.exit_code == 1 and "proof" in refused.output
-
-    shot = tmp_path / "s.png"
-    shot.write_bytes(b"x")
-    p = _run(["proof", "--lab", "L", "--host", "10.0.0.5", "--screenshot", str(shot),
-              "--db", str(tmp_db)])
-    assert p.exit_code == 0 and "looted" in p.output
-
-
-def test_proof_missing_screenshot_exits_2(tmp_db: Path, tmp_path: Path) -> None:
-    _seed(tmp_db)
-    r = _run(["proof", "--lab", "L", "--host", "10.0.0.5",
-              "--screenshot", str(tmp_path / "nope.png"), "--db", str(tmp_db)])
-    assert r.exit_code == 2 and "not found" in r.output
-
-
-def test_cred_creds_and_consume(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    assert _run(["cred", "--lab", "L", "--user", "admin", "--secret", "P@ss",
-                 "--db", str(tmp_db)]).exit_code == 0
-    creds = _run(["creds", "--lab", "L", "--db", str(tmp_db)])
-    assert "admin" in creds.output
-    _run(["plan", "--lab", "L", "--db", str(tmp_db)])
-    c = _run(["consume", "ollama_unauth_api", "--lab", "L", "--db", str(tmp_db)])
-    assert c.exit_code == 0 and "consumed" in c.output
-
-
 def test_pivot_records_tunnel_and_advances(tmp_db: Path) -> None:
     _seed(tmp_db)  # host 10.0.0.5 (linux)
     r = _run(["pivot", "--lab", "L", "--via-host", "10.0.0.5", "--subnet", "10.1.0.0/24",
@@ -126,15 +69,6 @@ def test_pivot_records_tunnel_and_advances(tmp_db: Path) -> None:
     rep = _run(["report", "--lab", "L", "--db", str(tmp_db)])
     assert "Reachability" in rep.output and "10.1.0.0/24" in rep.output
 
-
-def test_spray_no_sprayable_surface(tmp_db: Path) -> None:
-    _seed(tmp_db)  # ollama isn't sprayable
-    _run(["cred", "--lab", "L", "--user", "admin", "--secret", "P@ss", "--db", str(tmp_db)])
-    r = _run(["spray", "--lab", "L", "--db", str(tmp_db)])
-    assert r.exit_code == 0 and "Nothing to spray" in r.output
-
-
-# --- reporting / introspection ---------------------------------------------
 
 def test_findings_empty(tmp_db: Path) -> None:
     _seed(tmp_db)
@@ -167,12 +101,6 @@ def test_enum_rejects_out_of_scope_target(tmp_db: Path) -> None:
     assert r.exit_code == 2 and "not in scope" in r.output   # refused before HexStrike
 
 
-def test_snapshot_to_stdout(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    r = _run(["snapshot", "--lab", "L", "--db", str(tmp_db)])
-    assert r.exit_code == 0 and "world_model" in r.output
-
-
 def test_persona_prints_hash() -> None:
     r = _run(["persona"])
     assert r.exit_code == 0 and "sha256" in r.output
@@ -192,47 +120,11 @@ def test_missing_db_exits_2(tmp_path: Path) -> None:
 
 # --- operator memory + enumeration coverage ---------------------------------
 
-def test_outcome_fail_drops_the_task_from_next(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    _run(["plan", "--lab", "L", "--db", str(tmp_db)])
-    tid = _task_id(tmp_db)
-    r = _run(["outcome", "--lab", "L", "--result", "fail", "--task", str(tid),
-              "--why", "endpoint 404s", "--db", str(tmp_db)])
-    assert r.exit_code == 0 and "abandoned" in r.output
-    nxt = _run(["next", "--lab", "L", "--db", str(tmp_db)])
-    assert "No pending tasks" in nxt.output
-
-
-def test_outcome_success_consumes_and_prompts_for_the_note(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    _run(["plan", "--lab", "L", "--db", str(tmp_db)])
-    r = _run(["outcome", "--lab", "L", "--result", "success", "--task",
-              str(_task_id(tmp_db)), "--why", "leaked key", "--db", str(tmp_db)])
-    assert r.exit_code == 0
-    assert "consumed" in r.output and "Obsidian vault" in r.output
-
-
-def test_outcome_needs_a_target(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    r = _run(["outcome", "--lab", "L", "--result", "fail", "--db", str(tmp_db)])
-    assert r.exit_code == 2 and "task id or a playbook rule id" in r.output
-
-
 def test_outcome_rejects_an_unknown_result(tmp_db: Path) -> None:
     _seed(tmp_db)
     r = _run(["outcome", "--lab", "L", "--result", "sideways", "--task", "1",
               "--db", str(tmp_db)])
     assert r.exit_code == 2  # click rejects it against the choice list
-
-
-def test_recall_renders_and_has_a_json_mode(tmp_db: Path) -> None:
-    import json
-
-    _seed(tmp_db)
-    r = _run(["recall", "--lab", "L", "--db", str(tmp_db)])
-    assert r.exit_code == 0 and "YHWACH RECALL" in r.output
-    j = _run(["recall", "--lab", "L", "--json", "--db", str(tmp_db)])
-    assert j.exit_code == 0 and json.loads(j.output)["lab"] == "L"
 
 
 def test_gaps_lists_hosts_and_the_fix_command(tmp_db: Path) -> None:
@@ -268,22 +160,3 @@ def test_advance_to_enumerated_warns_but_still_advances(tmp_db: Path) -> None:
     assert "NOT fully enumerated" in r.output
 
 
-def test_next_contract_no_persona_is_much_cheaper(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    _run(["plan", "--lab", "L", "--db", str(tmp_db)])
-    full = _run(["next", "--lab", "L", "--contract", "--db", str(tmp_db)]).output
-    cheap = _run(["next", "--lab", "L", "--contract", "--no-persona",
-                  "--db", str(tmp_db)]).output
-    assert "sha256:" in cheap and len(cheap) < len(full) / 2
-    assert "## RANKED CANDIDATES" in cheap
-
-
-def test_next_json_emits_the_handoff_as_data(tmp_db: Path) -> None:
-    import json
-
-    _seed(tmp_db)
-    _run(["plan", "--lab", "L", "--db", str(tmp_db)])
-    r = _run(["next", "--lab", "L", "--json", "--db", str(tmp_db)])
-    data = json.loads(r.output)
-    assert data["engagement"]["lab"] == "L"
-    assert data["candidates"] and data["candidates"][0]["task_id"]

@@ -250,7 +250,6 @@ _ADDED_TABLES = {
         "  label TEXT NOT NULL,"
         "  points INTEGER DEFAULT 0,"
         "  captured INTEGER DEFAULT 0,"
-        "  proof_id INTEGER REFERENCES proof(id),"
         "  notes TEXT,"
         "  discovered_at TEXT NOT NULL)"
     ),
@@ -471,15 +470,6 @@ def set_host_stage(
     if (monotonic and stage != "blocked" and cur_stage in STAGES and stage in STAGES
             and STAGES.index(stage) < STAGES.index(cur_stage)):
         return False, f"{ip} is already at '{cur_stage}'; refusing to move back to '{stage}'"
-    # foothold -> looted requires evidence: a proof row with a screenshot.
-    if monotonic and stage == "looted":
-        has_proof = conn.execute(
-            "SELECT 1 FROM proof WHERE host_id = ? AND screenshot_path != '' LIMIT 1",
-            (row["id"],),
-        ).fetchone()
-        if has_proof is None:
-            return False, (f"{ip}: 'looted' needs a proof (flag + screenshot) — run "
-                           "`yhwach proof` first (or advance --force to override)")
     # looted -> pivoted requires a route out: a tunnel / reachable subnet via this host.
     if monotonic and stage == "pivoted":
         has_tunnel = conn.execute(
@@ -525,29 +515,6 @@ def list_tunnels(conn: sqlite3.Connection, engagement_id: int) -> list[sqlite3.R
         "WHERE t.engagement_id = ? ORDER BY t.created_at",
         (engagement_id,),
     ).fetchall()
-
-
-def add_proof(
-    conn: sqlite3.Connection,
-    host_id: int,
-    flag_path: str,
-    screenshot_path: str,
-    *,
-    flag_content: str | None = None,
-    obsidian_ref: str | None = None,
-) -> int:
-    """Record a proof (flag + screenshot) for a host and return its id.
-
-    The screenshot is what gates `foothold -> looted` (see set_host_stage). The
-    caller verifies the screenshot file exists before calling; the vault mirror
-    (obsidian_ref) is optional and filled in when the operator syncs it.
-    """
-    cur = conn.execute(
-        "INSERT INTO proof (host_id, flag_path, flag_content, screenshot_path, "
-        "obsidian_ref, scored, captured_at) VALUES (?, ?, ?, ?, ?, 0, ?)",
-        (host_id, flag_path, flag_content, screenshot_path, obsidian_ref, _now_utc()),
-    )
-    return int(cur.lastrowid)
 
 
 def add_credential(
@@ -1259,7 +1226,6 @@ def add_objective(
     kind: str = "flag",
     points: int = 0,
     captured: bool = False,
-    proof_id: int | None = None,
     notes: str | None = None,
 ) -> tuple[int, bool]:
     """Record a point-bearing objective (deduped by engagement+host+label)."""
@@ -1270,14 +1236,14 @@ def add_objective(
     if existing is not None:
         conn.execute(
             "UPDATE objective SET kind = ?, points = ?, captured = ?, "
-            "proof_id = COALESCE(?, proof_id), notes = COALESCE(?, notes) WHERE id = ?",
-            (kind, points, 1 if captured else 0, proof_id, notes, existing["id"]),
+            "notes = COALESCE(?, notes) WHERE id = ?",
+            (kind, points, 1 if captured else 0, notes, existing["id"]),
         )
         return int(existing["id"]), False
     cur = conn.execute(
         "INSERT INTO objective (engagement_id, host_id, kind, label, points, captured, "
-        "proof_id, notes, discovered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (engagement_id, host_id, kind, label, points, 1 if captured else 0, proof_id, notes,
+        "notes, discovered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (engagement_id, host_id, kind, label, points, 1 if captured else 0, notes,
          _now_utc()),
     )
     return int(cur.lastrowid), True

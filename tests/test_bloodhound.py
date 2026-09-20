@@ -4,13 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from click.testing import CliRunner
-
 from yhwach import db as yhdb
-from yhwach.cli import main
 from yhwach.parsers.bloodhound import parse_bloodhound
-from yhwach.planner import match_rules, top_tasks
-from yhwach.playbooks import default_playbook_dir, load_rules
 
 
 def test_parse_normalized_facts() -> None:
@@ -51,19 +46,3 @@ def _seed_dc(tmp_db: Path) -> int:
     return eng
 
 
-def test_bloodhound_ingest_chains_to_attacks(tmp_db: Path, tmp_path: Path) -> None:
-    eng = _seed_dc(tmp_db)
-    bh = tmp_path / "bh.json"
-    bh.write_text(json.dumps([
-        {"kind": "kerberoastable", "principal": "svc_sql"},
-        {"kind": "dcsync", "principal": "svc_bkp"},
-    ]))
-    r = CliRunner().invoke(main, ["ingest", str(bh), "--lab", "bh", "--kind", "bloodhound",
-                                  "--host", "10.0.0.10", "--db", str(tmp_db)])
-    assert r.exit_code == 0 and "kerberoastable" in r.output
-
-    rules = load_rules(default_playbook_dir())
-    with yhdb.transaction(tmp_db) as conn:
-        match_rules(conn, eng, rules)
-        ids = [t["playbook_rule_id"] for t in top_tasks(conn, eng, 50)]
-    assert "kerberoast" in ids and "dcsync" in ids

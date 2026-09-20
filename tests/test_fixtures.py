@@ -1,36 +1,20 @@
-"""Golden-fixture regression runner.
+"""World-model fixture helpers: seed a lab from YAML, snapshot it back.
 
-Every `tests/fixtures/*.yaml` with an `expected:` block is a golden test: seed a
-world model, run the planner, assert the ranked output matches. A rule change
-that would mis-rank a captured scenario fails here.
+Post-strip there is no ranker/golden runner — these just verify the seed/snapshot
+round-trip that the lab fixtures and tests rely on.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from yhwach import db as yhdb
-from yhwach.fixtures import (
-    load_fixture,
-    run_fixture_file,
-    seed_world_model,
-    snapshot_world_model,
-)
+from yhwach.fixtures import load_fixture, seed_world_model, snapshot_world_model
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures"
-# Recurse so captured lab scenarios under fixtures/labs/ are golden tests too.
-FIXTURE_FILES = sorted(FIXTURE_DIR.rglob("*.yaml"))
 
 
 def test_there_are_fixtures() -> None:
-    assert FIXTURE_FILES, "no golden fixtures found"
-
-
-@pytest.mark.parametrize("fixture_path", FIXTURE_FILES, ids=lambda p: p.stem)
-def test_golden_fixture(fixture_path: Path) -> None:
-    result = run_fixture_file(fixture_path)
-    assert result.passed, f"{result.name}: " + "; ".join(result.failures)
+    assert sorted(FIXTURE_DIR.rglob("*.yaml")), "no fixtures found"
 
 
 def test_seed_then_snapshot_roundtrips_hosts(tmp_db: Path) -> None:
@@ -38,13 +22,10 @@ def test_seed_then_snapshot_roundtrips_hosts(tmp_db: Path) -> None:
     with yhdb.transaction(tmp_db) as conn:
         eng_id = seed_world_model(conn, fixture)
         snap = snapshot_world_model(conn, eng_id)
-
     orig_hosts = fixture["world_model"]["hosts"]
     snap_hosts = snap["world_model"]["hosts"]
     assert len(snap_hosts) == len(orig_hosts)
     assert snap_hosts[0]["ip"] == orig_hosts[0]["ip"]
-
-    # surface kind + auth survive the round trip
     orig_kinds = {s["kind"] for s in orig_hosts[0]["surfaces"]}
     snap_kinds = {s["kind"] for s in snap_hosts[0]["surfaces"]}
     assert orig_kinds == snap_kinds

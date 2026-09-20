@@ -7,15 +7,10 @@ returns the persona-framed context block for the host to reason over.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from yhwach import db as yhdb
-from yhwach.context import build_context
-from yhwach.planner import match_rules
-from yhwach.playbooks import default_playbook_dir, load_rules
 from yhwach.report import build_report
-from yhwach.spray import build_spray_plan
 
 
 def _eng(conn, lab: str) -> int:
@@ -55,82 +50,16 @@ def tool_status(db_path: Path | str, lab: str) -> str:
         svc = conn.execute(
             "SELECT COUNT(*) n FROM service s JOIN host h ON h.id=s.host_id WHERE h.engagement_id=?",
             (eid,)).fetchone()["n"]
-        pend = conn.execute(
-            "SELECT COUNT(*) n FROM task WHERE engagement_id=? AND status='pending'", (eid,)).fetchone()["n"]
         vault_rows = yhdb.list_credentials(conn, eid)
     lines = [f"Engagement '{lab}':"]
     lines += [f"  {r['stage']}: {r['n']}" for r in stages] or ["  (no hosts)"]
-    lines.append(f"  services={svc}  pending_tasks={pend}  vault={len(vault_rows)}")
+    lines.append(f"  services={svc}  vault={len(vault_rows)}")
     if vault_rows:
         # Compact vault preview — identifier(kind); full secrets via yhwach_creds.
         preview = ", ".join(f"{r['identifier']}({r['kind']})" for r in vault_rows[:8])
         more = f" +{len(vault_rows) - 8} more" if len(vault_rows) > 8 else ""
         lines.append(f"  vault_ids: {preview}{more}")
     return "\n".join(lines)
-
-
-def tool_plan(db_path: Path | str, lab: str) -> str:
-    rules = load_rules(default_playbook_dir())
-    with yhdb.transaction(db_path) as conn:
-        eid = _eng(conn, lab)
-        rep = match_rules(conn, eid, rules)
-    msg = (f"rules matched {rep.rules_matched}; tasks {rep.tasks_created} new, "
-           f"{rep.tasks_updated} updated")
-    if rep.rules_skipped_consumed:
-        msg += f"; skipped consumed: {', '.join(rep.rules_skipped_consumed)}"
-    if rep.surfaces_filtered_denylist:
-        msg += f"; filtered {rep.surfaces_filtered_denylist} denylisted surface(s)"
-    return msg
-
-
-def tool_next(db_path: Path | str, lab: str, limit: int = 4, persona: bool = True,
-              fmt: str = "text") -> str:
-    """The operator context block: persona frame + state + EV-ranked candidates.
-
-    `persona=False` swaps the persona body for its sha256 — use it once the
-    frame is already in your context, and the handoff costs a fraction of the
-    tokens. `fmt="json"` returns the same slice as data (persona by digest).
-    """
-    with yhdb.transaction(db_path) as conn:
-        eid = _eng(conn, lab)
-        if fmt == "json":
-            from yhwach.context import build_context_json
-            return build_context_json(conn, eid, limit=limit)
-        return build_context(conn, eid, limit=limit, persona=persona)
-
-
-def tool_recall(db_path: Path | str, lab: str, events: int = 8, tasks: int = 3) -> str:
-    """Catch up on an engagement after a context reset — compact and persona-free.
-
-    Where the engagement stands, what has already been TRIED (wins + dead ends),
-    which leads are open, what enumeration is missing, and the next ranked moves.
-    Call this first in a fresh session or after a compaction, before yhwach_next.
-    """
-    from yhwach.memory import build_recall
-
-    with yhdb.transaction(db_path) as conn:
-        eid = _eng(conn, lab)
-        return build_recall(conn, eid, events=events, tasks=tasks)
-
-
-def tool_outcome(db_path: Path | str, lab: str, result: str, task_id: int | None = None,
-                 rule_id: str | None = None, host: str | None = None,
-                 why: str | None = None, evidence: str | None = None) -> str:
-    """Record how an attempt went: success | fail | blocked | partial.
-
-    Identify the move by `task_id` (from yhwach_next) or by `rule_id` [+ `host`].
-    success consumes the technique and closes the task; fail/blocked retire it
-    and decay its EV, and it is listed as a DEAD END in every later handoff;
-    partial leaves it queued. Always pass `why` — one line, for your future self.
-    Report EVERY resolved move: an unrecorded attempt is one you will repeat.
-    """
-    from yhwach.memory import record_outcome
-
-    with yhdb.transaction(db_path) as conn:
-        eid = _eng(conn, lab)
-        rep = record_outcome(conn, eid, result=result, task_id=task_id, rule_id=rule_id,
-                             host_ip=host, reason=why, evidence=evidence)
-    return rep.render()
 
 
 def tool_gaps(db_path: Path | str, lab: str, host: str | None = None) -> str:
@@ -179,17 +108,6 @@ def tool_report(db_path: Path | str, lab: str) -> str:
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
         return build_report(conn, eid)
-
-
-def tool_spray(db_path: Path | str, lab: str) -> str:
-    from yhwach.spray import lockout_note
-    with yhdb.transaction(db_path) as conn:
-        eid = _eng(conn, lab)
-        cmds = build_spray_plan(conn, eid)
-        note = lockout_note(conn, eid)
-    if not cmds:
-        return "nothing to spray (empty vault or no sprayable surfaces)"
-    return (f"{note}\n" if note else "") + "\n".join(cmds)
 
 
 def tool_add_cred(db_path: Path | str, lab: str, user: str, secret: str,
@@ -428,54 +346,6 @@ def tool_probe(db_path: Path | str, lab: str, host: str | None = None,
     return head + ("\n" + "\n".join(lines) if lines else "")
 
 
-def tool_run(db_path: Path | str, lab: str, task_id: int, go: bool = False,
-             hexstrike_url: str | None = None) -> str:
-    """Render (and with go=True, execute read-only) a task's actions.
-
-    Read-only/self-contained actions run and their output is captured + findings
-    extracted; proposal/render-only actions are printed for the operator. With
-    hexstrike_url, read-only actions run through HexStrike. Shares
-    engine.execute_task with the CLI `run` command."""
-    from yhwach.engine import execute_task
-
-    with yhdb.transaction(db_path) as conn:
-        eid = _eng(conn, lab)
-    lines, _ok = execute_task(db_path, eid, task_id, go=go, hexstrike_url=hexstrike_url)
-    return "\n".join(lines)
-
-
-def tool_proof(db_path: Path | str, lab: str, host: str, screenshot: str,
-               flag: str | None = None, flag_content: str | None = None,
-               advance: bool = True) -> str:
-    """Bind a flag + screenshot to a host (evidence) and advance foothold -> looted.
-
-    The screenshot file must exist — it is the evidence that gates 'looted'."""
-    shot = Path(os.path.expanduser(screenshot))
-    if not shot.is_file():
-        raise ValueError(f"screenshot not found: {shot} — a proof needs a real screenshot")
-    if flag_content is None and flag:
-        fp = Path(os.path.expanduser(flag))
-        if fp.is_file():
-            flag_content = fp.read_text(encoding="utf-8", errors="replace").strip()
-    with yhdb.transaction(db_path) as conn:
-        eid = _eng(conn, lab)
-        hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
-                            (eid, host)).fetchone()
-        if hrow is None:
-            raise ValueError(f"host {host} not found")
-        pid = yhdb.add_proof(conn, hrow["id"], flag or "-", str(shot), flag_content=flag_content)
-        yhdb.log_event(conn, eid, "proof", {"host": host, "screenshot": str(shot)})
-        msg = f"proof #{pid} recorded for {host}"
-        if advance:
-            adv, m = yhdb.set_host_stage(conn, eid, host, "looted")
-            if adv:
-                yhdb.log_event(conn, eid, "stage", {"host": host, "stage": "looted"})
-                msg += "; host -> looted"
-            else:
-                msg += f"; stage unchanged ({m})"
-    return msg
-
-
 def tool_pivot(db_path: Path | str, lab: str, via_host: str, subnet: str,
                lport: int = 11601, advance: bool = True) -> str:
     """Record a pivot (subnet reachable via a host) and render the deploy commands.
@@ -504,22 +374,6 @@ def tool_pivot(db_path: Path | str, lab: str, via_host: str, subnet: str,
     lines = [msg, "== Deploy (propose — operator runs) =="]
     lines += render_pivot(via_host, subnet, os_name, lport=lport)
     return "\n".join(lines)
-
-
-def tool_consume(db_path: Path | str, lab: str, technique: str,
-                 host: str | None = None) -> str:
-    """Mark a technique consumed — the planner stops proposing it this engagement."""
-    from yhwach.primitives import mark_technique_consumed
-
-    with yhdb.transaction(db_path) as conn:
-        eid = _eng(conn, lab)
-        host_id = None
-        if host:
-            r = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
-                             (eid, host)).fetchone()
-            host_id = r["id"] if r else None
-        mark_technique_consumed(conn, eid, technique, host_id)
-    return f"technique '{technique}' consumed for '{lab}' — re-run plan to drop it"
 
 
 def tool_ref(db_path: Path | str, pack: str, query: str | None = None) -> str:
@@ -603,14 +457,11 @@ TOOL_SPECS = [
      "Initialise/resume a lab: create the DB and upsert the engagement (lab + scope "
      "[+ domain/dc]). Call this first; scope is validated as IPs/CIDRs."),
     ("yhwach_status", tool_status, "Engagement scoreboard: hosts by stage, services, tasks, vault."),
-    ("yhwach_plan", tool_plan, "Match playbooks against the world model; populate the task queue."),
-    ("yhwach_next", tool_next, "The operator context block (persona + state + ranked candidates + commands)."),
     ("yhwach_brief", tool_brief,
      "The AI-legible engagement map: REACH / HOLD / SURFACES / UNLOCKS / UNEXPLORED / OBJECTIVES. "
      "Read this to reason over the memory and find the path; yhwach decides nothing."),
     ("yhwach_findings", tool_findings, "Recorded findings, most severe first."),
     ("yhwach_report", tool_report, "Full Markdown engagement report."),
-    ("yhwach_spray", tool_spray, "Credential-spray commands (vault creds x sprayable surfaces)."),
     ("yhwach_add_cred", tool_add_cred,
      "Add a credential to the vault (username/label + secret + kind + source; "
      "source is appended on update, never clobbered)."),
@@ -628,26 +479,12 @@ TOOL_SPECS = [
      "Run nmap through HexStrike against a target and ingest the result (delegated enumeration)."),
     ("yhwach_probe", tool_probe,
      "Probe scanned hosts for AI + traditional attack surfaces and record them."),
-    ("yhwach_run", tool_run,
-     "Render a task's actions; with go=true, execute read-only ones and extract findings."),
-    ("yhwach_proof", tool_proof,
-     "Bind a flag + screenshot to a host as evidence and advance foothold -> looted."),
     ("yhwach_pivot", tool_pivot,
      "Record a pivot (subnet reachable via a host), render the Ligolo deploy, and advance "
      "the host looted -> pivoted."),
-    ("yhwach_recall", tool_recall,
-     "Catch up after a context reset: state + what was already TRIED (wins and dead ends) "
-     "+ open leads + enum gaps + the next ranked moves. Compact and persona-free — call "
-     "this first in a fresh session, before yhwach_next."),
-    ("yhwach_outcome", tool_outcome,
-     "Record how an attempt went (success|fail|blocked|partial) with a one-line reason. "
-     "Success consumes the technique; fail/blocked retire the task, decay its EV and list "
-     "it as a DEAD END so it is never re-proposed. Call it for EVERY resolved move."),
     ("yhwach_gaps", tool_gaps,
      "Under-enumerated hosts and the exact nmap that closes each gap (full-port / -sV / "
      "UDP top-100), from recorded scan coverage."),
-    ("yhwach_consume", tool_consume,
-     "Mark a technique consumed so the planner stops proposing it this engagement."),
     ("yhwach_vulns", tool_vulns,
      "Match recorded software versions against the offline CVE knowledge base; record "
      "vulnerabilities + exploitable_cve findings. Run after ingesting versions."),

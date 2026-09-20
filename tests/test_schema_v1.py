@@ -234,32 +234,6 @@ def test_ingest_peas_software(eng) -> None:
 
 # --- spray lockout gate -----------------------------------------------------
 
-def test_lockout_note_unknown_policy_warns(eng) -> None:
-    from yhwach.spray import lockout_note
-    db, eid, hid = eng
-    with yhdb.transaction(db) as conn:
-        assert "No password policy" in (lockout_note(conn, eid) or "")
-
-
-def test_lockout_note_no_lockout_is_safe(eng) -> None:
-    from yhwach.spray import lockout_note
-    db, eid, hid = eng
-    with yhdb.transaction(db) as conn:
-        yhdb.add_password_policy(conn, eid, domain="corp.local", lockout_threshold=0)
-        assert lockout_note(conn, eid) is None
-
-
-def test_lockout_note_threshold_warns(eng) -> None:
-    from yhwach.spray import lockout_note
-    db, eid, hid = eng
-    with yhdb.transaction(db) as conn:
-        yhdb.add_password_policy(conn, eid, domain="corp.local", lockout_threshold=5)
-        note = lockout_note(conn, eid)
-    assert note and "threshold = 5" in note
-
-
-# --- notes rendering / export ----------------------------------------------
-
 def test_cve_version_matcher() -> None:
     from yhwach.vulns import version_matches as vm
     assert vm("5.17.4", "<5.18.3") and not vm("5.19.0", "<5.18.3")
@@ -304,75 +278,6 @@ def test_web_ingest_emits_chaining_findings(eng) -> None:
         tags = {r["tag"] for r in conn.execute("SELECT tag FROM finding WHERE host_id=?", (hid,))}
     assert summ["findings"] >= 2
     assert {"web_upload", "web_git"} <= tags
-
-
-def test_lateral_and_web_rules_fire(eng) -> None:
-    """The netexec/web tags must actually queue tasks (no dead facts)."""
-    from yhwach.planner import match_rules
-    from yhwach.playbooks import default_playbook_dir, load_rules
-    db, eid, hid = eng
-    rules = load_rules(default_playbook_dir())
-    with yhdb.transaction(db) as conn:
-        # advance host so it's a real target, add the chaining tags
-        conn.execute("UPDATE host SET stage='foothold' WHERE id=?", (hid,))
-        yhdb.add_finding(conn, hid, None, "T1135", "Writable SMB share", "medium",
-                         "backups", tag="writable_share")
-        yhdb.add_finding(conn, hid, None, "CWE-434", "Web upload surface", "high",
-                         "/upload", tag="web_upload")
-        match_rules(conn, eid, rules)
-        queued = {r["playbook_rule_id"] for r in conn.execute(
-            "SELECT playbook_rule_id FROM task WHERE engagement_id=?", (eid,))}
-    assert "smb_writable_share_abuse" in queued
-    assert "web_upload_rce" in queued
-
-
-def test_attack_path_block_in_context(eng) -> None:
-    from yhwach import context
-    db, eid, hid = eng
-    with yhdb.transaction(db) as conn:
-        conn.execute("UPDATE host SET stage='foothold' WHERE id=?", (hid,))
-        pu, _ = yhdb.add_principal(conn, eid, "svc_sql", type="user")
-        pg, _ = yhdb.add_principal(conn, eid, "Domain Admins", type="group")
-        yhdb.add_credential(conn, eid, "svc_sql", "pw", "password", "test")
-        yhdb.add_edge(conn, eid, f"host:{hid}", f"principal:{pu}", "HasSession")
-        yhdb.add_edge(conn, eid, f"principal:{pu}", f"principal:{pg}", "MemberOf")
-        block = context._attack_path_block(conn, eid)
-    joined = "\n".join(block)
-    assert "svc_sql" in joined and "Domain Admins" in joined
-
-
-def test_json_handoff_has_attack_path_parity(eng) -> None:
-    """The --json handoff must carry the same path-to-DA the text handoff shows."""
-    import json as _json
-
-    from yhwach.context import build_context, build_context_json
-    db, eid, hid = eng
-    with yhdb.transaction(db) as conn:
-        conn.execute("UPDATE host SET stage='foothold' WHERE id=?", (hid,))
-        pu, _ = yhdb.add_principal(conn, eid, "svc_sql", type="user")
-        pg, _ = yhdb.add_principal(conn, eid, "Domain Admins", type="group")
-        yhdb.add_credential(conn, eid, "svc_sql", "pw", "password", "test")
-        yhdb.add_edge(conn, eid, f"host:{hid}", f"principal:{pu}", "HasSession")
-        yhdb.add_edge(conn, eid, f"principal:{pu}", f"principal:{pg}", "MemberOf")
-        text = build_context(conn, eid)
-        data = _json.loads(build_context_json(conn, eid))
-    assert "PATH TO OBJECTIVE" in text
-    assert data["attack_path"] is not None
-    # svc_sql is owned (we hold its credential), so the shortest route is the
-    # 1-hop svc_sql --MemberOf--> Domain Admins, not the 2-hop path from the host.
-    assert data["attack_path"]["hops"] == 1
-    assert "Domain Admins" in data["attack_path"]["route"]
-
-
-def test_recall_surfaces_schema_v1_counts(eng) -> None:
-    from yhwach.memory import build_recall
-    db, eid, hid = eng
-    with yhdb.transaction(db) as conn:
-        yhdb.add_software(conn, hid, "sudo", "1.8.31", kind="package", source="linpeas")
-        yhdb.add_share(conn, hid, "backups", access="READ,WRITE", source="netexec")
-        yhdb.add_principal(conn, eid, "svc_sql", type="user")
-        out = build_recall(conn, eid)
-    assert "exploitable_cves=" in out and "writable_shares=" in out and "principals=" in out
 
 
 def test_export_notes_writes_tree(eng, tmp_path) -> None:

@@ -138,16 +138,6 @@ CREATE TABLE IF NOT EXISTS task (
 -- Proof — captured flag file + REQUIRED screenshot. The screenshot row is a hard
 -- FSM gate: `foothold -> looted` refuses to fire without one bound here.
 -- ---------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS proof (
-    id               INTEGER PRIMARY KEY,
-    host_id          INTEGER NOT NULL REFERENCES host(id),
-    flag_path        TEXT    NOT NULL,
-    flag_content     TEXT,
-    screenshot_path  TEXT    NOT NULL,
-    obsidian_ref     TEXT,                 -- vault path where the mirror lives
-    scored           INTEGER NOT NULL DEFAULT 0,
-    captured_at      TEXT    NOT NULL
-);
 
 -- ---------------------------------------------------------------------------
 -- Technique state — enforces "no repeats" per engagement.
@@ -447,7 +437,6 @@ CREATE TABLE IF NOT EXISTS objective (
     label         TEXT    NOT NULL,      -- 'local.txt' | 'proof.txt' | 'exfil customer DB'
     points        INTEGER DEFAULT 0,
     captured      INTEGER DEFAULT 0,
-    proof_id      INTEGER REFERENCES proof(id),
     notes         TEXT,
     discovered_at TEXT    NOT NULL
 );

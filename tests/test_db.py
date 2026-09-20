@@ -16,7 +16,6 @@ EXPECTED_TABLES = {
     "finding",
     "credential",
     "task",
-    "proof",
     "technique_state",
     "lore_denylist_hit",
     "event",

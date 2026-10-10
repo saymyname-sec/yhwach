@@ -1,4 +1,6 @@
-# Yhwach
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="yhwach — AI-Driven Memory & Playbook" width="660">
+</p>
 
 **AI-Driven Memory & Playbook — a persistent world-model, lessons-memory and playbook engine for AI-driven security operators.**
 

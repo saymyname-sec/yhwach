@@ -142,6 +142,10 @@ Agent instructions alone won't keep the memory current (see above) — but witho
 - After any credential, finding, stage change, pivot or flag: record it in yhwach AND
   update the matching note in the same step. Never "later".
 - Never re-run an approach listed in `exhausted-approaches.md` without asking me.
+- Write each step into `notes/acme/chains/<ID>-<host>-<technique>.md` right after
+  running it (template: docs/templates/chain-note.md).
+- At every capture point run `scripts/yhwach-shot.sh -l acme -n <ID>-<step> --cmd -- <command>`
+  and paste the EMBED line it prints. If it prints SCREENSHOT-MISSING, write that token.
 - yhwach recalls options; I choose the attack path. Ask before any exploit.
 - Before `yhwach_add_cred`, check the lockout policy — recording a credential sprays it.
 ```
@@ -252,40 +256,104 @@ At the end of each working session, run through this checklist with your agent:
 
 ## Notes with Obsidian
 
-Yhwach and your notes have **separate jobs**, and keeping both current is on you:
-
-- **Yhwach DB = the facts** — hosts, services, credentials, findings, stages, pivots. Queryable, structured, the source of truth for *what*.
-- **Obsidian vault = the story** — how you got in, why a path worked, the reproducible chain behind every flag. The source of truth for *how* and *why*.
+Yhwach holds the **facts**. Your Obsidian vault holds the **story and the evidence**: how you got in, why it worked, and the proof. **The report is written from the vault, not from yhwach.**
 
 > [!NOTE]
 > **Yhwach never reads your Obsidian vault, and nothing syncs the two automatically.** Your agent writes notes with its normal file tools — when you ask it to. Record the fact in yhwach and write the note in the same step, every time.
 
-### What yhwach generates for you
+The advice below comes from reviewing the vaults of real, finished engagements: a handful of notes carried the entire report, while others were created at kickoff and never filled. Put your effort where it pays. One folder per engagement, e.g. `~/notes/acme/`.
 
-| Command | Produces |
-|---|---|
-| `yhwach export-notes --lab acme --out <obsidian-vault>/acme/_yhwach` | Inventory notes built from the DB — *Services & Software*, *Vulnerabilities*, *Web*, *Users & Groups*, *Shares* — and one `hosts/<host>.md` per host, **including every in-scope address not yet scanned** (a /24 means ~254 files; keep the folder collapsed or excluded from graph view). **Each run overwrites these files**, so export them into their own subfolder and never type your own prose into them. Re-export after big ingests. |
-| `yhwach_poc_step` → `yhwach poc --lab acme --objective <name> --out <obsidian-vault>/acme/chains/<name>.md` | A reproducible chain: every step's command, output, script and source, in order — the backbone of your write-up. Without `--out` it is written to `~/.local/share/yhwach/chains/`, **outside your vault and shared by every lab** — so use objective names that are unique across engagements. |
-| `yhwach report --lab acme --out report.md` | A full Markdown engagement report: findings, hosts, pivots and the timeline. |
-| `yhwach recon --lab acme --host 10.10.10.5` | Everything known about one host — paste it into a note. |
-
-### What you write (or ask your agent to write)
-
-A note set that works well, one folder per engagement:
+### Report notes — these become the report
 
 | Note | Holds |
 |---|---|
-| `index.md` | Status board — links to every note, hosts / findings / credentials at a glance |
-| `overview.md` | The 30-second summary and one line per objective |
-| `attack-chain.md` | The end-to-end kill path, newest phase last |
-| `credentials.md` | Every credential: value, where it's valid, how it was obtained |
-| `network-map.md` | Subnets, routes, pivots, tunnels — who reaches what |
-| `next-steps.md` | Open leads, in order |
-| `exhausted-approaches.md` | Dead ends and decoys, **with why** they failed — never re-try blindly |
-| `resume.md` | Where you stopped and the very next move — read it first after any break |
-| `hosts/`, `findings/`, `chains/` | Your own per-host narrative, one note per finding, and the per-flag reproducible chains |
+| `chains/<ID>-<host>-<technique>.md` | **One per flag / objective — the deliverable.** Seven fixed sections ([below](#the-chain-note)): every command, its output and a screenshot, start to flag. |
+| `screenshots/` | Proof images, each paired with a `.txt` of the same command's output — made by [`scripts/yhwach-shot.sh`](scripts/yhwach-shot.sh) and embedded in the chain notes. |
+| `credentials.md` | A **master table at the top**: principal · secret · where it works · how it was obtained (link the chain) · last verified · durable or ephemeral. Move superseded values to a section at the bottom instead of correcting them in prose further down. |
+| `attack-chain.md` | The narrative: one dated phase per step forward, each linking its chain note. It becomes the report's summary. |
+| `scripts/` | Every exploit or helper you ran, with a header: what it does, where it came from, what you changed, how you ran it. Feeds *Source & modifications*. |
+| `loot/` | Small text loot (keys, configs) and an `.ORIGINAL` copy of every file you overwrite on a target, for cleanup. Large dumps stay outside the vault, referenced by path and hash. |
+| `index.md` | The status board while you work. At the end, the **submission summary**: one row per flag with its chain link and its proof **embedded** (a plain filename renders nothing). |
 
-The rule that makes it work: **every time something lands in yhwach, the matching note gets updated in the same step** — and before you end a session, `resume.md` is current.
+### Working notes — keep you oriented, stay out of the report
+
+| Note | Holds |
+|---|---|
+| `resume.md` | **One** rolling note, **overwritten** each session: where you are, how to reconnect, which access is durable (credentials, keys) and which is ephemeral (shells, tunnels, sessions), the next three moves, cleanup owed. Read it first after any break. |
+| `next-steps.md` | Open leads, ranked. What's left at the end becomes the report's *not captured* section. |
+| `exhausted-approaches.md` | Each dead end: what you tried, the result, **how confident** you are and **what you assumed** (tunnel up, fresh token, right credentials) — so it gets re-tested when that changes. Move an entry out when it turns out to work. |
+| `hosts/<host>.md` | One per host you touch, under **one** canonical name. Keep its status lines (access, privesc, loot, link to its chain) **updated in place**, not as appended session logs, and update it after exploitation, not only at recon. |
+| `network-map.md` | Subnets, routes, pivots and tunnels — and which of them die on a revert. |
+
+### Skip these — they ended up empty
+
+- **A new resume note every session.** They pile up and contradict each other. Keep one `resume.md`; archive old versions to `sessions/<date>.md`.
+- **An `overview.md` written at kickoff.** Nobody updates it. Keep the summary in `index.md`, or write the overview at the end.
+- **A half-used `findings/` folder.** Either one note per vulnerability (severity, evidence embed, link to its chain), or let section 2 of each chain note be the finding. Half-done leaves orphans.
+- **`yhwach export-notes` inventory notes** (*Services & Software*, *Shares*, *Users & Groups*, *Vulnerabilities*, *Web*). They are built only from structured records yhwach holds, and in practice they stayed empty. Export them (into their own `_yhwach/` folder — each run overwrites it) only if you feed those records, and re-export after each ingest.
+- **Non-chain notes in `chains/`** — resume points, deferred plans, idea lists. `chains/` holds exactly the deliverable.
+- **Tool artifacts** — C2 session stubs, cracking session files, temporary run scripts. Keep them out of the vault.
+
+### The chain note
+
+Start every chain from [`docs/templates/chain-note.md`](docs/templates/chain-note.md) (it works with Obsidian's *Templates* plugin). Seven sections, in this order:
+
+1. **Target + objective** — host, service, the proof file, points.
+2. **Vulnerability** — class / CVE / misconfiguration in a sentence or two. This *is* the finding.
+3. **Prerequisites** — exactly what a reader needs to start: tunnel, credentials (each linked to the chain that produced it), tools. Nothing else assumed.
+4. **Steps** — numbered. Each one: the exact command, the verbatim output from its `.txt`, one line on what it proves, the screenshot.
+5. **Proof** — one command run on the target as the compromised user, showing identity + hostname + flag together.
+6. **Source & modifications** — the full source of every script used, where it came from, and what you changed.
+7. **Cleanup / notes** — persistence installed, what's left on the target, what's durable and what's ephemeral.
+
+What separated report-ready chains from the rest:
+
+- **Each step written right after it ran.** Notes reconstructed at the end of a session — or screenshots retaken afterwards — miss state that's already gone.
+- **Commands that run as pasted:** real IPs, users and paths inline; no `$VARS`, `~/` or temp paths; no placeholders; no "same as step 2 of the other note" (make that note a prerequisite instead).
+- **Output pasted, not paraphrased** — copied from the `.txt`.
+- **A control step** where it helps: the blocked request before the bypass.
+- **A final re-run from zero:** revert, follow each chain note literally, re-capture, stamp *re-verified &lt;date&gt;*, and delete the superseded first-pass screenshots.
+
+`yhwach poc` gives section 4 a head start: `yhwach poc --lab acme --objective <name>` prints the steps you recorded with `yhwach_poc_step`. Paste them into the chain note and write the other six sections yourself. Don't point its `--out` at a note you edit by hand — it overwrites the file.
+
+### Proof screenshots — `scripts/yhwach-shot.sh`
+
+```bash
+export YHWACH_VAULT="$HOME/notes"          # vault root; each lab is a folder in it
+~/yhwach/scripts/yhwach-shot.sh -l acme -n c1-web01-proof --cmd -- <the command that prints the proof>
+#   SAVED:  /home/you/notes/acme/screenshots/20261010-174506_c1-web01-proof.png
+#   OUTPUT: /home/you/notes/acme/screenshots/20261010-174506_c1-web01-proof.txt   (exit 0)
+#   EMBED:  ![[20261010-174506_c1-web01-proof.png]]
+```
+
+`--cmd` opens a terminal, runs the command in it, saves the output to the `.txt` (headed by the UTC time, `user@host` and the exact command line) and captures the whole screen. For a shell that's already open — a reverse shell, a C2 session — bring it to the front and use `--region --delay 3` to frame it yourself. The script prints an embed only for a file that really exists; otherwise it prints `⚠️ SCREENSHOT-MISSING` and exits 1. It needs a desktop session: ImageMagick `import` on X11, or `grim` + `slurp` on Wayland.
+
+What makes a screenshot count:
+
+- **Capture points:** the first shell, every privilege boundary, every web or AI request that lands, and the proof.
+- **The proof is the output of a command you ran on the target as the compromised user:** `whoami` / `id`, `hostname`, the IP and the flag, in one frame. A flag you downloaded and read on your own machine, or a value the target merely echoes back, isn't proof.
+- **AI targets:** the exact request **and** the real effect — the tool result, job trace or listener hit — not the model repeating your input.
+- **A clean frame:** an opaque terminal, no other chats or sessions visible (the whole screen is captured), no resizing during the capture, command lines short enough not to wrap.
+- **Label with the chain ID** (`-n c1-web01-proof`) so each image belongs to one note, and paste the embed on its **own line** — never in backticks or a code block, never split across lines.
+- **A capture point you missed gets the literal token `⚠️ SCREENSHOT-MISSING`** at that step — not a sentence about it — so the check below finds it.
+
+### Before you call it done — `scripts/yhwach-vault-check.py`
+
+```bash
+~/yhwach/scripts/yhwach-vault-check.py ~/notes/acme
+```
+
+A mechanical done-gate for one lab folder. It lists embeds that point at missing files or won't render, leftover `SCREENSHOT-MISSING` / `TODO` / `UNVERIFIED` markers, chain notes missing one of the seven sections, screenshots no note embeds, captures that saved output but no image, and links to notes that don't exist. It exits 1 while any chain note isn't done.
+
+> [!WARNING]
+> Your vault holds live secrets — credentials, keys, flags. Never sync it to a public location.
+
+### Also from yhwach
+
+| Command | Produces |
+|---|---|
+| `yhwach report --lab acme --out report.md` | A Markdown engagement report from the database — findings, hosts, pivots, timeline. Cross-check it against your chain notes. |
+| `yhwach recon --lab acme --host 10.10.10.5` | Everything yhwach knows about one host — paste what's useful into its host note. |
 
 ---
 

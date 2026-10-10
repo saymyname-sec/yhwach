@@ -400,7 +400,9 @@ def test_vault_panel_shows_cred_secret_and_opens(tmp_db: Path) -> None:
     assert r.status_code == 200
     assert "Administrator" in r.text
     assert "S3cr3t!" in r.text                 # plaintext secret shown
-    assert "10.0.0.5:5985/winrm" in r.text     # opens column
+    assert "5985/winrm" in r.text              # opens column: service chip (IP condensed out)
+    assert "opens 1" in r.text                 # host-count summary
+    assert "10.0.0.5" in r.text                # host still shown (validated column)
     assert "copy" in r.text and "reveal" not in r.text  # plaintext, no reveal toggle
 
 
@@ -1524,8 +1526,8 @@ def test_vault_separates_proven_access_from_proven_failure(tmp_db: Path) -> None
                                 result="fail", source="spray")
     body = _client(tmp_db).get("/vault").text
     assert "access (proven / failed)" in body
-    assert "failed:" in body
-    assert "10.0.0.9" in body, "the host it failed against is not shown"
+    assert "✗ 1 failed" in body                   # failures collapsed to a count, separate from proven
+    assert "10.0.0.9" in body, "the host it failed against is not shown"  # still in the expandable list
 
 
 # ─── markdown STRUCTURE injection ──────────────────────────────────────────

@@ -1,0 +1,6 @@
+    __             __               __
+2024/01/02 kerbrute
+[+] VALID USERNAME:	 administrator@corp.local
+[+] VALID USERNAME:	 svc_sql@corp.local
+[+] VALID USERNAME:	 j.doe@corp.local
+Done! Tested 5000 usernames (3 valid) in 4.2 seconds

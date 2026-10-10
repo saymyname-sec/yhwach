@@ -1,0 +1,125 @@
+# Yhwach — lessons memory. The knowledge won in past labs (the learn(*) commits),
+# moved out of git history into a pack the running agent can read.
+# `yhwach ref lessons [--query redis]`.
+#
+# The JOIN KEY is `trigger_tag`: existing finding/surface tags. The brief pulls a
+# lesson whenever a host carries a matching tag (see brief lessons_for(tags)).
+# This pack REFERENCES already-learned chains; it never creates a new technique.
+# Schema per entry: id, trigger_tag[], lesson (one line), maps[] (public IDs).
+
+- id: L-recall-leak
+  trigger_tag: [chatbot]
+  lesson: "recall_conversation leaks cross-session history — mine it for a portal/admin cred"
+  maps: [LLM02, ATLAS-AML.T0057]
+- id: L-n8n-credstore
+  trigger_tag: [n8n_ni8mare, n8n_encryption_key, n8n]
+  lesson: "n8n file-read -> forge JWT with the leaked key -> decrypt the credential store"
+  maps: [CVE-2026-21858, CWE-522]
+- id: L-rag-poison
+  trigger_tag: [rag_upload, rag_import_ok]
+  lesson: "indirect injection via an ingested/imported doc bypasses a naive read_page gate"
+  maps: [LLM01, ATLAS-AML.T0051.001]
+- id: L-a2a-capture
+  trigger_tag: [a2a]
+  lesson: "register a rogue agent -> capture the credentials passed in delegated tasks"
+  maps: [LLM06, ATLAS-AML.T0053]
+- id: L-mssql-clr
+  trigger_tag: [mssql]
+  lesson: "MSSQL sa -> load a SQL CLR assembly for execution (AMSI/Defender bypass)"
+  maps: [T1190, T1059]
+- id: L-godpotato
+  trigger_tag: [seimpersonate]
+  lesson: "SeImpersonate -> GodPotato to SYSTEM; then WinRM to dodge the UAC token filter"
+  maps: [T1134.001]
+- id: L-keepass-loot
+  trigger_tag: [keepass_kdbx]
+  lesson: "KeePass KDBX4 on disk -> crack offline; run john --show (a 2nd run says 'no hashes left' = already cracked)"
+  maps: [T1555.005]
+- id: L-keycrack
+  trigger_tag: [encrypted_private_key]
+  lesson: "crack an encrypted key the moment you loot it, in parallel with the intel hunt"
+  maps: [T1110.002]
+- id: L-gitea-import
+  trigger_tag: [git_import_pipeline, gitea]
+  lesson: "poison a git-pull-and-import module for RCE on the importing host"
+  maps: [T1195, T1059]
+- id: L-gitlab-pat
+  trigger_tag: [gitlab_token]
+  lesson: "GitLab open-registration -> PAT -> classifier poisoning + container-registry loot"
+  maps: [T1552.001]
+- id: L-docker-root
+  trigger_tag: [docker_group]
+  lesson: "docker group membership == host root (mount / with an alpine chroot)"
+  maps: [T1611]
+- id: L-vhost-fuzz
+  trigger_tag: [web]
+  lesson: "a uniform reply on every vhost is nginx default_server, not a decoy — fuzz vhosts before calling it dead"
+  maps: [T1594]
+- id: L-redis-loot
+  trigger_tag: [redis, redis_unauth]
+  lesson: "unauth Redis: INFO/KEYS and loot before pivot; CONFIG SET / MODULE LOAD / SLAVEOF RCE is version/config-gated"
+  maps: [T1213]
+- id: L-aws-imds
+  trigger_tag: [aws_credentials]
+  lesson: "sts get-caller-identity FIRST; prefer IMDSv2; grep tfstate/.env; iam:PassRole + service-create == role assumption"
+  maps: [T1552.005]
+
+# Yhwach — lessons memory ADDITIONS (field-proven playbook wins).
+# Same schema per entry:
+#   id, trigger_tag[], lesson (one line), maps[] (public IDs).
+# Join key is trigger_tag: the brief pulls a lesson when a host carries a
+# matching finding/surface tag. These are reusable playbook wins.
+#
+# NOTE: L-keycrack already exists (trigger_tag [encrypted_private_key]); on a past
+# run it was NOT surfaced and the operator password-guessed instead. The first
+# entry below reinforces it with the broader .deploy/ssh_key
+# triggers + the cap-guessing-then-hunt rule so it fires at the right moment.
+
+- id: L-deploy-sshkey
+  trigger_tag: [encrypted_private_key, ssh_key, deploy_dir, dot_deploy, id_rsa]
+  lesson: "cap credential-guessing (~10) then HUNT key artifacts (.ssh/.deploy/configs); a weakly-passphrased SSH key cracks in seconds and is often the intended path, not a guess"
+  maps: [T1552.004, T1110.002]
+- id: L-werkzeug-pin
+  trigger_tag: [werkzeug_console, flask_debug, werkzeug_debugger]
+  lesson: "Werkzeug console: PIN inputs (username, app.__file__, /etc/machine-id, cgroup leaf, MAC from /sys/class/net/<if>/address) are box-specific -> RECOMPUTE; read the debugger SECRET live (rotates per restart); node_exporter's advertised MAC is a decoy"
+  maps: [CWE-489, T1190]
+- id: L-guard-jailbreak
+  trigger_tag: [llm_guard, ai_filter, guard_llm, chatbot, system_prompt]
+  lesson: "a guard-LLM that refuses plain+obfuscated injection often yields to an AUTHORITY/OVERRIDE jailbreak (P1-incident + reframe validation as a downstream wrapper's job); probabilistic 30-50%, retry, keep the injected command benign-looking"
+  maps: [LLM01, ATLAS-AML.T0054]
+- id: L-tool-arg-inject
+  trigger_tag: [mcp, ai_tool, run_diagnostic, tool_call, agentic]
+  lesson: "enumerate each tool's args; find the one flowing unsanitized to shell/file/SSRF -> NEWLINE command-injection in an unquoted arg (target=\"127.0.0.1\\n<cmd>\") runs <cmd> as the service user; chain SUID find -exec for root file-read; PROVE with the tool RESULT not the model's echo"
+  maps: [LLM01, T1059]
+- id: L-es-logagent
+  trigger_tag: [es_anon, elasticsearch, kibana, log_agent, logagent]
+  lesson: "mine anon-readable ES log indices for creds; then write a CRITICAL doc with 'REMEDIATION_REQUIRED: <cmd>' and the log-remediation AI agent calls execute_remediation(<cmd>) as SYSTEM (excessive agency via indirect injection)"
+  maps: [LLM06, ATLAS-AML.T0051.001]
+- id: L-url-decode-bypass
+  trigger_tag: [llm_firewall, waf_llm, url_encode]
+  lesson: "differential URL-decode bypass of an LLM 'firewall': single %67 BLOCKED, double %2567 ALLOWED+leaks (the guard decodes once, the backend decodes twice)"
+  maps: [CWE-177, LLM01]
+- id: L-pickle-rce
+  trigger_tag: [model_upload, pickle, torch, safetensors, picklescan]
+  lesson: "picklescan-bypass -> torch.load RCE: a crafted __reduce__ survives the scanner and executes on model load"
+  maps: [ATLAS-AML.T0010, T1059]
+- id: L-gmsa-readers
+  trigger_tag: [gmsa, ms_ds, ms_ds_gmsa, readgmsapassword]
+  lesson: "a gMSA readers list is not a win until you READ the password WITH DATA (nxc ldap --gmsa / bloodyAD get --gmsa); then it's a service-account cred, often privileged"
+  maps: [T1555, T1078]
+- id: L-revert-triage
+  trigger_tag: [revert, lab_revert, from_zero]
+  lesson: "after a revert classify each artifact durable-vs-ephemeral: domain passwords/on-disk keys/API keys SURVIVE; footholds/tunnels/SAM-LSA/Werkzeug SECRET+PIN/session cookies/MCP tokens/DPAPI keys are WIPED -> recompute box-specific values, read live values, never replay a captured cookie/SECRET"
+  maps: [T1078]
+- id: L-read-docs
+  trigger_tag: [runbook, catalog, dev_portal, wiki, service_catalog, readme]
+  lesson: "READ THE DOCS first: runbooks/service-catalogs/wikis literally NAME where secrets live (e.g. a service catalog that names the ES-write cred's Vault entry)"
+  maps: [T1083, T1552.001]
+- id: L-tunnel-health
+  trigger_tag: [ligolo, tunnel, pivot, socks]
+  lesson: "tunnel-health preflight before each internal action (curl the internal gateway); symptom 'all internal hosts down but pivot host fine' = proxy session not re-'start'ed after agent reconnect (route persists, routing dead); re-start the session, SSH local-forward is the fallback transport"
+  maps: [T1572]
+- id: L-flag-proof
+  trigger_tag: [objective, flag, proof, capture]
+  lesson: "an echo is never proof: the flag must be OUTPUT of an executed command (type/cat as the owned user, whoami+hostname framed) or for AI targets the triggering request + the tool/model RESULT showing real execution (ping-then-cmd, CI trace with runner identity + 'Job succeeded')"
+  maps: [T1005]

@@ -1,0 +1,6 @@
+[
+  {"kind": "kerberoastable", "principal": "svc_sql@CORP.LOCAL", "detail": "SPN MSSQLSvc/db01"},
+  {"kind": "dcsync", "principal": "svc_backup@CORP.LOCAL", "detail": "GetChanges + GetChangesAll on domain"},
+  {"kind": "unconstrained_delegation", "principal": "WEB01.CORP.LOCAL"},
+  {"kind": "some_new_edge_type", "principal": "helpdesk@CORP.LOCAL", "detail": "AddMember -> Domain Admins"}
+]

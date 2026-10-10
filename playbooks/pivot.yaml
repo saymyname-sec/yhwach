@@ -1,0 +1,104 @@
+# Yhwach — pivot / revshell playbook (arsenal-wired).
+#
+# Fires once a host reaches `foothold` and the operator needs either a reverse
+# shell (before the foothold; from a delivery surface such as a Jenkins Groovy
+# console or a stored SSTI) or a subnet-piercing pivot (after the foothold).
+#
+# Every rule below hardcodes the CANONICAL arsenal binary via
+# `yhwach.arsenal` — the actions themselves resolve the path, but the rule
+# metadata names the key so `yhwach next` can print WHICH binary each move
+# will ship. See `yhwach/arsenal.py` for the registry and
+# `~/.claude/CLAUDE.md` § Arsenal for the doctrine.
+#
+# All rules `authorized_only: true`. Deployment reaches outside the target
+# (opens a listener on Kali) so `action_class: listener` — a blanket
+# `--allow-gated` does NOT cover it; the human must explicitly `--allow listener`
+# for it to run unattended.
+
+# ── Windows pivot: obfuscated ligolo agent (svcmon.exe) ──────────────────────
+- id: pivot_ligolo_windows
+  when: { os: windows, stage: foothold }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: deploy_svcmon_and_route
+  maps: [T1090.002]  # Proxy: External Proxy
+  points: 10
+  risk: exploit
+  action_class: listener
+  routes: 'yhwach pivot'
+  source: 'arsenal: yhwach.arsenal.SVCMON_WIN (<repo>/arsenal/svcmon.exe, vendored)'
+  authorized_only: true
+
+# ── Linux pivot (default): chisel reverse SOCKS ──────────────────────────────
+# Preferred over ligolo on Linux — no root needed on target OR Kali, and it
+# ships one static Go ELF. Use pivot_ligolo_linux when full-tun L3 is required.
+- id: pivot_chisel_linux
+  when: { os: linux, stage: foothold }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: deploy_chisel_reverse_socks
+  maps: [T1090.002]
+  points: 10
+  risk: exploit
+  action_class: listener
+  routes: 'yhwach pivot'
+  source: 'arsenal: yhwach.arsenal.CHISEL (/usr/local/bin/chisel)'
+  authorized_only: true
+
+# ── Linux pivot (alt): ligolo-agent-linux (needs root on Kali for tun) ───────
+- id: pivot_ligolo_linux
+  when: { os: linux, stage: foothold }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: deploy_ligolo_agent_linux
+  maps: [T1090.002]
+  points: 8
+  risk: exploit
+  action_class: listener
+  routes: 'yhwach pivot'
+  source: 'arsenal: yhwach.arsenal.LIGOLO_AGENT_LINUX (/usr/bin/ligolo-agent, Kali apt)'
+  authorized_only: true
+
+# ── Windows revshell generation (before foothold) ────────────────────────────
+# Emits a per-run randomised C# revshell (XOR + jitter + reconnect) via the
+# canonical Windows generator. Not a pivot itself — it's the payload the
+# operator delivers via a Windows RCE surface. Output writes to
+# <workspace>/loot/revshells/ (see yhwach.config).
+- id: generate_windows_revshell
+  when: { os: windows }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: render_gen_sh
+  maps: [T1059.001]  # Command and Scripting Interpreter: PowerShell/csc
+  points: 6
+  risk: exploit
+  action_class: listener
+  routes: 'yhwach pivot'
+  source: 'arsenal: yhwach.arsenal.REVSHELL_GEN_WIN (<repo>/arsenal/gen_cs_shell.sh, vendored)'
+  authorized_only: true
+
+# ── Linux revshell generation (before foothold) ──────────────────────────────
+# Emits the 7-payload Linux menu (bash /dev/tcp, python PTY, socat, nc+mkfifo,
+# perl, php, ELF gcc). Pick the flavour that fits the delivery vector.
+- id: generate_linux_revshell
+  when: { os: linux }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: render_gen_linux_shell
+  maps: [T1059.004]  # Command and Scripting Interpreter: Unix Shell
+  points: 6
+  risk: exploit
+  action_class: listener
+  routes: 'yhwach pivot'
+  source: 'arsenal: yhwach.arsenal.REVSHELL_GEN_LINUX (<repo>/arsenal/gen_linux_shell.sh, vendored)'
+  authorized_only: true

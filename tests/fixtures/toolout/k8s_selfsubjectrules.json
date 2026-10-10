@@ -1,0 +1,3 @@
+{"verbs":["create","get","list","delete"],"apiGroups":[""],"resources":["pods"]}
+{"verbs":["get","list"],"apiGroups":[""],"resources":["secrets"]}
+{"verbs":["get"],"apiGroups":[""],"resources":["configmaps"]}

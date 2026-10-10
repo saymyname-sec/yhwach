@@ -1,0 +1,151 @@
+# Yhwach — cloud / Kubernetes / AWS playbook.
+#
+# Cloud / Kubernetes / AWS ML-infra attack chains. Covers IAM role chain
+# escalation, K8s cross-namespace secret exfil, SageMaker notebook privesc,
+# SSM/CloudWatch credential hunting, and GPU container escape.
+
+# A mounted service-account token (found post-foothold inside a pod) is the
+# entry point — no network "kubernetes surface" is ever probed, so gate on the
+# finding the linpeas parser sets.
+- id: k8s_sa_token_and_secrets
+  when: { findings_include: k8s_sa_token }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: k8s_sa_token_enum
+    - action: k8s_secret_sweep
+  maps: [LLM06, CWE-200]
+  points: 15
+  risk: propose
+  routes: 'yhwach ref ai-attacks -q cloud_loot'
+  source: 'technique: mounted SA token -> enum + cross-namespace secret sweep (LLM06)'
+  authorized_only: true
+
+- id: k8s_privileged_escape
+  when: { findings_include: pod_create_permission }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: k8s_privileged_pod_escape
+  maps: [LLM06, CWE-250]
+  points: 15
+  risk: destructive
+  routes: 'yhwach ref ai-attacks -q cloud_loot'
+  source: 'technique: create a privileged pod (hostPID + nsenter) -> node root'
+  authorized_only: true
+
+- id: aws_iam_role_chain_escalation
+  when: { findings_include: aws_credentials }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: aws_iam_role_chain
+    - action: aws_sagemaker_enum
+    - action: aws_ssm_secret_dump
+    - action: aws_cloudwatch_cred_hunt
+    - action: aws_ecr_image_inspect
+  maps: [LLM06, CWE-269]
+  points: 15
+  risk: propose
+  routes: 'yhwach ref ai-attacks -q cloud_loot'
+  source: 'technique: multi-hop IAM AssumeRole chain through ML roles -> SageMaker (illustrative: Lambda->DataScientist->MLOps->SageMaker)'
+  authorized_only: true
+
+- id: aws_sagemaker_notebook_privesc
+  when: { findings_include: sagemaker_create_notebook }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: aws_sagemaker_notebook_privesc
+  maps: [LLM06, CWE-269]
+  points: 15
+  risk: destructive
+  routes: 'yhwach ref ai-attacks -q cloud_loot'
+  source: 'technique: CreateNotebookInstance + PassRole bypasses sts:AssumeRole (CWE-269)'
+  authorized_only: true
+
+- id: gpu_container_escape
+  when: { findings_include: nvidia_toolkit }
+  class: ai
+  likelihood: M
+  time_cost: slow
+  emits:
+    - action: gpu_container_escape_cve
+  maps: [CVE-2025-23266]
+  points: 15
+  risk: destructive
+  routes: 'yhwach ref ai-attacks -q cloud_loot'
+  source: 'CVE-2025-23266: nvidia-container-toolkit LD_PRELOAD container escape'
+  authorized_only: true
+
+# --- Network-surface control plane (P1: PORT_KIND now classifies apiserver/
+#     kubelet/etcd/docker_api). These are the reachable-from-the-network half of
+#     the k8s attack surface — the rules above are all post-foothold. class:
+#     traditional (NOT ai) so the AI-first ranker doesn't mis-promote pure infra.
+#     Rule ids are kind-prefixed so a recon attempt clears the service_enum gap.
+
+- id: apiserver_anonymous_enum
+  when: { surface: apiserver }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: apiserver_version
+    - action: apiserver_anonymous_rbac_review
+  maps: [T1613, CWE-284]
+  points: 15
+  risk: read_only
+  routes: 'yhwach ref arsenal -q cloud'
+  source: 'k8s docs . 6443 apiserver: /version + can-i --list --as=system:anonymous'
+  technique: apiserver_enum
+  authorized_only: true
+
+- id: kubelet_anonymous_enum
+  when: { surface: kubelet }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: kubelet_pods_list
+  maps: [T1613, CWE-306]
+  points: 15
+  risk: read_only
+  routes: 'yhwach ref arsenal -q cloud'
+  source: 'hacktricks . 10250 kubelet: /pods + /runningpods (anon) -> /run exec target'
+  technique: kubelet_enum
+  authorized_only: true
+
+- id: etcd_unauth_keyspace
+  when: { surface: etcd }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: etcd_keyspace_dump
+  maps: [T1552.007, CWE-306]
+  points: 15
+  risk: read_only
+  routes: 'yhwach ref ai-attacks -q cloud_loot'
+  source: 'hacktricks . 2379 etcd: unauth get / --prefix -> /registry/secrets'
+  technique: etcd_enum
+  authorized_only: true
+
+- id: docker_api_unauth
+  when: { surface: docker_api }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: docker_api_ping_version
+    - action: docker_api_list_containers
+  maps: [T1610, CWE-306]
+  points: 15
+  risk: read_only
+  routes: 'yhwach ref arsenal -q cloud'
+  source: 'hacktricks . 2375 docker API: /_ping + /version + /containers/json (host-root-equiv)'
+  technique: docker_api_enum
+  authorized_only: true

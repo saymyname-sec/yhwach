@@ -1,0 +1,5 @@
+[*] gpohound analysis --enrich
+[GPO] Default Domain Policy {31B2F340-016D-11D2-945F-00C04FB984F9}
+    Links: DC=corp,DC=local
+[VULNERABLE] GPO 'Workstation Baseline' {A1B2...} is writable (GenericWrite) by group 'GPO-Editors'
+    -> push an immediate scheduled task to all linked workstations

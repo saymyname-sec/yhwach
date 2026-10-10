@@ -1,0 +1,8 @@
+HTTP/1.1 200 OK
+Server: nginx
+X-Content-Type-Options: nosniff
+X-Jenkins: 2.555.1
+X-Jenkins-Session: 6f0b0d3a
+Content-Type: application/json;charset=utf-8
+
+{"_class":"hudson.model.Hudson","assignedLabels":[{}],"mode":"NORMAL","nodeName":"","useSecurity":false,"jobs":[]}

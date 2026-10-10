@@ -1,0 +1,8 @@
+{
+  "meta": {"type": "users", "count": 3, "version": 5},
+  "data": [
+    {"Properties": {"name": "ADMINISTRATOR@CORP.LOCAL", "admincount": true, "hasspn": false, "dontreqpreauth": false}},
+    {"Properties": {"name": "SVC_SQL@CORP.LOCAL", "hasspn": true, "dontreqpreauth": false}},
+    {"Properties": {"name": "J.DOE@CORP.LOCAL", "hasspn": false, "dontreqpreauth": true}}
+  ]
+}

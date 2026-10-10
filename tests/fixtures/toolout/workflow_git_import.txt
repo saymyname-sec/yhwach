@@ -1,0 +1,1 @@
+cd /opt/example-model && git -c credential.helper='!f(){ echo username=deploy-svc; echo "password=Depl0y!Svc#Acme2025"; }; f' pull -q origin main; python3 -c 'import sys,importlib;sys.path.insert(0,"/opt/example-model");importlib.import_module("clf")'

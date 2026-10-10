@@ -1,0 +1,1084 @@
+"""Deterministic finding extraction from action output.
+
+This is the *deterministic* half of INTERPRET: high-signal, unambiguous outputs
+(an Ollama model list, an exposed MCP tool list, a Jenkins unauth API) become
+`finding` rows with zero model involvement. Ambiguous output (does this chatbot
+reply leak the system prompt?) stays the operator's judgment via the contract —
+we do not guess here.
+
+Each extractor: (output, context) -> ExtractedFinding | None. Registered per
+action id. Silence (None) is always safe.
+"""
+from __future__ import annotations
+
+import json
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass
+class ExtractedFinding:
+    cls: str        # LLM01..LLM10 | CWE-... | CVE-... | ATLAS-...
+    title: str
+    severity: str   # critical | high | medium | low
+    evidence: str
+    tag: str | None = None   # chaining key a rule's `findings_include` matches on
+
+
+def _first_json(output: str) -> Any:
+    """Parse the first JSON object/array embedded in output, or None.
+
+    Uses raw_decode from each `[`/`{` candidate so trailing text after the JSON
+    is tolerated in a single pass (no quadratic substring scan, no size cap)."""
+    if not output:
+        return None
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r"[\[{]", output):
+        try:
+            obj, _ = decoder.raw_decode(output, m.start())
+            return obj
+        except ValueError:
+            continue
+    return None
+
+
+def _ollama_models(output: str, ctx: dict) -> ExtractedFinding | None:
+    data = _first_json(output)
+    if isinstance(data, dict) and data.get("models"):
+        names = [m.get("name") for m in data["models"] if isinstance(m, dict) and m.get("name")]
+        return ExtractedFinding(
+            "LLM06", "Unauthenticated Ollama API exposes models", "high",
+            f"{len(names)} models on {ctx.get('URL','?')}: {', '.join(names)[:140]}",
+        )
+    return None
+
+
+def _ollama_version(output: str, ctx: dict) -> ExtractedFinding | None:
+    """`/api/version` -> tag ollama_probllama when < 0.1.34 (CVE-2024-37032).
+
+    The rogue-registry arbitrary-file-write is version-gated, so fingerprinting
+    the version is what unlocks the exploit rule deterministically."""
+    data = _first_json(output)
+    if not isinstance(data, dict):
+        return None
+    ver = data.get("version")
+    if not isinstance(ver, str):
+        return None
+    try:
+        parts = tuple(int(x) for x in re.findall(r"\d+", ver)[:3])
+    except ValueError:
+        return None
+    if parts and parts < (0, 1, 34):   # fixed in 0.1.34
+        return ExtractedFinding(
+            "CVE-2024-37032", "Ollama vulnerable to Probllama (arbitrary file write)", "critical",
+            f"Ollama {ver} on {ctx.get('URL','?')} < 0.1.34 — rogue-registry manifest digest "
+            "path traversal writes files as the ollama process (often root)",
+            tag="ollama_probllama")
+    return None
+
+
+def _git_import_pipeline(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A scheduled git-pull-and-import carrying a credential.helper cred ->
+    tag git_import_pipeline (poison the imported module for RCE, obj7)."""
+    has_cred = "credential.helper" in output or re.search(r"password=\S+", output)
+    has_git = re.search(r"\bgit\b.*\bpull\b", output, re.DOTALL)
+    has_import = "import_module(" in output or "__init__" in output
+    if not (has_cred and has_git and has_import):
+        return None
+    return ExtractedFinding(
+        "CWE-94", "Scheduled git-pull-and-import with a pushable cred", "critical",
+        "a scheduled job git-pulls then imports a repo using a leaked credential.helper cred — "
+        "poison the imported module (__init__.py) for RCE as the runtime user",
+        tag="git_import_pipeline")
+
+
+def _gitlab_pat(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A minted GitLab PAT -> tag gitlab_token (unlocks the CI-exfil chain)."""
+    data = _first_json(output)
+    tok = data.get("token") if isinstance(data, dict) else None
+    if not (isinstance(tok, str) and tok.startswith("glpat-")):
+        m = re.search(r"\bglpat-[A-Za-z0-9._-]{15,}", output)
+        tok = m.group(0) if m else None
+    if not tok:
+        return None
+    return ExtractedFinding(
+        "CWE-200", "GitLab personal access token minted", "high",
+        f"PAT {tok[:12]}… on {ctx.get('URL','?')} — read internal projects, CI variables, "
+        "and the container registry",
+        tag="gitlab_token")
+
+
+def _encrypted_privkey(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A looted *encrypted* private key -> tag encrypted_private_key.
+
+    Ranks offline cracking immediately (ssh2john + rockyou) instead of a
+    days-long "where is the passphrase stored" hunt. In practice a looted audit
+    key is often rockyou-crackable within the first hour."""
+    enc = bool(re.search(r"Proc-Type:\s*4,ENCRYPTED", output)) or "DEK-Info:" in output or (
+        "BEGIN OPENSSH PRIVATE KEY" in output and re.search(r"bcrypt|aes\d", output, re.IGNORECASE))
+    if not enc:
+        return None
+    return ExtractedFinding(
+        "CWE-522", "Encrypted private key looted", "high",
+        "an encrypted private key is present — run ssh2john + rockyou NOW (in parallel with any "
+        "intel hunt) and ALWAYS check `john --show`",
+        tag="encrypted_private_key")
+
+
+def _a2a_capture(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Captured A2A task traffic containing a DB connection string / creds ->
+    tag a2a_creds_captured (obj3/obj4)."""
+    m = re.search(r"(?:User\s*Id|uid)\s*=\s*([^;\s]+).{0,80}?(?:Password|pwd)\s*=\s*([^;\s]+)",
+                  output, re.IGNORECASE | re.DOTALL)
+    if not m:
+        return None
+    return ExtractedFinding(
+        "LLM06", "A2A task traffic leaks a database credential", "critical",
+        f"captured connection string exposes {m.group(1)} on {ctx.get('IP', ctx.get('URL','?'))} "
+        "via a redirected agent task",
+        tag="a2a_creds_captured")
+
+
+def _rag_import(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A successful authenticated /api/import -> tag rag_import_ok (obj8).
+
+    The write primitive is what enables the retrieval-poisoning read_page unlock,
+    so a confirmed import unlocks the poison rule."""
+    data = _first_json(output)
+    ok = isinstance(data, dict) and (
+        data.get("status") == "imported" or "nearest_neighbors" in data or data.get("slug"))
+    if not ok:
+        return None
+    return ExtractedFinding(
+        "LLM06", "RAG /api/import authenticated write", "high",
+        f"authenticated import accepted on {ctx.get('URL','?')} — the write primitive enables "
+        "retrieval poisoning to unlock read_page on hidden internal docs",
+        tag="rag_import_ok")
+
+
+def _n8n_version(output: str, ctx: dict) -> ExtractedFinding | None:
+    """n8n version -> tag n8n_ni8mare when < 1.121.0 (CVE-2026-21858 "Ni8mare").
+
+    The form-trigger content-type-confusion arbitrary-file-read is version-gated
+    (fixed 1.121.0), so fingerprinting the version unlocks the exploit rule."""
+    ver = None
+    data = _first_json(output)
+    if isinstance(data, dict):
+        inner = data.get("data") if isinstance(data.get("data"), dict) else data
+        v = inner.get("versionCli") or inner.get("n8nVersion") or inner.get("version")
+        if isinstance(v, str):
+            ver = v
+    if ver is None:
+        m = re.search(r"n8n[\s/@v-]*?(\d+\.\d+\.\d+)", output, re.IGNORECASE)
+        if m:
+            ver = m.group(1)
+    if not isinstance(ver, str):
+        return None
+    parts = tuple(int(x) for x in re.findall(r"\d+", ver)[:3])
+    if parts and parts < (1, 121, 0):
+        return ExtractedFinding(
+            "CVE-2026-21858", "n8n vulnerable to Ni8mare (unauth arbitrary file read)", "critical",
+            f"n8n {ver} on {ctx.get('URL','?')} < 1.121.0 — a form-trigger content-type confusion "
+            "(application/json upload) reads arbitrary text files unauthenticated",
+            tag="n8n_ni8mare")
+    return None
+
+
+def _n8n_env_secret(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A leaked /etc/n8n.env -> tag n8n_encryption_key (unlocks JWT forge + cred-store decrypt)."""
+    m = re.search(r"N8N_ENCRYPTION_KEY\s*=\s*[\"']?([^\s\"']+)", output)
+    if not m:
+        return None
+    return ExtractedFinding(
+        "CWE-522", "n8n encryption key disclosed", "critical",
+        f"N8N_ENCRYPTION_KEY recovered ({m.group(1)[:6]}…) on {ctx.get('URL','?')} — forge the "
+        "n8n-auth JWT (secret = sha256(key[::2])) and decrypt the whole credential store",
+        tag="n8n_encryption_key")
+
+
+def _openai_models(output: str, ctx: dict) -> ExtractedFinding | None:
+    data = _first_json(output)
+    if isinstance(data, dict) and isinstance(data.get("data"), list) and data["data"]:
+        ids = [m.get("id") for m in data["data"] if isinstance(m, dict) and m.get("id")]
+        return ExtractedFinding(
+            "LLM02", "Unauthenticated OpenAI-compatible API", "high",
+            f"{len(ids)} models on {ctx.get('URL','?')}: {', '.join(ids)[:140]}",
+        )
+    return None
+
+
+def _mcp_tools(output: str, ctx: dict) -> ExtractedFinding | None:
+    data = _first_json(output)
+    if isinstance(data, dict) and isinstance(data.get("result"), dict):
+        tools = [t.get("name") for t in data["result"].get("tools", []) if isinstance(t, dict)]
+        if tools:
+            return ExtractedFinding(
+                "LLM06", "MCP server exposes tools unauthenticated", "critical",
+                f"{len(tools)} tools on {ctx.get('URL','?')}: {', '.join(filter(None, tools))[:140]}",
+            )
+    return None
+
+
+def _tool_call_success(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A privileged tool call returned success (excessive agency).
+
+    An LLM tool response with a `tool_calls` result of `ok: true` (or a returned
+    `temp_password`/credential) is deterministic evidence the model executed a
+    real-effect action off an unverified justification."""
+    data = _first_json(output)
+    if isinstance(data, dict) and isinstance(data.get("tool_calls"), list):
+        for call in data["tool_calls"]:
+            res = call.get("result") if isinstance(call, dict) else None
+            if isinstance(res, dict) and (res.get("ok") is True or res.get("temp_password")
+                                          or res.get("password")):
+                name = call.get("name") or "tool"
+                return ExtractedFinding(
+                    "LLM06", "Excessive agency: privileged tool executed on unverified request",
+                    "critical",
+                    f"{ctx.get('URL','?')} ran `{name}` off a fabricated justification",
+                    tag="excessive_agency_confirmed")
+    return None
+
+
+def _jenkins_api(output: str, ctx: dict) -> ExtractedFinding | None:
+    if "hudson.model.Hudson" in output or '"jobs"' in output:
+        return ExtractedFinding(
+            "CWE-200", "Jenkins REST API reachable without auth", "medium",
+            f"{ctx.get('URL','?')}/api/json returns instance metadata",
+        )
+    return None
+
+
+def _jenkins_proxy_bypass(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Jenkins reachable through an auth-proxy static-suffix bypass -> tag
+    jenkins_unsecured. The `X-Jenkins` header or a hudson.model.Hudson body
+    behind a `.css` suffix is the deterministic marker."""
+    if "X-Jenkins" in output or "hudson.model.Hudson" in output:
+        return ExtractedFinding(
+            "CWE-287", "Auth proxy bypassed via static-extension suffix (Jenkins reachable)",
+            "critical",
+            f"{ctx.get('URL','?')}/api/json/x.css reaches Jenkins past oauth2-proxy skip_auth_routes",
+            tag="jenkins_unsecured")
+    return None
+
+
+def _smb_null(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """netexec/smbmap SMB output — one run yields several AD signals at once."""
+    ip = ctx.get("IP", "?")
+    out: list[ExtractedFinding] = []
+    if "Pwn3d" in output:  # keep first: back-compat with interpret_output's single-value callers
+        out.append(ExtractedFinding(
+            "CWE-287", "SMB admin access via null/guest session", "critical",
+            f"netexec reports (Pwn3d!) on {ip}"))
+    if re.search(r"signing:\s*False", output, re.I):
+        out.append(ExtractedFinding(
+            "CWE-326", "SMB signing not required", "medium",
+            f"{ip} signing:False — NTLM relay candidate", tag="smb_signing_off"))
+    if re.search(r"READ|WRITE", output) and "\\" in output:
+        out.append(ExtractedFinding(
+            "CWE-200", "SMB shares readable via null session", "high",
+            f"readable shares enumerated on {ip}", tag="null_session"))
+    return out
+
+
+def _coerce_services(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """nxc -M spooler / -M webdav -> tag a coercible service.
+
+    WebClient (HTTP auth) is the higher-value one: it relays to ADCS (ESC8).
+    Both tag coercion_target so the coerce->relay rule can fire."""
+    ip = ctx.get("IP", "?")
+    out: list[ExtractedFinding] = []
+    # nxc marks a positive with [+]; a "not enabled" line never carries it.
+    hits = [ln for ln in output.splitlines() if "[+]" in ln]
+    if any(re.search(r"(?i)spooler", ln) for ln in hits):
+        out.append(ExtractedFinding(
+            "T1187", "Print Spooler running (MS-RPRN PrinterBug coercible)", "high",
+            f"{ip} Spooler is up — coerce machine auth over SMB", tag="coercion_target"))
+    if any(re.search(r"(?i)web(dav|client)", ln) for ln in hits):
+        out.append(ExtractedFinding(
+            "T1187", "WebClient running (HTTP coercion -> ADCS ESC8)", "high",
+            f"{ip} WebClient is up — coerce over HTTP and relay to ADCS certsrv",
+            tag="webclient_running"))
+    return out
+
+
+def _ldap_anon(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """Anonymous LDAP bind / naming-context leak -> tag ldap_anon (+ the domain)."""
+    ip = ctx.get("IP", "?")
+    m = re.search(r"(?:namingContexts|defaultNamingContext):\s*(DC=\S+)", output, re.I)
+    if m:
+        domain = ".".join(re.findall(r"DC=([^,]+)", m.group(1), re.I))
+        return [ExtractedFinding(
+            "CWE-200", "Anonymous LDAP bind exposes the directory", "high",
+            f"anon LDAP on {ip} leaks {domain or m.group(1)}", tag="ldap_anon")]
+    if re.search(r"\bLDAP\b.*\[\+\]", output):  # netexec anon bind succeeded
+        return [ExtractedFinding(
+            "CWE-200", "Anonymous LDAP bind allowed", "high",
+            f"anonymous bind accepted on {ip}", tag="ldap_anon")]
+    return []
+
+
+def _ad_users(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """A domain user list was enumerated (netexec --users / enum4linux-ng / kerbrute)
+    -> tag domain_users, which unlocks AS-REP roast and spraying.
+
+    Handles the real formats: kerbrute `VALID USERNAME: user@DOMAIN`, netexec
+    `DOMAIN\\user` columns, and enum4linux-ng `username: user`."""
+    users: set[str] = set()
+    users |= {u for u in re.findall(r"valid user(?:name)?:\s*([^\s@]+)", output, re.I)}
+    users |= {u for u in re.findall(r"^\s*username:\s*(\S+)", output, re.M | re.I)}
+    # DOMAIN\user (netexec --users / --rid-brute), excluding machine accounts ($).
+    users |= {u for u in re.findall(r"[A-Za-z0-9.\-]+\\([A-Za-z0-9._-]+)(?!\$)", output)
+              if not u.endswith("$")}
+    users.discard("")
+    if len(users) >= 2:
+        return [ExtractedFinding(
+            "CWE-200", "Domain user list enumerated", "medium",
+            f"{len(users)} domain users on {ctx.get('IP','?')}", tag="domain_users")]
+    return []
+
+
+def _enum4linux(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """enum4linux-ng reports both SMB posture and a user list — extract both."""
+    return _smb_null(output, ctx) + _ad_users(output, ctx)
+
+
+def _laps(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A readable ms-Mcs-AdmPwd (clear-text LAPS password) -> tag laps_password.
+
+    The negative lookahead skips ms-mcs-admpwd*expirationtime* (a timestamp, not
+    the secret)."""
+    if re.search(r"(?i)ms-?mcs-?admpwd(?!expiration)\b\s*[:=]\s*\S+", output):
+        return ExtractedFinding(
+            "CWE-522", "Readable LAPS password (ms-Mcs-AdmPwd)", "critical",
+            f"{ctx.get('IP','?')} exposes a clear-text LAPS local-admin password",
+            tag="laps_password")
+    return None
+
+
+def _desc_password(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A password parked in an AD user description / password attribute.
+
+    Matches a `pass/pwd/creds` keyword followed by a value — benign descriptions
+    (e.g. 'Built-in account for guest access') carry no such token and are
+    ignored. Tags desc_password (a credential lead worth spraying)."""
+    for line in output.splitlines():
+        if not re.search(r"(?i)\b(?:pass(?:word)?|pwd|creds?)\b\s*[:=]?\s*[^\s,;]{4,}", line):
+            continue
+        who = re.search(r"(?i)User:\s*(\S+)", line)
+        subject = who.group(1) if who else "(an AD object)"
+        return ExtractedFinding(
+            "CWE-522", "Password stored in an AD user description/attribute", "high",
+            f"{subject} on {ctx.get('IP','?')} exposes a credential in its description",
+            tag="desc_password")
+    return None
+
+
+def _gpo_control(output: str, ctx: dict) -> ExtractedFinding | None:
+    """gpohound flagging a writable/controllable GPO -> tag gpo_control."""
+    if re.search(r"(?i)\b(writegplink|writedacl|genericwrite|genericall|owns|writable)\b", output) \
+            and re.search(r"(?i)gpo|group policy", output):
+        return ExtractedFinding(
+            "T1484.001", "Controllable GPO", "high",
+            f"{ctx.get('IP','?')} has a GPO you can edit — push a task / local-admin right",
+            tag="gpo_control")
+    return None
+
+
+def _domain_trust(output: str, ctx: dict) -> ExtractedFinding | None:
+    """A domain/forest trust in the enum output -> tag domain_trust."""
+    if re.search(r"(?i)parent[\s_-]?child|tree[\s_-]?root|forest|external|bidirectional|<->", output):
+        return ExtractedFinding(
+            "T1482", "Domain/forest trust present", "high",
+            f"{ctx.get('IP','?')} exposes a trust — SID history / inter-realm forge candidate",
+            tag="domain_trust")
+    return None
+
+
+def _constrained_deleg(output: str, ctx: dict) -> ExtractedFinding | None:
+    """An account with msDS-AllowedToDelegateTo set -> tag constrained_delegation."""
+    if re.search(r"(?i)msds?-?allowedtodelegateto\s*[:=]\s*\S+", output):
+        return ExtractedFinding(
+            "T1558.003", "Account trusted for constrained delegation", "high",
+            f"{ctx.get('IP','?')} has an account with msDS-AllowedToDelegateTo (S4U abuse)",
+            tag="constrained_delegation")
+    return None
+
+
+def _maq(output: str, ctx: dict) -> ExtractedFinding | None:
+    """ms-DS-MachineAccountQuota > 0 -> tag machine_account_quota (RBCD/noPac).
+
+    A quota of 0 is not abusable, so it is (correctly) not tagged."""
+    m = re.search(r"MachineAccountQuota:\s*(\d+)", output, re.I)
+    if not m:
+        return None
+    quota = int(m.group(1))
+    if quota <= 0:
+        return None
+    return ExtractedFinding(
+        "T1078", "MachineAccountQuota allows computer-account creation", "medium",
+        f"{ctx.get('IP','?')} MachineAccountQuota={quota} — any user can add a machine (RBCD/noPac)",
+        tag="machine_account_quota")
+
+
+def _badsuccessor(output: str, ctx: dict) -> ExtractedFinding | None:
+    """nxc -M badsuccessor flagging a writable/creatable dMSA OU -> tag
+    dmsa_badsuccessor (Server 2025 domain-user -> DA path)."""
+    for line in output.splitlines():
+        if "[+]" not in line:
+            continue
+        if re.search(r"(?i)dmsa|badsuccessor|create.*dmsa|delegated managed service", line):
+            return ExtractedFinding(
+                "T1078", "BadSuccessor: can create/edit a dMSA (Server 2025)", "critical",
+                f"{ctx.get('IP','?')} — dMSA succession abuse yields the predecessor's keys (DA)",
+                tag="dmsa_badsuccessor")
+    return None
+
+
+def _pass_pol(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Domain password policy dumped -> tag password_policy (safe-spray gate).
+
+    Surfaces the lockout threshold: 'None'/0 means spray freely; a number means
+    throttle below it. The tag records that the policy is known before spraying."""
+    m = re.search(r"Account Lockout Threshold:\s*(\S+)", output, re.I)
+    if not m:
+        return None
+    thr = m.group(1)
+    safe = thr.lower() in ("none", "0")
+    note = "no lockout — spray freely" if safe else f"lockout at {thr} — throttle below it"
+    return ExtractedFinding(
+        "CWE-521", "Domain password policy enumerated", "low",
+        f"{ctx.get('IP','?')} Account Lockout Threshold: {thr} ({note})",
+        tag="password_policy")
+
+
+def _kerberos_roast(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """Kerberoast / AS-REP roast hashes captured -> tag for the crack follow-up."""
+    out: list[ExtractedFinding] = []
+    if "$krb5tgs$" in output:
+        out.append(ExtractedFinding(
+            "CWE-522", "Kerberoastable service account (TGS captured)", "high",
+            "crack $krb5tgs$ offline (hashcat -m 13100)", tag="kerberoastable"))
+    if "$krb5asrep$" in output:
+        out.append(ExtractedFinding(
+            "CWE-522", "AS-REP roastable account (no preauth)", "high",
+            "crack $krb5asrep$ offline (hashcat -m 18200)", tag="asreproastable"))
+    return out
+
+
+def _ssrf_file(output: str, ctx: dict) -> ExtractedFinding | None:
+    """An egress-proxy tool returning local file content via file:// -> tag
+    ssrf_confirmed (also unlocks the IMDS/cloud-metadata rule). Markers: a
+    passwd line or a PEM private-key header."""
+    if re.search(r"^\w[\w.\-]*:[^:]*:\d+:\d+:", output, re.M) or "PRIVATE KEY-----" in output:
+        return ExtractedFinding(
+            "LLM06", "Agent egress proxy accepts file:// (SSRF -> local file read)", "critical",
+            f"{ctx.get('URL','?')}/api/try?url=file:// reads local files / private keys",
+            tag="ssrf_confirmed")
+    return None
+
+
+def _lfi_passwd(output: str, ctx: dict) -> ExtractedFinding | None:
+    """/etc/passwd leaking through an agent tool surface -> tag lfi_confirmed.
+
+    A `user:x:UID:GID:` line is the deterministic marker of a successful read
+    (path traversal or unsafe YAML !include)."""
+    if re.search(r"^\w[\w.\-]*:[^:]*:\d+:\d+:", output, re.M):
+        return ExtractedFinding(
+            "LLM06", "Arbitrary file read via agent tool surface", "high",
+            f"{ctx.get('URL','?')} leaked /etc/passwd (path traversal / unsafe YAML include)",
+            tag="lfi_confirmed")
+    return None
+
+
+def _ssti_reflection(output: str, ctx: dict) -> ExtractedFinding | None:
+    """`X{{7*7}}X` -> `X49X` reflection = a server-side template renderer.
+
+    Deterministic marker (49 bracketed by our sentinels), so it is safe to
+    auto-tag jinja2_template — the SSTI exploit rules chain off it. A literal
+    `X{{7*7}}X` echo (no evaluation) is correctly ignored."""
+    if re.search(r"X\s*49\s*X", output) or '"rendered":"X49X"' in output:
+        return ExtractedFinding(
+            "LLM01", "Server-side template injection (Jinja2 reflection)", "high",
+            f"{ctx.get('URL','?')} evaluated 7*7 -> 49 in a template render",
+            tag="jinja2_template")
+    return None
+
+
+def _langflow_exec(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Unauth Langflow PythonComponent exec endpoint -> tag langflow_exec.
+
+    Fires on the probe's FOUND marker or on an exec response echoing `result`."""
+    if re.search(r"FOUND\s+\S*langflow/components/exec", output) or '"result"' in output:
+        return ExtractedFinding(
+            "LLM05", "Langflow PythonComponent exec endpoint unauthenticated", "critical",
+            f"{ctx.get('URL','?')}/api/v1/langflow/components/exec runs code unsandboxed (unauth RCE)",
+            tag="langflow_exec")
+    return None
+
+
+def _k8s_can_create_pods(output: str, ctx: dict) -> ExtractedFinding | None:
+    """SelfSubjectRulesReview granting create over pods (or *) -> tag
+    pod_create_permission (privileged-pod / node-escape path)."""
+    res_pods = re.search(r'"resources":\s*\[[^\]]*"(?:pods|\*)"', output)
+    verb_create = re.search(r'"verbs":\s*\[[^\]]*"(?:create|\*)"', output)
+    if res_pods and verb_create:
+        return ExtractedFinding(
+            "CWE-250", "Kubernetes SA can create pods", "high",
+            f"{ctx.get('IP','pod')} SA may create pods — hostPID/privileged pod -> node root",
+            tag="pod_create_permission")
+    return None
+
+
+def _apiserver_version(output: str, ctx: dict) -> ExtractedFinding | None:
+    """kube-apiserver /version reachable anonymously -> record the version
+    (feeds version->CVE) + flags anonymous API reachability."""
+    data = _first_json(output)
+    if isinstance(data, dict) and (data.get("gitVersion") or (data.get("major") and data.get("minor"))):
+        ver = data.get("gitVersion") or f"v{data.get('major')}.{data.get('minor')}"
+        return ExtractedFinding(
+            "CWE-200", "Kubernetes API server reachable (version disclosed)", "info",
+            f"{ctx.get('IP','?')} kube-apiserver {ver} — anonymous /version readable")
+    return None
+
+
+def _kubelet_anon_pods(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Anonymous kubelet /pods returning a PodList -> read-only cluster foothold
+    (pod specs/env readable; /run|/exec may allow command execution)."""
+    data = _first_json(output)
+    is_podlist = (
+        isinstance(data, dict)
+        and (data.get("kind") == "PodList" or isinstance(data.get("items"), list))
+    ) or '"kind":"PodList"' in output
+    if is_podlist:
+        items = data.get("items") if isinstance(data, dict) else None
+        n = len(items) if isinstance(items, list) else "?"
+        return ExtractedFinding(
+            "CWE-306", "Anonymous kubelet API exposes pod list", "high",
+            f"{ctx.get('IP','?')}:10250/pods returned {n} pod(s) unauthenticated — read pod "
+            "specs/env/SA mounts; /run and /exec may allow command execution on the node")
+    return None
+
+
+def _imds_creds(output: str, ctx: dict) -> ExtractedFinding | None:
+    """SSRF-reached IMDS role credentials -> tag aws_credentials.
+
+    The instance-profile response carries AccessKeyId + SecretAccessKey (+ Token);
+    that tag unlocks the IAM role-chain escalation rule."""
+    data = _first_json(output)
+    if isinstance(data, dict) and data.get("AccessKeyId") and data.get("SecretAccessKey"):
+        return ExtractedFinding(
+            "LLM06", "AWS role credentials exposed via SSRF->IMDS", "critical",
+            f"{ctx.get('URL','?')} leaked instance-profile keys ({data.get('AccessKeyId','?')[:10]}...)",
+            tag="aws_credentials")
+    return None
+
+
+def _sagemaker_passrole(output: str, ctx: dict) -> ExtractedFinding | None:
+    """IAM perms allowing sagemaker:CreateNotebookInstance + iam:PassRole ->
+    tag sagemaker_create_notebook (a PassRole privesc that bypasses AssumeRole)."""
+    low = output.lower()
+    if "createnotebookinstance" in low and "passrole" in low:
+        return ExtractedFinding(
+            "CWE-269", "SageMaker CreateNotebookInstance + PassRole privesc", "high",
+            "CreateNotebookInstance + iam:PassRole grants a role you cannot sts:AssumeRole into",
+            tag="sagemaker_create_notebook")
+    return None
+
+
+def _timeroast(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Timeroast NTP hashes ($sntp-ms$) captured -> tag for offline cracking."""
+    if "$sntp-ms$" in output:
+        n = len(re.findall(r"\$sntp-ms\$", output))
+        return ExtractedFinding(
+            "T1558", "Timeroastable account hashes captured (MS-SNTP)", "medium",
+            f"{n} $sntp-ms$ hash(es) from {ctx.get('IP','?')} — crack offline (hashcat -m 31300)",
+            tag="timeroastable")
+    return None
+
+
+def _rag_upload(output: str, ctx: dict) -> ExtractedFinding | None:
+    hits = re.findall(r"FOUND (\S+)", output)
+    if hits:
+        return ExtractedFinding(
+            "LLM04", "RAG/document upload endpoint discovered", "high",
+            f"upload paths on {ctx.get('URL','?')}: {', '.join(hits)[:140]}",
+            tag="rag_upload",  # unlocks rag_kb_advanced_poisoning / embedding_collision_attack
+        )
+    return None
+
+
+# ---------------------------------------------------------------------------
+# AI / ML supply-chain surfaces
+# ---------------------------------------------------------------------------
+# These tags gated rules that shipped with no detector at all: the rule, the
+# action and the payload existed, but nothing in the engine could ever set the
+# tag, so the planner could never fire them (5 rules, all on the scored AI
+# surface). The needles below are deliberately narrow — a bare "checkpoint" or
+# "scanner" does NOT qualify. A false tag costs the operator a wasted
+# exploitation turn, which is worse than staying silent.
+
+# Anything that unpickles attacker-reachable bytes. `torch.load` is here as well
+# as under checkpoints: it IS pickle deserialization.
+_PICKLE_RE = re.compile(
+    r"(?i)\b(?:c?pickle\.loads?|_pickle|unpickl\w*|joblib\.load|dill\.loads?|"
+    r"marshal\.loads?|sympify|torch\.load)\b"
+    r"|yaml\.load\s*\((?![^)]*Safe)"          # yaml.load without a Safe loader
+    r"|[\w./-]+\.(?:pkl|pickle)\b"
+    r"|/(?:unpickle|deserialize|load[_-]model)\b")
+
+# A .pt/.pth/.ckpt checkpoint is a pickle archive; .safetensors deliberately is
+# not, so it is never a signal here.
+_CHECKPOINT_RE = re.compile(
+    r"(?i)\b(?:torch\.load|load_state_dict|from_pretrained)\b"
+    r"|pytorch_model\.bin"
+    r"|[\w./-]+\.(?:ckpt|pth)\b")
+
+_TRAINING_RE = re.compile(
+    r"(?i)\bfine[_-]?tun\w*|/v1/fine_tuning|adapter_config\.json|adapter_model"
+    r"|\bpeft\b|trainer_state\.json|training_args|/train(?:ing)?\b")
+
+
+def _ml_supply_chain(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """Tag the three ML supply-chain footholds visible in AI recon output.
+
+    Runs over tool lists, OpenAPI specs and model listings: the places where a
+    deserialization path, a loadable checkpoint or a training pipeline shows
+    itself by name. Each hit is an independent chain, so several may fire."""
+    text = output or ""
+    where = ctx.get("URL") or ctx.get("IP") or "?"
+    out: list[ExtractedFinding] = []
+
+    m = _PICKLE_RE.search(text)
+    if m:
+        out.append(ExtractedFinding(
+            "CWE-502", "Pickle deserialization surface exposed", "high",
+            f"{where} exposes an unpickling path ('{m.group(0)[:48]}') — crafted bytes "
+            "execute on load",
+            tag="pickle_endpoint"))
+
+    m = _CHECKPOINT_RE.search(text)
+    if m:
+        out.append(ExtractedFinding(
+            "CWE-502", "Model checkpoint loaded from disk (torch.load)", "high",
+            f"{where} loads a pickle-backed checkpoint ('{m.group(0)[:48]}') — poison the "
+            "file and the model server executes it",
+            tag="model_checkpoint_load"))
+
+    m = _TRAINING_RE.search(text)
+    if m:
+        out.append(ExtractedFinding(
+            "LLM03", "Training / fine-tuning pipeline reachable", "medium",
+            f"{where} exposes a training path ('{m.group(0)[:48]}') — dataset, LoRA adapter "
+            "or tokenizer poisoning",
+            tag="training_pipeline"))
+    return out
+
+
+# GitLab AI review / scanning pipeline. Both tags come out of the same recon
+# output (project + CI + runner listings), so one extractor emits either or both.
+_CODE_SCANNER_RE = re.compile(
+    r"(?i)\bpre-?receive\b|\bsemgrep\b|\bbandit\b|\bsast\b|secret[_-]detection"
+    r"|\bgitleaks\b|\btrufflehog\b|code[_-]quality|ai[_-]?scanner")
+
+_AI_REVIEW_RE = re.compile(
+    r"(?i)ai[_-]?(?:code[_-]?)?review|llm[_-]?review|gitlab[_ -]?duo|duo[_-]code[_-]review"
+    r"|review(?:er)?[_-]bot|\bcopilot[_-]review\b")
+
+
+def _gitlab_ai_pipeline(output: str, ctx: dict) -> list[ExtractedFinding]:
+    """GitLab recon -> an AI code reviewer and/or an automated scanner gate.
+
+    Both are *guards*, and each has a documented bypass: a scanner that string-
+    matches is evaded by a direct API commit, an AI reviewer by zero-width
+    Unicode. Naming the guard is what unlocks those rules."""
+    text = output or ""
+    where = ctx.get("URL") or ctx.get("IP") or "?"
+    out: list[ExtractedFinding] = []
+
+    m = _CODE_SCANNER_RE.search(text)
+    if m:
+        out.append(ExtractedFinding(
+            "LLM05", "GitLab automated code scanner in the merge path", "medium",
+            f"{where} runs a scanner gate ('{m.group(0)[:40]}') — string-matching gates are "
+            "bypassed by a direct API commit",
+            tag="code_scanner"))
+
+    m = _AI_REVIEW_RE.search(text)
+    if m:
+        out.append(ExtractedFinding(
+            "LLM01", "GitLab AI code review in the merge path", "medium",
+            f"{where} routes merges through an AI reviewer ('{m.group(0)[:40]}') — an LLM "
+            "reviewer reads what the diff renders, not what it executes",
+            tag="ai_code_review"))
+    return out
+
+
+def _chain(*fns: _Extractor) -> _Extractor:
+    """Compose extractors so one action can feed several independent detectors.
+
+    `interpret_all` dispatches a single extractor per action id, so registering
+    a second detector for an action that already has one would silently replace
+    it. This composes instead."""
+    def run(output: str, ctx: dict) -> list[ExtractedFinding]:
+        found: list[ExtractedFinding] = []
+        for fn in fns:
+            res = fn(output, ctx)
+            if res is None:
+                continue
+            found.extend(res if isinstance(res, list) else [res])
+        return found
+    return run
+
+
+_SQL_ERROR_SIGNATURES = (
+    "unrecognized token", "sql error", "sqlite3.", "sqlite_error",            # sqlite
+    "you have an error in your sql syntax", "mysql_fetch", "mysqlsyntaxerror",  # mysql
+    "unclosed quotation mark", "microsoft ole db", "odbc sql server",          # mssql
+    "postgresql query failed", "pg::syntaxerror",                             # postgres
+    "ora-01756", "ora-00933",                                                 # oracle
+    "[sqli]",                                                                 # our probe marker
+)
+
+
+def _sqli_error(output: str, ctx: dict) -> ExtractedFinding | None:
+    low = (output or "").lower()
+    for sig in _SQL_ERROR_SIGNATURES:
+        if sig in low:
+            hit = re.search(r"\[SQLi\]\s*(\S+)", output)
+            where = hit.group(1) if hit else ctx.get("URL", "?")
+            return ExtractedFinding(
+                "CWE-89", "SQL injection (error-based)", "critical",
+                f"SQL error reflected from {where} on a single-quote payload")
+    return None
+
+
+def _setup_incomplete(output: str, ctx: dict) -> ExtractedFinding | None:
+    """An exposed unfinished first-run/setup surface -> `setup_incomplete`.
+
+    Metabase leaks a non-null `setup-token` at /api/session/properties (pre-auth
+    RCE, CVE-2023-38646); generic wizards expose a 'create the first admin' page."""
+    m = re.search(r'"setup[-_]token"\s*:\s*"([0-9a-fA-F][\w-]{7,})"', output)
+    if m:
+        return ExtractedFinding(
+            "CWE-1188", "Unfinished setup exposes a setup token", "high",
+            f"setup-token present ({m.group(1)[:12]}...) — pre-auth admin/RCE via the setup flow",
+            tag="setup_incomplete")
+    low = output.lower()
+    if any(s in low for s in ("create the first admin", "first-run setup", "setup wizard",
+                              "complete the setup", "initialize the database")):
+        return ExtractedFinding(
+            "CWE-1188", "Unfinished first-run setup page exposed", "medium",
+            "an unfinished setup/first-run flow is reachable — admin takeover",
+            tag="setup_incomplete")
+    return None
+
+
+def _redis_info(output: str, ctx: dict) -> ExtractedFinding | None:
+    """Unauth Redis INFO/PING -> the `redis_unauth` chaining tag (unlocks the
+    CONFIG SET / MODULE LOAD / SLAVEOF write-RCE rule)."""
+    low = output.lower()
+    if "redis_version:" not in low and "+pong" not in low and "# server" not in low:
+        return None
+    m = re.search(r"redis_version:\s*([\d.]+)", output)
+    ver = m.group(1) if m else "?"
+    return ExtractedFinding(
+        "T1213", "Redis reachable unauthenticated", "high",
+        f"unauth INFO/PING (redis_version {ver}) — CONFIG/MODULE/SLAVEOF write path",
+        tag="redis_unauth")
+
+
+# ── AI-craft response extractors ────────────────────────────────────────────
+# The CRAFT path (runners.craft) delivers a brain-written payload and parses the
+# reply with the extractor named by the emit action. Without one, a crafted AI
+# attack returned a bare "delivered" — never a typed finding. These turn the
+# prompt-injection / leak families into typed, standards-mapped findings, firing
+# ONLY on a concrete signal (a canary echo, a mined secret, a leaked system
+# prompt, a SQL error) so "delivered" never masquerades as a confirmed compromise.
+
+# High-confidence secret shapes — a match here IS a secret (no value heuristic
+# needed). Distinct vendor prefixes + key blobs + long hex/JWT.
+_STRONG_SECRET_RE = re.compile(
+    r"(sk-[A-Za-z0-9]{16,}"                                  # legacy OpenAI key
+    r"|sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{16,}"         # modern OpenAI project/service keys
+    r"|sk_(?:live|test)_[A-Za-z0-9]{16,}"                    # Stripe secret key
+    r"|AKIA[0-9A-Z]{16}"                                     # AWS access key id
+    r"|gh[pousr]_[A-Za-z0-9]{20,}"                           # GitHub token
+    r"|xox[baprs]-[A-Za-z0-9-]{10,}"                         # Slack token
+    r"|eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}"  # JWT
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"                   # private key blob
+    r"|[Bb]earer\s+[A-Za-z0-9._-]{16,}"                      # bearer token (header-cased)
+    r"|\b[A-Fa-f0-9]{32,}\b)",                               # long hex (hash/key)
+)
+# `label: value` — high FALSE-POSITIVE risk (prose says "password: contact us"),
+# so the captured value is validated by _looks_secret before it counts.
+_LABELED_SECRET_RE = re.compile(
+    r"(?:password|passwd|pwd|api[_-]?key|secret|token)\s*[:=]\s*[\"']?([^\s\"']{6,})",
+    re.I,
+)
+# Obvious placeholders / masks / prose that a labeled value must NOT be.
+_PLACEHOLDER_RE = re.compile(
+    r"^(?:[*.\-_x<>]+|null|none|n/?a|redacted|hidden|changeme|example|"
+    r"password|secret|token|your[-_].*|the[-_].*|<[^>]+>|\.{3,})$",
+    re.I,
+)
+_SYSPROMPT_RE = re.compile(
+    # the literal phrase, but only when a disclosure verb follows ("system prompt:"
+    # / "system prompt is") — a bare mention ("the system prompt design pattern")
+    # is a benign name-drop, not a leak.
+    r"(system prompt\b\s*(?:is|are|:|reads?|says?|follows?|below)"
+    r"|\b(?:my|your) (?:system prompt|instructions|guidelines|rules|directives)\b"
+    r"\s*(?:is|are|:|include|state|say|read)"                # "my instructions are:"
+    r"|here (?:is|are) (?:the |my )?(?:system prompt|instructions)"
+    # "You are <persona>. You must …" — leaked-prompt scaffolding (a directive
+    # MUST follow, so "You are a valued customer." alone does not match)
+    r"|you are [^.\n]{1,60}[.,]\s*"
+    r"(?:you (?:must|should|will|can|are|cannot|can'?t|may|need)|do not|don'?t|"
+    r"never|always|your (?:role|task|purpose|job|goal))"
+    r"|<\|?im_start\|?>\s*system|<\|?system\|?>"             # chat-template markers
+    r"|^\s*system:\s)",                                      # a role: system line
+    re.I | re.M,
+)
+# A refusal to disclose is NOT a leak — this overrides _SYSPROMPT_RE so
+# "I can't share my system prompt" (which contains the literal phrase) is silent.
+_REFUSAL_RE = re.compile(
+    r"\bi\b[^.\n]{0,40}?\b(?:can'?t|cannot|can ?not|won'?t|will not|not able to|"
+    r"unable to|not allowed to|not permitted to|do not|don'?t)\b[^.\n]{0,40}?"
+    r"\b(?:share|reveal|disclose|provide|expose|show|tell|repeat|discuss|give)\b",
+    re.I,
+)
+_CANARY_RE = re.compile(
+    r"\b(YHWACH[_-]?PWNED|INJECT(?:ION)?[_-]?OK|PROMPT[_-]?PWNED|CONFIRM(?:ED)?[_-]?INJECT)\b",
+    re.I,
+)
+_CONV_HIST_RE = re.compile(
+    r"(previous (?:conversation|session|user)"
+    r"|earlier you (?:said|asked|mentioned)"
+    r"|conversation history"
+    r"|other users?'? (?:messages|data|conversation)"
+    r"|session[_ ]?id\s*[:=])",
+    re.I,
+)
+
+
+def _looks_secret(value: str) -> bool:
+    """A labeled value that plausibly IS a secret, not prose/placeholder. Requires
+    length + entropy-ish content, and rejects masks/placeholders."""
+    v = value.strip("\"'")
+    if len(v) < 8 or _PLACEHOLDER_RE.match(v):
+        return False
+    # a real secret usually carries a digit, or is long — "contact-support" (no
+    # digit, <20 chars) is prose and filtered out.
+    return any(c.isdigit() for c in v) or len(v) >= 20
+
+
+def _mine_secret(output: str) -> str | None:
+    """The strongest secret in the output, or None. High-confidence shapes match
+    outright; a `label: value` match is kept only if the value looks like a secret."""
+    if not output:
+        return None
+    m = _STRONG_SECRET_RE.search(output)
+    if m:
+        return m.group(0)[:80]
+    for m in _LABELED_SECRET_RE.finditer(output):
+        if _looks_secret(m.group(1)):
+            return m.group(0)[:80]
+    return None
+
+
+def looks_like_refusal(output: str) -> bool:
+    """True when the model answered with a guardrail refusal.
+
+    `_REFUSAL_RE` existed only to SUPPRESS a finding — a rejection produced zero
+    rows anywhere. For an operator deciding whether to escalate direct ->
+    indirect -> encoded, "this model refused this phrasing, in these words" is
+    the highest-value fact in the engagement.
+    """
+    return bool(output and _REFUSAL_RE.search(output))
+
+
+def _sysprompt_disclosed(output: str) -> bool:
+    """True only when the output actually discloses a system prompt — a refusal to
+    disclose (which mentions the same words) is explicitly excluded."""
+    return bool(_SYSPROMPT_RE.search(output) and not _REFUSAL_RE.search(output))
+
+
+def _cred_in_output(secret: str) -> ExtractedFinding:
+    return ExtractedFinding(
+        "LLM02", "Credential exposed in model output", "critical",
+        f"secret mined from the model response: {secret}", tag="credential_in_output")
+
+
+def _system_prompt_leak(output: str, ctx: dict) -> list[ExtractedFinding] | None:
+    if not output or not _sysprompt_disclosed(output):
+        return None
+    secret = _mine_secret(output)
+    where = ctx.get("URL", "?")
+    out = [ExtractedFinding(
+        "LLM07", "System prompt leaked", "critical" if secret else "high",
+        f"the model disclosed its system prompt via {where}"
+        + (f"; secret in output: {secret}" if secret else ""),
+        tag="system_prompt_leak")]
+    if secret:
+        out.append(_cred_in_output(secret))
+    return out
+
+
+def _recall_conversation_leak(output: str, ctx: dict) -> list[ExtractedFinding] | None:
+    if not output or not _CONV_HIST_RE.search(output):
+        return None
+    secret = _mine_secret(output)
+    out = [ExtractedFinding(
+        "LLM02", "Cross-session conversation history leaked", "high",
+        f"the model returned other-session / history content via {ctx.get('URL','?')}",
+        tag="recall_leak")]
+    if secret:
+        out.append(_cred_in_output(secret))
+    return out
+
+
+def _text_to_sql_bypass(output: str, ctx: dict) -> ExtractedFinding | None:
+    low = (output or "").lower()
+    if not any(sig in low for sig in _SQL_ERROR_SIGNATURES):
+        return None
+    return ExtractedFinding(
+        "LLM05", "Natural-language-to-SQL guardrail bypassed", "high",
+        f"a SQL error surfaced from the NL->SQL path at {ctx.get('URL', '?')} — the "
+        "guard did not constrain the generated query", tag="text_to_sql_bypass")
+
+
+def _injection_extractor(label: str, tag: str) -> _Extractor:
+    """Factory: a prompt-injection-family extractor that fires only on a concrete
+    success signal (canary echo, mined secret, or leaked system prompt) — never on
+    a bare 200 reply."""
+    def fn(output: str, ctx: dict) -> list[ExtractedFinding] | None:
+        if not output:
+            return None
+        canary = _CANARY_RE.search(output)
+        secret = _mine_secret(output)
+        sysp = _sysprompt_disclosed(output)
+        if not (canary or secret or sysp):
+            return None
+        signal = ("canary echoed in the response" if canary
+                  else "system prompt leaked" if sysp
+                  else "secret disclosed")
+        out = [ExtractedFinding(
+            "LLM01", f"Prompt injection confirmed — {label}",
+            "critical" if secret else "high",
+            f"{signal} via {ctx.get('URL', '?')}", tag=tag)]
+        if secret:
+            out.append(_cred_in_output(secret))
+        return out
+    return fn
+
+
+# An extractor returns a single finding, None, or a list — `interpret_all`
+# normalises all three. AD tools (netexec/ldapsearch) emit several signals per
+# run, so their extractors return lists.
+_Extractor = Callable[[str, dict], "ExtractedFinding | list[ExtractedFinding] | None"]
+
+_EXTRACTORS: dict[str, _Extractor] = {
+    "sqli_error_probe": _sqli_error,
+    "redis_unauth_info": _redis_info,
+    "webapp_setup_probe": _setup_incomplete,
+    "probe_ollama_models": _ollama_models,
+    "probe_ollama_version": _ollama_version,
+    "probe_n8n_version": _n8n_version,
+    "n8n_ni8mare_file_read": _n8n_env_secret,
+    "rag_authenticated_import": _rag_import,
+    "a2a_capture_task_creds": _a2a_capture,
+    "inspect_private_key": _encrypted_privkey,
+    "gitlab_create_pat": _gitlab_pat,
+    "inspect_workflow_config": _git_import_pipeline,
+    "enumerate_models": _chain(_openai_models, _ml_supply_chain),
+    "mcp_tools_list": _chain(_mcp_tools, _ml_supply_chain),
+    "jenkins_auth_check": _jenkins_api,
+    "jenkins_oauth2proxy_bypass": _jenkins_proxy_bypass,
+    "craft_tool_agency_abuse": _tool_call_success,
+    "netexec_smb_null": _smb_null,
+    "nxc_coerce_service_check": _coerce_services,
+    "probe_writable_smb_share": _smb_null,
+    "enum4linux_ng": _enum4linux,
+    "smbmap_shares": _smb_null,
+    "probe_rag_upload_paths": _rag_upload,
+    # --- AI / ML supply chain (tool lists, API specs, GitLab recon) ---
+    "craft_tool_enumeration": _ml_supply_chain,
+    "probe_openapi_spec": _ml_supply_chain,
+    "gradio_api_enumerate": _ml_supply_chain,
+    "try_direct_generate": _ml_supply_chain,
+    "gitlab_public_repos": _gitlab_ai_pipeline,
+    "gitlab_version_cve": _gitlab_ai_pipeline,
+    "gitlab_runner_enum": _gitlab_ai_pipeline,
+    "probe_imds_v1": _imds_creds,
+    "enumerate_aws_ml": _imds_creds,
+    "aws_iam_role_chain": _sagemaker_passrole,
+    "aws_sagemaker_enum": _sagemaker_passrole,
+    "k8s_sa_token_enum": _k8s_can_create_pods,
+    # read-only k8s anon enum (apiserver/kubelet) — SSRR reuses the tested extractor
+    "apiserver_anonymous_rbac_review": _k8s_can_create_pods,
+    "apiserver_version": _apiserver_version,
+    "kubelet_pods_list": _kubelet_anon_pods,
+    "probe_langflow_exec": _langflow_exec,
+    "craft_ssti_probe": _ssti_reflection,
+    # AI-craft response families — typed findings from a delivered payload.
+    "craft_system_prompt_leak": _system_prompt_leak,
+    "craft_recall_conversation_leak": _recall_conversation_leak,
+    "craft_text_to_sql_bypass": _text_to_sql_bypass,
+    "craft_indirect_injection_doc": _injection_extractor(
+        "indirect injection via an ingested doc", "indirect_injection"),
+    "craft_two_file_injection": _injection_extractor(
+        "two-file split injection", "indirect_injection"),
+    "craft_retrieval_hijack": _injection_extractor(
+        "RAG retrieval hijack", "indirect_injection"),
+    "craft_tokenizer_swap": _injection_extractor(
+        "tokenizer-swap encoding bypass", "prompt_injection"),
+    "craft_zero_width_code_evasion": _injection_extractor(
+        "zero-width character evasion", "prompt_injection"),
+    "craft_character_spacing_bypass": _injection_extractor(
+        "character-spacing filter bypass", "prompt_injection"),
+    "craft_cyrillic_homoglyph_bypass": _injection_extractor(
+        "Cyrillic homoglyph filter bypass", "prompt_injection"),
+    "craft_debug_mode_bypass": _injection_extractor(
+        "debug-mode guardrail bypass", "prompt_injection"),
+    "craft_output_filter_substitution": _injection_extractor(
+        "output-filter substitution", "prompt_injection"),
+    "probe_tool_lfi_traversal": _lfi_passwd,
+    "probe_ssrf_egress_proxy": _ssrf_file,
+    # --- AD enumeration ---
+    "netexec_ldap": _ldap_anon,
+    "ldapsearch_anon": _ldap_anon,
+    "ldap_anon_dump": _ad_users,
+    "kerbrute_userenum": _ad_users,
+    "netexec_rid_brute": _ad_users,
+    "netexec_pass_pol": _pass_pol,
+    "netexec_maq": _maq,
+    "ldap_find_constrained_delegation": _constrained_deleg,
+    "nxc_badsuccessor_check": _badsuccessor,
+    "enumerate_domain_trusts": _domain_trust,
+    "gpohound_enum": _gpo_control,
+    "netexec_get_desc_users": _desc_password,
+    "netexec_laps": _laps,
+    "asreproast_users": _kerberos_roast,
+    "kerberoast_getuserspns": _kerberos_roast,
+    "timeroast_ntp": _timeroast,
+}
+
+
+def interpret_all(action_id: str, output: str, context: dict) -> list[ExtractedFinding]:
+    """All findings an action's output yields (may be several for AD tools)."""
+    fn = _EXTRACTORS.get(action_id)
+    if fn is None:
+        return []
+    res = fn(output, context)
+    if res is None:
+        return []
+    return res if isinstance(res, list) else [res]
+
+
+def interpret_output(action_id: str, output: str, context: dict) -> ExtractedFinding | None:
+    """The first finding from an action's output, or None. Back-compat single-value
+    view over `interpret_all` (used where only one finding is expected)."""
+    res = interpret_all(action_id, output, context)
+    return res[0] if res else None

@@ -1,0 +1,110 @@
+# yhwach — arsenal manifest (REFERENCE INDEX — no binaries shipped)
+#
+# yhwach bundles NO offensive binaries or third-party tools. This file only
+# *names and links* the tools that yhwach's playbooks and actions reference, so
+# you can fetch and vet them yourself.
+#
+# On licensing: naming a tool and linking its official upstream is a reference
+# (like a bibliography) — it is NOT redistribution and carries no licence
+# constraint. Redistribution is what licences govern, and yhwach redistributes
+# nothing here. You fetch each tool from its upstream and comply with THAT
+# tool's licence (shown per entry; "see upstream" where it is best read at the
+# source). One tool below (procdump) is proprietary — link-only, never vendored.
+#
+# How yhwach finds them: the engine treats the arsenal as an OPTIONAL, user-
+# provided local directory resolved by yhwach.config.arsenal_dir():
+#     $YHWACH_ARSENAL_DIR  >  $YHWACH_HOME/arsenal  >  ~/.local/share/yhwach/arsenal
+# Everything in yhwach works without it — an absent item degrades to a manual-
+# render hint, never a crash. `scripts/fetch-arsenal.sh` is an opt-in helper for
+# the dual-use pivot infra; the rest you fetch and review yourself.
+#
+# Authorised engagements only — see AUTHORIZATION.md.
+
+# ── Pivot / tunnelling infrastructure (dual-use, commonly packaged) ───────────
+infra:
+  - name: ligolo-ng
+    provides: [ligolo-agent, ligolo-proxy]
+    purpose: reverse-tunnel pivot (agent on target, proxy on your box)
+    upstream: https://github.com/nicocha30/ligolo-ng
+    license: see upstream
+    install: "apt install ligolo-ng (Kali), or a release build"
+  - name: chisel
+    provides: [chisel]
+    purpose: reverse-SOCKS pivot, no root required
+    upstream: https://github.com/jpillora/chisel
+    license: MIT
+
+# ── Offensive tools referenced by playbooks/*.yaml and data/*.yaml ────────────
+# yhwach references these by NAME only. Fetch from the official upstream, review
+# the licence, drop into the arsenal dir if you want those actions to resolve.
+tools:
+  - name: PEASS-ng (winPEAS / linPEAS)
+    purpose: local privilege-escalation enumeration (Windows + Linux)
+    upstream: https://github.com/peass-ng/PEASS-ng
+    license: MIT
+  - name: SharpCollection
+    purpose: "prebuilt .NET offensive tools referenced by the AD/post-exploit playbooks (Rubeus, Seatbelt, SharpUp, SharpDPAPI, SharpChrome, SafetyKatz, SharpWMI, SharpDump, SpoolSample)"
+    upstream: https://github.com/Flangvik/SharpCollection
+    license: aggregate — see each tool's own upstream LICENSE
+  - name: LaZagne
+    purpose: local credential recovery
+    upstream: https://github.com/AlessandroZ/LaZagne
+    license: LGPL-3.0
+  - name: mimikatz
+    purpose: Windows credential / ticket extraction
+    upstream: https://github.com/gentilkiwi/mimikatz
+    license: CC-BY-4.0 (gentilkiwi) — see upstream
+  - name: PowerSploit (PowerUp / PowerView)
+    purpose: Windows privilege-escalation + AD enumeration (PowerShell)
+    upstream: https://github.com/PowerShellMafia/PowerSploit
+    license: BSD-3-Clause (archived) — see upstream
+  - name: Invoke-Kerberoast
+    purpose: Kerberoasting (PowerShell)
+    upstream: https://github.com/EmpireProject/Empire
+    license: see upstream
+  - name: kerbrute
+    purpose: Kerberos pre-auth user enumeration / password spraying
+    upstream: https://github.com/ropnop/kerbrute
+    license: Apache-2.0 — see upstream
+  - name: procdump (Sysinternals)
+    purpose: process memory dump (e.g. LSASS)
+    upstream: https://learn.microsoft.com/sysinternals/downloads/procdump
+    license: Microsoft Sysinternals Software License (PROPRIETARY — link-only, do not vendor)
+
+# ── Standard Kali tooling the playbooks assume on PATH (apt / pipx) ───────────
+# Not "arsenal" drops — these are mainstream packages. Listed for completeness
+# because the playbooks/actions invoke them by name.
+standard:
+  - name: NetExec (nxc)
+    purpose: the primary AD/SMB/LDAP/MSSQL/WinRM enumeration + spray tool
+    upstream: https://github.com/Pennyw0rth/NetExec
+    license: see upstream
+    install: "apt install netexec / pipx install netexec"
+  - name: Impacket
+    purpose: secretsdump, mssqlclient, ntlmrelayx, etc.
+    upstream: https://github.com/fortra/impacket
+    license: see upstream (Fortra/Apache-style)
+    install: "apt install impacket / pipx install impacket"
+  - name: Certipy
+    purpose: AD CS (ESC1-16) enumeration + abuse
+    upstream: https://github.com/ly4k/Certipy
+    license: see upstream
+    install: "pipx install certipy-ad"
+  - name: BloodHound
+    purpose: AD attack-graph collection + analysis (feeds yhwach via the bloodhound MCP)
+    upstream: https://github.com/SpecterOps/BloodHound
+    license: Apache-2.0 — see upstream
+  - name: AdaptixC2 (optional)
+    purpose: optional C2 fallback (yhwach integrates via the adaptix MCP; not required)
+    upstream: https://github.com/Adaptix-Framework/AdaptixC2
+    license: see upstream
+
+# ── Operator-original helpers (NOT distributed, NOT fetchable) ────────────────
+# These keys are referenced by the pivot/revshell playbook actions. They were an
+# operator's own tooling and are not shipped or downloadable. Supply your own
+# equivalents under the arsenal dir using these keys if you want the matching
+# actions to resolve a real path (see yhwach/arsenal.py):
+operator_supplied:
+  - key: REVSHELL_GEN_WIN      # a Windows (C#) reverse-shell generator -> gen_cs_shell.sh
+  - key: REVSHELL_GEN_LINUX    # a Linux reverse-shell generator        -> gen_linux_shell.sh
+  - key: SVCMON_WIN            # a Windows ligolo agent binary           -> svcmon.exe

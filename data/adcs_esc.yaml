@@ -1,0 +1,104 @@
+# Yhwach — AD CS ESC catalog. Reference for interpreting certipy `find` output and
+# choosing the abuse. `yhwach ref esc [--query esc1]`. The certipy parser tags
+# adcs_vuln plus a per-ESC tag (adcs_esc1..16); this maps the specific ESC to its
+# `certipy find` signal, its abuse, and the chain it unlocks so the operator picks fast.
+#
+# Fields: id, title, requirement, signal (the string certipy find prints), abuse
+# (one-line tool+technique ref), chain (findings_include prereq -> payoff).
+
+- id: ESC1
+  title: "Template allows requester-supplied SAN + client-auth EKU"
+  requirement: "Enroll right + ENROLLEE_SUPPLIES_SUBJECT + Client Authentication EKU"
+  signal: "ESC1 : 'Enrollee Supplies Subject' + Client Authentication"
+  abuse: "certipy req -ca <CA> -template <T> -upn administrator@<domain> -> auth as DA"
+  chain: "adcs_vuln -> request cert w/ admin UPN -> PKINIT -> DA"
+- id: ESC2
+  title: "Template with Any Purpose (or no) EKU"
+  requirement: "Enroll right + Any Purpose EKU"
+  signal: "ESC2 : Template has Any Purpose EKU (or no EKU)"
+  abuse: "request a cert usable for any purpose; use as ESC3 enrollment agent or direct auth"
+  chain: "adcs_vuln -> any-purpose cert -> ESC3 agent or direct auth -> DA"
+- id: ESC3
+  title: "Enrollment Agent template"
+  requirement: "Certificate Request Agent EKU"
+  signal: "ESC3 : Template has Certificate Request Agent EKU"
+  abuse: "get an agent cert, then request on-behalf-of a privileged user"
+  chain: "adcs_vuln -> agent cert -> on-behalf-of enroll as DA -> DA"
+- id: ESC4
+  title: "Vulnerable template access control (write over template)"
+  requirement: "Write/GenericAll over a certificate template object"
+  signal: "ESC4 : write/GenericAll/GenericWrite/Owner on the template object"
+  abuse: "reconfigure the template to be ESC1, exploit, then restore"
+  chain: "adcs_vuln -> make template ESC1 -> exploit -> restore -> DA"
+- id: ESC5
+  title: "Vulnerable PKI object access control"
+  requirement: "Control over CA object / CA server computer / related AD objects"
+  signal: "(not flagged by certipy find - PKI-object ACL, surface via BloodHound)"
+  abuse: "compromise the PKI object chain (often reduces to host takeover)"
+  chain: "pki_object_control -> CA host/object takeover -> forge -> DA"
+- id: ESC6
+  title: "EDITF_ATTRIBUTESUBJECTALTNAME2 on the CA"
+  requirement: "CA flag set — SAN honored for ANY template"
+  signal: "ESC6 : EDITF_ATTRIBUTESUBJECTALTNAME2 set on the CA"
+  abuse: "request any enrollable template with a spoofed SAN -> DA"
+  chain: "adcs_vuln -> any template + spoofed SAN -> auth as DA"
+- id: ESC7
+  title: "Vulnerable CA access control"
+  requirement: "ManageCA / ManageCertificates right on the CA"
+  signal: "ESC7 : ManageCA / Manage Certificates on the CA"
+  abuse: "grant self ManageCertificates -> approve a failed request / enable SAN (-> ESC6)"
+  chain: "adcs_vuln -> officer rights -> enable SAN / approve -> DA"
+- id: ESC8
+  title: "NTLM relay to AD CS HTTP enrollment (web enrollment)"
+  requirement: "Web enrollment endpoint reachable + a coercible machine account"
+  signal: "ESC8 : Web Enrollment is enabled and vulnerable to NTLM relay"
+  abuse: "coerce (PetitPotam) + ntlmrelayx to /certsrv -> cert for the DC$ -> DCSync"
+  chain: "webclient_running -> coerce -> relay to /certsrv -> DC cert -> DCSync"
+- id: ESC9
+  title: "No Security Extension (NO_SECURITY_EXTENSION)"
+  requirement: "template omits SID sec-ext + client-auth EKU + control of a victim w/ enroll right + weak DC mapping"
+  signal: "ESC9 : Template has the NO_SECURITY_EXTENSION flag set"
+  abuse: "certipy account update -upn administrator -user <victim>; req; revert; auth (UPN-swap)"
+  chain: "victim_account_control -> cert w/o SID -> auth as swapped UPN -> DA"
+- id: ESC10
+  title: "Weak certificate mappings (registry)"
+  requirement: "CertificateMappingMethods=0x4 or StrongCertificateBindingEnforcement=0 on DCs"
+  signal: "CertificateMappingMethods : 0x4 / StrongCertificateBindingEnforcement : 0"
+  abuse: "UPN-swap (as ESC9) or certipy shadow auto / altSecurityIdentities map, then auth"
+  chain: "victim_account_control + weak-mapping -> cert maps to target -> DA"
+- id: ESC11
+  title: "IF_ENFORCEENCRYPTICERTREQUEST cleared (relay to RPC)"
+  requirement: "CA ICertPassage accepts unencrypted requests -> relayable"
+  signal: "ESC11 : Encryption is not enforced for ICPR requests"
+  abuse: "coerce -> certipy relay -target rpc://<ca> (or ntlmrelayx -t rpc:// --adcs)"
+  chain: "coercion_target -> relayed RPC cert -> PKINIT -> DA"
+- id: ESC12
+  title: "Shell on CA with key on YubiHSM"
+  requirement: "local shell on CA + CA key on a YubiHSM2 with a recoverable PIN"
+  signal: "(not flagged by certipy find - local/HSM condition)"
+  abuse: "recover PIN -> yubihsm-shell export -> certipy forge -ca-pfx"
+  chain: "ca_host_shell -> export CA key -> forge any principal -> DA"
+- id: ESC13
+  title: "Issuance policy OID linked to a privileged group"
+  requirement: "enrollable template whose issuance-policy OID is msDS-OIDToGroupLink'd to a priv group"
+  signal: "ESC13 : Template has an issuance policy linked to a group"
+  abuse: "certipy req -template <T>; auth -> TGT carries the linked group SID"
+  chain: "adcs_vuln -> cert grants group membership -> DA (no SAN spoof)"
+- id: ESC14
+  title: "Write over altSecurityIdentities (explicit mapping)"
+  requirement: "write to a target's altSecurityIdentities, or a weak X509 explicit mapping"
+  signal: "ESC14 : write on target altSecurityIdentities / weak explicit mapping"
+  abuse: "write X509 map (bloodyAD/ldapmodify) or certipy shadow auto -account <t>; auth"
+  chain: "altsecid_write -> explicit map to attacker cert -> auth as target -> DA"
+- id: ESC15
+  title: "EKUwu: V1 template application-policy injection (CVE-2024-49019)"
+  requirement: "schema V1 template + ENROLLEE_SUPPLIES_SUBJECT on an unpatched CA"
+  signal: "ESC15 / Vulnerable to CVE-2024-49019 (V1 template, enrollee supplies subject)"
+  abuse: "certipy req -template <V1> -application-policies '1.3.6.1.4.1.311.20.2.1' -> ESC3 agent"
+  chain: "adcs_vuln -> injected app-policy overrides EKU -> client-auth cert -> DA"
+- id: ESC16
+  title: "Security extension disabled CA-wide"
+  requirement: "CA omits szOID_NTDS_CA_SECURITY_EXT on ALL certs (DisableExtensionList)"
+  signal: "ESC16 : Security Extension is disabled (szOID_NTDS_CA_SECURITY_EXT in DisableExtensionList)"
+  abuse: "UPN-swap victim -> req any client-auth template -> revert -> auth"
+  chain: "victim_account_control -> every cert lacks SID -> weak-mapping auth (pairs ESC6/9)"

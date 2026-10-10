@@ -1,0 +1,355 @@
+# Arsenal index — vendored offensive tooling under <repo>/arsenal/.
+# Queryable offline via `yhwach ref arsenal [-q <term>]`. Tiers:
+#   canonical  — battle-tested primary path; reach for these first.
+#   quick-win  — opportunistic, surface-specific shortcut; NOT a substitute
+#                for exhaustive manual enumeration with the full Kali toolset.
+#   deep       — heavier/destructive; render-only, authorized engagements only.
+# Paths are relative to the repo root unless marked (apt) / (system).
+
+# ── Canonical foothold + pivot (proven on AV-enabled targets) ──────────
+- name: gen_cs_shell.sh
+  key: REVSHELL_GEN_WIN
+  tier: canonical
+  os: windows
+  surface: foothold
+  purpose: C# reverse-shell generator (4-byte XOR strings, per-run random symbols, reconnect+jitter). Reliably lands a shell on Win11 with AV enabled. Default Windows foothold.
+  path: arsenal/gen_cs_shell.sh
+  invoke: yhwach revshell --os win --lport <PORT>   # renders the gen + compile (mcs/csc) + drop
+  note: fresh LPORT per host, record it. Compile on Kali (mcs) or target (csc.exe).
+
+- name: svcmon.exe
+  key: SVCMON_WIN
+  tier: canonical
+  os: windows
+  surface: pivot
+  purpose: Obfuscated, AV/Defender-evasive ligolo-ng Windows agent. Default Windows pivot when a new subnet must be reached.
+  path: arsenal/svcmon.exe   # sha256-pinned in yhwach.arsenal
+  invoke: yhwach pivot --lab <L> --via-host <IP> --subnet <CIDR>   # renders svcmon deploy + route
+  deps: ligolo-proxy on Kali (apt); a fresh persistence port per host.
+
+- name: gen_linux_shell.sh
+  key: REVSHELL_GEN_LINUX
+  tier: canonical
+  os: linux
+  surface: foothold
+  purpose: Emits 7 Linux reverse-shell payloads (bash /dev/tcp, python PTY, socat, nc mkfifo, perl, php, ELF) pre-filled with LHOST/LPORT.
+  path: arsenal/gen_linux_shell.sh
+  invoke: yhwach revshell --os linux --lport <PORT>
+
+- name: ligolo-agent
+  key: LIGOLO_AGENT_LINUX
+  tier: canonical
+  os: linux
+  surface: pivot
+  purpose: Linux ligolo-ng agent (x86-64 ELF) — copy to a Linux target to tunnel back.
+  path: /usr/bin/ligolo-agent   # (apt) ligolo-ng package
+  invoke: yhwach pivot --lab <L> --via-host <IP> --subnet <CIDR> --kind ligolo
+
+- name: ligolo-proxy
+  key: LIGOLO_PROXY
+  tier: canonical
+  os: linux
+  surface: pivot
+  purpose: Kali-side ligolo-ng proxy; terminates agent tunnels on a tun interface.
+  path: /usr/bin/ligolo-proxy   # (apt) ligolo-ng package
+  invoke: sudo ligolo-proxy -selfcert   # then `session` / `start` / `ifconfig` inside the console
+  deps: root for the tun interface.
+
+- name: chisel
+  key: CHISEL
+  tier: canonical
+  os: any
+  surface: pivot
+  purpose: Reverse-SOCKS pivot, no root needed on target or Kali. Default Linux pivot fast path.
+  path: /usr/local/bin/chisel   # (system)
+  invoke: yhwach pivot --lab <L> --via-host <IP> --subnet <CIDR> --kind chisel
+
+# ── Loaders / encoders (shellcode delivery) ──────────────────────────────────
+- name: loader_windows.py
+  tier: quick-win
+  os: windows
+  surface: loader
+  purpose: W^X in-memory shellcode loader (VirtualAlloc RW -> VirtualProtect RX). Optional XOR + SHA256 checksum.
+  path: arsenal/loader_windows.py
+  invoke: python loader_windows.py shellcode.bin [--key 0xHEX --checksum <sha256>]
+
+- name: loader_linux.py
+  tier: quick-win
+  os: linux
+  surface: loader
+  purpose: Linux W^X loader (mmap/mprotect). Same CLI/XOR/checksum contract as loader_windows.py.
+  path: arsenal/loader_linux.py
+  invoke: python3 loader_linux.py shellcode.bin [--key 0xHEX --checksum <sha256>]
+
+- name: xor_encrypt_bin.py
+  tier: quick-win
+  os: any
+  surface: loader
+  purpose: Pre-encrypt raw shellcode (XOR) before dropping; prints plaintext SHA256 + ready loader command.
+  path: arsenal/xor_encrypt_bin.py
+  invoke: python3 xor_encrypt_bin.py shellcode.bin [--key 0xHEX]
+
+- name: msfconsole/build.sh
+  tier: quick-win
+  os: windows
+  surface: loader
+  purpose: Build a custom AMSI/firewall-evasive .NET loader for a msfvenom payload (see msfconsole/cheatsheet.md, handler.rc).
+  path: arsenal/msfconsole/build.sh
+  invoke: bash arsenal/msfconsole/build.sh   # read arsenal/msfconsole/cheatsheet.md
+
+# ── AI / ML surface — enumeration & fingerprint (quick-win) ───────────────────
+- name: model_fingerprint.sh
+  tier: quick-win
+  os: any
+  surface: ai-model
+  purpose: Fingerprint an LLM/model API (provider, model, routes) on a host:port.
+  path: arsenal/AIScripts/model_fingerprint.sh
+  invoke: ./model_fingerprint.sh <host:port>
+
+- name: endpoint_fuzz.sh
+  tier: quick-win
+  os: any
+  surface: ai-model
+  purpose: Fuzz an AI service for hidden API endpoints/routes.
+  path: arsenal/AIScripts/endpoint_fuzz.sh
+  invoke: ./endpoint_fuzz.sh <host:port>
+
+- name: agent_port_discovery.sh
+  tier: quick-win
+  os: any
+  surface: a2a
+  purpose: Discover agent/A2A service ports on a target.
+  path: arsenal/AIScripts/agent_port_discovery.sh
+  invoke: bash arsenal/AIScripts/agent_port_discovery.sh <target>   # read header for args
+
+- name: session_enum.py
+  tier: quick-win
+  os: any
+  surface: ai-model
+  purpose: Brute-force / enumerate chatbot-agent session IDs for sensitive data left in other sessions.
+  path: arsenal/AIScripts/session_enum.py
+  invoke: python3 session_enum.py <base-url>   # read header for args (faster variant: session_enumeration_faster.py)
+
+- name: oneliners.sh
+  tier: quick-win
+  os: any
+  surface: ai-model
+  purpose: Grab-bag of AI-surface enumeration one-liners (curl probes, route checks).
+  path: arsenal/AIScripts/oneliners.sh
+  invoke: less arsenal/AIScripts/oneliners.sh   # copy the relevant one-liner
+
+# ── AI / ML surface — infra (k8s, cloud, registry, gitlab) ────────────────────
+- name: k8s_ml_enum.sh
+  tier: quick-win
+  os: any
+  surface: kubernetes
+  purpose: Enumerate a k8s/ML cluster (apiserver/kubelet/etcd) for service accounts, secrets, notebooks.
+  path: arsenal/AIScripts/k8s_ml_enum.sh
+  invoke: bash k8s_ml_enum.sh   # in-cluster or with KUBECONFIG/token in env
+
+- name: nexus_recon.sh
+  tier: quick-win
+  os: any
+  surface: nexus
+  purpose: Recon a Nexus/registry across a subnet (uses a k8s token when present).
+  path: arsenal/AIScripts/nexus_recon.sh
+  invoke: K8S_TOKEN=<token> bash nexus_recon.sh <subnet>
+
+- name: aws_ml_enum.sh
+  tier: quick-win
+  os: any
+  surface: cloud
+  purpose: Enumerate an AWS ML environment (identity, SageMaker/S3/IAM) from a profile or IMDS creds.
+  path: arsenal/AIScripts/aws_ml_enum.sh
+  invoke: bash aws_ml_enum.sh [profile]
+
+- name: gitlab_enum.sh
+  tier: quick-win
+  os: any
+  surface: gitlab
+  purpose: Enumerate a GitLab instance with a token (projects, CI vars, members).
+  path: arsenal/AIScripts/gitlab_enum.sh
+  invoke: ./gitlab_enum.sh <GITLAB_IP> <TOKEN> [PROJECT_ID]
+
+# ── Vector DB / embeddings ────────────────────────────────────────────────────
+- name: weaviate_export.py
+  tier: quick-win
+  os: any
+  surface: vector-db
+  purpose: Dump a Weaviate/vector-DB collection (objects + vectors) for offline analysis.
+  path: arsenal/AIScripts/weaviate_export.py
+  invoke: python3 weaviate_export.py --host <IP> --port 8081 --collection <NAME>
+
+- name: inspect_embeddings.py
+  tier: quick-win
+  os: any
+  surface: vector-db
+  purpose: Inspect an exported embeddings .npy (shape, stats, nearest neighbours).
+  path: arsenal/AIScripts/inspect_embeddings.py
+  invoke: python3 inspect_embeddings.py embeddings.npy
+
+- name: inversion_attack.py
+  tier: deep
+  os: any
+  surface: vector-db
+  purpose: Embedding-inversion — recover plaintext behind exported vectors via a wordlist.
+  path: arsenal/AIScripts/inversion_attack.py
+  invoke: python3 inversion_attack.py --vectors <vectors.json> --wordlist <words.txt>
+
+# ── Model / training-data poisoning (deep, render-only, authorized only) ──────
+- name: train_poison.py
+  tier: deep
+  os: any
+  surface: ai-model
+  purpose: Craft poisoned training rows (.jsonl) to flip a classifier/label. Authorized engagements only.
+  path: arsenal/AIScripts/train_poison.py
+  invoke: python3 train_poison.py <output.jsonl> [--amplify N] [--append existing.jsonl]
+
+- name: poison_injector.py
+  tier: deep
+  os: any
+  surface: ai-model
+  purpose: Inject poison samples into a writable RAG/training store. Authorized engagements only.
+  path: arsenal/AIScripts/poison_injector.py
+  invoke: python3 poison_injector.py   # read header; pairs with poison_template.py
+
+- name: tokenizer_swap.py
+  tier: deep
+  os: any
+  surface: ai-model
+  purpose: Swap two tokens in a model's tokenizer dir (targeted misbehaviour). Authorized engagements only.
+  path: arsenal/AIScripts/tokenizer_swap.py
+  invoke: python3 tokenizer_swap.py <model_dir> <token_A> <token_B>
+
+- name: sympify_payload.py
+  tier: deep
+  os: any
+  surface: ai-model
+  purpose: Build a crafted model checkpoint (.pt) payload that runs a command on load. Authorized engagements only.
+  path: arsenal/AIScripts/sympify_payload.py
+  invoke: python3 sympify_payload.py <output.pt> <command>
+
+# ── Document / prompt obfuscation & indirect injection ────────────────────────
+- name: zwc_encode.py
+  tier: quick-win
+  os: any
+  surface: ai-model
+  purpose: Encode a payload into zero-width characters for indirect prompt injection.
+  path: arsenal/AIScripts/zwc_encode.py
+  invoke: python3 zwc_encode.py <payload_file> [--output zwc_string.txt]
+
+- name: zero_width_obfuscator.py
+  tier: quick-win
+  os: any
+  surface: ai-model
+  purpose: Obfuscate text/source with zero-width chars to evade AI code/content reviewers.
+  path: arsenal/AIScripts/zero_width_obfuscator.py
+  invoke: python3 zero_width_obfuscator.py [/path/to/obfuscate]
+
+- name: create_collision_document.py
+  tier: quick-win
+  os: any
+  surface: ai-model
+  purpose: Generate a crafted PDF for RAG/ingest poisoning (visual vs. extracted-text mismatch).
+  path: arsenal/AIScripts/create_collision_document.py
+  invoke: pip install reportlab && python3 create_collision_document.py   # see two_file_chain.py for the 2-file variant
+
+# ── A2A / agent MITM (deep, authorized only) ──────────────────────────────────
+- name: spoof_server.py
+  tier: deep
+  os: any
+  surface: a2a
+  purpose: Stand up a rogue A2A agent impersonating a legitimate peer (agent-card spoofing).
+  path: arsenal/AIScripts/spoof_server.py
+  invoke: python3 spoof_server.py   # read header for bind/peer config
+
+- name: MITM_spoofer.py
+  tier: deep
+  os: any
+  surface: a2a
+  purpose: MITM a rogue agent to steal credentials/relay tasks. noisy + credential-stealer variants.
+  path: arsenal/AIScripts/MITM_spoofer_noisy.py
+  invoke: python3 MITM_spoofer_noisy.py [args]   # also MITM_Spoofer_credential_stealer.py
+
+# ── Container / GPU escape (deep, render-only, authorized only) ───────────────
+- name: k8s_escape_pod.yaml
+  tier: deep
+  os: linux
+  surface: kubernetes
+  purpose: Privileged/hostPath pod manifest to break out of a pod to the node.
+  path: arsenal/AIScripts/k8s_escape_pod.yaml
+  invoke: kubectl apply -f k8s_escape_pod.yaml   # requires pod-create rights; authorized only
+
+- name: gpu_escape_cve_2025_23266.c
+  tier: deep
+  os: linux
+  surface: kubernetes
+  purpose: Container escape via NVIDIA GPU CVE-2025-23266 (build in the paired dockerfile).
+  path: arsenal/AIScripts/gpu_escape_cve_2025_23266.c
+  invoke: see arsenal/AIScripts/gpu_escape_dockerfile   # authorized only
+
+# ── Windows credential / AD post-exploitation ────────────────────────────────
+- name: LaZagne
+  tier: quick-win
+  os: windows
+  surface: windows-cred
+  purpose: Harvest stored credentials from many local apps (browsers, mail, wifi, etc.).
+  path: arsenal/LaZagne/Windows/laZagne.py
+  invoke: laZagne.exe all   # or python laZagne.py all
+
+- name: SharpDPAPI / SharpChrome
+  tier: quick-win
+  os: windows
+  surface: windows-cred
+  purpose: DPAPI masterkey/credential/vault decrypt; SharpChrome for browser secrets.
+  path: arsenal/SharpDPAPI/
+  invoke: SharpDPAPI.exe triage   # SharpChrome.exe logins / cookies
+
+- name: chrome-injector / Invoke-PowerChrome
+  tier: quick-win
+  os: windows
+  surface: windows-cred
+  purpose: In-process Chrome App-Bound-Encryption decryption (cookies/passwords) via injection.
+  path: arsenal/chrome-injector.exe
+  invoke: chrome-injector.exe   # see Invoke-PowerChrome.ps1 / cdp_steal.py
+
+- name: Invoke-Mimikatz.ps1
+  tier: quick-win
+  os: windows
+  surface: windows-cred
+  purpose: In-memory mimikatz (sekurlsa/lsadump).
+  path: arsenal/Invoke-Mimikatz.ps1
+  invoke: IEX(...); Invoke-Mimikatz -Command '"sekurlsa::logonpasswords"'
+
+- name: PowerView / PowerUp / Kerberoast
+  tier: quick-win
+  os: windows
+  surface: ad
+  purpose: AD enumeration (PowerView), local privesc checks (PowerUp), SPN roasting (Invoke-Kerberoast).
+  path: arsenal/powerview.ps1
+  invoke: IEX(...); Get-DomainUser -SPN   # PowerUp: Invoke-AllChecks
+
+- name: procdump.exe
+  tier: quick-win
+  os: windows
+  surface: windows-cred
+  purpose: Signed MS tool to dump LSASS for offline secretsdump.
+  path: arsenal/procdump.exe
+  invoke: procdump.exe -accepteula -ma lsass.exe lsass.dmp
+
+- name: python-libhijack (numpy/pandas)
+  tier: deep
+  os: any
+  surface: ai-model
+  purpose: Malicious drop-in numpy/pandas modules for import-hijack on an ML host. Authorized only.
+  path: arsenal/malicious_pandas.py
+  invoke: place on PYTHONPATH ahead of the real package   # numpy.py / pandas.py variants
+
+# ── C2 (optional fallback) ────────────────────────────────────────────────────
+- name: adaptix_gen / adaptix_quick.sh
+  tier: quick-win
+  os: any
+  surface: c2
+  purpose: Automate AdaptixC2 listener + agent generation (optional C2 fallback).
+  path: arsenal/adaptix/adaptix_quick.sh
+  invoke: bash arsenal/adaptix/adaptix_quick.sh   # teamserver must be running

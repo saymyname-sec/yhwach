@@ -1,0 +1,9 @@
+# extended LDIF
+#
+dn:
+namingContexts: DC=corp,DC=local
+namingContexts: CN=Configuration,DC=corp,DC=local
+supportedLDAPVersion: 3
+# search result
+search: 2
+result: 0 Success

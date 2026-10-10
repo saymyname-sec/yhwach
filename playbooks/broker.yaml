@@ -1,0 +1,98 @@
+# Yhwach — message-broker playbook.
+#
+# Message-broker surface. In an AI environment a broker is BOTH a traditional
+# RCE target (ActiveMQ CVEs — MQTT 1883 / AMQP 5672 / console 8161) AND an A2A
+# indirect-injection surface (agent messages flow through it).
+
+- id: activemq_rce
+  when: { surface: activemq }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: activemq_version_jolokia
+    - action: activemq_default_creds
+    - action: activemq_openwire_cve_check
+  maps: [CVE-2023-46604]
+  points: 10
+  risk: propose
+  routes: 'HexStrike web stack'
+  source: 'CVE-2023-46604 . Apache ActiveMQ OpenWire RCE (<5.15.16/5.16.7/5.17.6/5.18.3)'
+  authorized_only: true
+
+- id: activemq_openwire_rce
+  when: { surface: activemq_openwire }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: activemq_openwire_cve_check
+  maps: [CVE-2023-46604]
+  points: 10
+  risk: propose
+  routes: 'HexStrike web stack'
+  source: 'CVE-2023-46604 . OpenWire :61616 direct RCE'
+  authorized_only: true
+
+- id: mqtt_agent_bus
+  when: { surface: mqtt }
+  class: ai                       # broker often carries AI/A2A agent traffic
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: mqtt_subscribe_all
+    - action: mqtt_publish_injection
+  maps: [LLM01, LLM06]
+  points: 15
+  risk: propose
+  routes: 'yhwach ref ai-attacks -q a2a_attack'
+  source: 'technique: A2A indirect injection via a message bus (LLM01/LLM06)'
+  authorized_only: true
+
+- id: amqp_agent_bus
+  when: { surface: amqp }
+  class: ai
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: amqp_enum_queues
+  maps: [LLM01, LLM06]
+  points: 15
+  risk: read_only
+  routes: 'yhwach ref ai-attacks -q a2a_attack'
+  source: 'technique: A2A indirect injection via an AMQP message bus (LLM01/LLM06)'
+  authorized_only: true
+
+# --- Kafka + RabbitMQ (P1: PORT_KIND now classifies kafka:9092 / rabbitmq:15672).
+#     Kind-prefixed ids so a recon attempt clears the service_enum gap.
+
+- id: kafka_enumeration
+  when: { surface: kafka }
+  class: ai                       # bus often carries A2A agent traffic
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: kafka_metadata_list
+  maps: [T1213, LLM06]
+  points: 15
+  risk: read_only
+  routes: 'yhwach ref ai-attacks -q a2a_attack'
+  source: 'hacktricks . 9092 kafka: kcat -L metadata / topic list (A2A bus enum)'
+  technique: kafka_enum
+  authorized_only: true
+
+- id: rabbitmq_mgmt_recon
+  when: { surface: rabbitmq }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: rabbitmq_default_creds
+    - action: rabbitmq_definitions_dump
+  maps: [T1213, CWE-306]
+  points: 10
+  risk: read_only
+  routes: 'yhwach_ingest'
+  source: 'hacktricks . 15672 rabbitmq mgmt: guest:guest -> /api/definitions (creds in defs)'
+  technique: rabbitmq_enum
+  authorized_only: true

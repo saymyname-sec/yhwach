@@ -1,0 +1,3 @@
+LDAP        10.10.10.10     389    DC01             [+] corp.local\jdoe:Passw0rd
+BADSUCC...  10.10.10.10     389    DC01             [*] Checking for BadSuccessor (dMSA) primitives
+BADSUCC...  10.10.10.10     389    DC01             [+] User can create a dMSA in: OU=temp,DC=corp,DC=local

@@ -1,0 +1,14 @@
+{
+  "facts": [
+    {
+      "kind": "shadow_cred_target",
+      "principal": "helpdesk-adm@CORP.LOCAL",
+      "detail": "GenericWrite from owned group; member of Domain Admins; msDS-KeyCredentialLink writable"
+    },
+    {
+      "kind": "da_path",
+      "principal": "owned-user@CORP.LOCAL",
+      "detail": "GenericWrite -> helpdesk-adm -> Domain Admins"
+    }
+  ]
+}

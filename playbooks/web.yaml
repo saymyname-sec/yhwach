@@ -1,0 +1,288 @@
+# Yhwach — web-surface playbook (schema v1 activation).
+#
+# Fires off the interesting web paths the web ingest records
+# (yhwach/parsers/web.py -> yhwach/ingest.py sets one finding per path kind):
+# web_login, web_upload, web_git, web_api, web_backup. Content discovery
+# (gobuster/ffuf/feroxbuster) SETS these via `yhwach ingest --kind web`.
+# class:traditional — web is ranked below AI surfaces by doctrine, but a web->RCE
+# (upload) is a high-points foothold, so it is ranked accordingly within the tier.
+
+# Exposed .git / VCS metadata -> reconstruct source + mine history for secrets.
+- id: web_git_source_dump
+  when: { findings_include: web_git }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: web_git_dump
+  maps: [T1552.001, CWE-527]
+  points: 12
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'internalallthethings . exposed .git -> git-dumper'
+  authorized_only: true
+
+# File-upload surface -> unrestricted upload -> webshell RCE (top web foothold).
+- id: web_upload_rce
+  when: { findings_include: web_upload }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: web_upload_webshell
+  maps: [T1505.003, CWE-434]
+  points: 15
+  risk: propose
+  routes: 'HexStrike web stack'
+  source: 'OWASP WSTG . unrestricted file upload -> RCE'
+  authorized_only: true
+
+# Login surface -> default/known creds, then a lockout-aware spray.
+- id: web_login_creds
+  when: { findings_include: web_login }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: web_login_attack
+  maps: [T1110.001, T1078]
+  points: 8
+  risk: propose
+  routes: 'HexStrike web stack'
+  source: 'OWASP WSTG . auth: default creds / bounded spray'
+  authorized_only: true
+
+# API / Swagger surface -> enumerate the contract before fuzzing.
+- id: web_api_recon
+  when: { findings_include: web_api }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: web_api_enum
+  maps: [T1596, CWE-200]
+  points: 7
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'OWASP API Top 10 . discover the API contract'
+  authorized_only: true
+
+# Exposed backup/archive -> download and mine for source + credentials.
+- id: web_backup_loot
+  when: { findings_include: web_backup }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits:
+    - action: web_backup_download
+  maps: [T1552.001, CWE-530]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'OWASP WSTG . exposed backup files'
+  authorized_only: true
+
+# --- Per-product web-app recon (P1: probe_webapp_products fingerprints these
+#     into a product surface). Recon-tier, read-only: default-creds check +
+#     version->CVE (via `yhwach vulns`). Kind-prefixed ids clear service_enum.
+#     `yhwach ref default-creds -q <product>` for the creds; version RCEs land
+#     with the cve_map slice.
+
+- id: grafana_recon
+  when: { surface: grafana }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits: [{action: grafana_default_creds}, {action: grafana_version_cve}]
+  maps: [T1190, CWE-1188]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . grafana admin:admin + version->CVE (LFI CVE-2021-43798 etc.)'
+  technique: grafana_recon
+  authorized_only: true
+
+- id: keycloak_recon
+  when: { surface: keycloak }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits: [{action: keycloak_default_creds}, {action: keycloak_version_cve}]
+  maps: [T1190, CWE-1188]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . keycloak admin console default creds + realm/version enum'
+  technique: keycloak_recon
+  authorized_only: true
+
+- id: minio_recon
+  when: { surface: minio }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits: [{action: minio_default_creds}, {action: minio_version_cve}]
+  maps: [T1190, CWE-1188]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . minio minioadmin:minioadmin -> bucket loot; version->CVE'
+  technique: minio_recon
+  authorized_only: true
+
+- id: confluence_recon
+  when: { surface: confluence }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits: [{action: confluence_version_cve}]
+  maps: [T1190]
+  points: 12
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . confluence version->CVE (OGNL/auth-bypass families)'
+  technique: confluence_recon
+  authorized_only: true
+
+- id: teamcity_recon
+  when: { surface: teamcity }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits: [{action: teamcity_version_cve}]
+  maps: [T1190]
+  points: 12
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . teamcity version->CVE (auth-bypass -> RCE families)'
+  technique: teamcity_recon
+  authorized_only: true
+
+- id: nexus_recon
+  when: { surface: nexus }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits: [{action: nexus_default_creds}, {action: nexus_version_cve}]
+  maps: [T1190, CWE-1188]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . nexus admin:admin123 + version->CVE'
+  technique: nexus_recon
+  authorized_only: true
+
+- id: sonarqube_recon
+  when: { surface: sonarqube }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits: [{action: sonarqube_default_creds}, {action: sonarqube_token_hunt}]
+  maps: [T1190, CWE-1188]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . sonarqube admin:admin -> project tokens / SCM creds'
+  technique: sonarqube_recon
+  authorized_only: true
+
+- id: superset_recon
+  when: { surface: superset }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits: [{action: superset_default_creds}, {action: superset_version_cve}]
+  maps: [T1190, CWE-1188]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . superset admin:admin + version->CVE (SQLLab / secret-key)'
+  technique: superset_recon
+  authorized_only: true
+
+- id: metabase_recon
+  when: { surface: metabase }
+  class: traditional
+  likelihood: H
+  time_cost: fast
+  emits: [{action: metabase_version_cve}, {action: webapp_setup_probe}]
+  maps: [T1190]
+  points: 12
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . metabase version->CVE (setup-token pre-auth RCE family)'
+  technique: metabase_recon
+  authorized_only: true
+
+- id: jupyterhub_recon
+  when: { surface: jupyterhub }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits: [{action: jupyterhub_token_check}]
+  maps: [T1190, CWE-306]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . jupyterhub/jupyter token-less access -> notebook kernel exec'
+  technique: jupyterhub_recon
+  authorized_only: true
+
+- id: nextcloud_recon
+  when: { surface: nextcloud }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits: [{action: nextcloud_default_creds}, {action: nextcloud_version_cve}]
+  maps: [T1190, CWE-1188]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . nextcloud default/weak admin + version->CVE'
+  technique: nextcloud_recon
+  authorized_only: true
+
+- id: artifactory_recon
+  when: { surface: artifactory }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits: [{action: artifactory_default_creds}, {action: artifactory_version_cve}]
+  maps: [T1190, CWE-1188]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . artifactory admin:password -> repo/secret loot; version->CVE'
+  technique: artifactory_recon
+  authorized_only: true
+
+- id: jira_recon
+  when: { surface: jira }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits: [{action: jira_version_cve}, {action: jira_user_enum}]
+  maps: [T1190, T1087]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'hacktricks . jira version->CVE + unauth user/project enum'
+  technique: jira_recon
+  authorized_only: true
+
+# Unfinished setup exposed (setup_incomplete, set by the webapp_setup_probe
+# extractor). Scoped to metabase: a leaked setup-token is pre-auth RCE. Superset's
+# default-SECRET_KEY forge needs a different producer (deferred). Exploit-tier.
+- id: metabase_setup_token_rce
+  when: { surface: metabase, findings_include: setup_incomplete }
+  class: traditional
+  likelihood: H
+  time_cost: med
+  emits: [{action: metabase_setup_token_rce}]
+  maps: [CVE-2023-38646, CWE-1188]
+  points: 15
+  risk: exploit
+  routes: 'HexStrike web stack'
+  source: 'metabase . leaked setup-token -> pre-auth RCE (CVE-2023-38646)'
+  technique: metabase_setup_rce
+  authorized_only: true

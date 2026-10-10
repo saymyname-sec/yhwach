@@ -1,0 +1,1 @@
+{"kind":"PodList","apiVersion":"v1","metadata":{},"items":[{"metadata":{"name":"nginx-7c5ddbdf54-abcde","namespace":"default"},"spec":{"serviceAccountName":"default","containers":[{"name":"nginx","image":"nginx:1.25"}]}},{"metadata":{"name":"coredns-5d78c9869d-xyz12","namespace":"kube-system"},"spec":{"serviceAccountName":"coredns"}}]}

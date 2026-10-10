@@ -1,0 +1,24 @@
+name: chatbot_open
+description: Open chatbot endpoint, no auth. Multiple attack angles should surface
+  (direct injection, session enumeration, RAG upload discovery); direct injection
+  ranks first on EV. The Ollama rule must NOT appear.
+world_model:
+  engagement:
+    lab: fx_chatbot
+    scope: [10.10.10.0/24]
+  hosts:
+    - ip: 10.10.10.20
+      os: linux
+      stage: scanned
+      services:
+        - {port: 8000, proto: tcp, product: uvicorn, version: 0.24.0}
+      surfaces:
+        - {kind: chatbot, auth: none, service_port: 8000, meta: {endpoint: /api/chat}}
+expected:
+  autonomy: proceed
+  top_hypothesis: {playbook_rule_id: chatbot_direct_injection_probe}
+  must_include_hypotheses:
+    - chatbot_direct_injection_probe
+    - chatbot_session_enumeration
+    - rag_upload_discovery
+  must_not_include: [ollama_unauth_api]

@@ -1,0 +1,3 @@
+SPOOLER     10.10.10.10     445    DC01             [+] Spooler service enabled
+WEBDAV      10.10.10.20     445    WS01             [+] WebClient service enabled
+SMB         10.10.10.30     445    SRV02            WebClient service not enabled

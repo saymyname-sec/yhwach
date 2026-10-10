@@ -1,0 +1,8 @@
+SMB         10.10.11.231    445    DC01             [*] Windows 10 / Server 2019 Build 17763 x64 (name:DC01) (domain:corp.local) (signing:True) (SMBv1:False)
+SMB         10.10.11.231    445    DC01             [+] corp.local\guest:
+SMB         10.10.11.231    445    DC01             498: corp\Enterprise Read-only Domain Controllers (SidTypeGroup)
+SMB         10.10.11.231    445    DC01             500: corp\Administrator (SidTypeUser)
+SMB         10.10.11.231    445    DC01             501: corp\Guest (SidTypeUser)
+SMB         10.10.11.231    445    DC01             502: corp\krbtgt (SidTypeUser)
+SMB         10.10.11.231    445    DC01             1103: corp\svc_sql (SidTypeUser)
+SMB         10.10.11.231    445    DC01             1104: corp\jdoe (SidTypeUser)

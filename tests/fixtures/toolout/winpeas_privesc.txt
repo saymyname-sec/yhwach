@@ -1,0 +1,26 @@
+ÉÍÍÍÍÍÍÍÍÍÍ¹ Scheduled Applications --Non Microsoft--
+    (Task) CorpZoneSync
+        Action: powershell -File C:\ProgramData\Corp\example-zone-sync.ps1
+        Trigger: every 15 minutes
+        Run As: NT AUTHORITY\SYSTEM
+        File Permissions: BUILTIN\Users [WriteData/CreateFiles]
+
+ÉÍÍÍÍÍÍÍÍÍÍ¹ Looking for AutoLogon credentials
+    DefaultDomainName             :  CORP
+    DefaultUserName               :  svc-autologon
+    DefaultPassword               :  Sup3r-S3cret-Autologon!
+
+ÉÍÍÍÍÍÍÍÍÍÍ¹ Looking for DPAPI Credential Manager
+    Folder: C:\Users\j.martinez\AppData\Roaming\Microsoft\Credentials
+    Folder: C:\Users\j.martinez\AppData\Roaming\Microsoft\Protect\S-1-5-21-...
+
+=========================================
+ÉÍÍÍÍ¹ Token privileges
+    SeImpersonatePrivilege: Enabled
+    SeChangeNotifyPrivilege: Enabled
+
+ÉÍÍÍÍ¹ Analyzing KeePass Files
+    C:\Users\michael.torres\Documents\KeePass\IT-Service-Accounts.kdbx
+ÉÍÍÍÍ¹ Autorun Applications
+    HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+        CorpVault: "C:\Program Files\KeePass\KeePass.exe" "C:\...\Corp-IT.kdbx" -pw:Corp-SOC-Vault!2026

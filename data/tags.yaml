@@ -1,0 +1,105 @@
+# Yhwach — the chaining-tag registry: the memory's data dictionary.
+# `yhwach ref tags [--query seimpersonate]`.
+#
+# The memory is indexed on THREE orthogonal tag axes:
+#   surface   -> surface.kind / rule `surface:`      (what it IS)         -> service_matrix.yaml
+#   state     -> finding.tag / rule `findings_include`(what we PROVED)    -> THIS file
+#   taxonomy  -> finding.class / rule `maps:`         (what it MEANS)     -> public IDs
+#
+# This file documents the STATE axis. The invariant "every chaining tag has a
+# producer and a consumer, or it is dead" is enforced by tests/test_tag_graph.py
+# (computed from code, so this file need not be exhaustive to be safe).
+#
+# Schema: tag, producer[] (code that emits it), consumers[] (rules that key on it),
+#         implies[] (taxonomy), status (live | dead), note.
+
+# --- the high_ev_leads credential triggers: now PRODUCED by parsers/peas.py
+#     (P1 winPEAS/linPEAS slice). Previously dead; revived so the P0 promotion
+#     path fires. tests/test_tag_graph.py asserts none are orphans. ---
+- tag: unattend_xml
+  status: live
+  producer: [yhwach/parsers/peas.py]
+  consumers: [high_ev_leads]
+  implies: [T1552.001]
+  note: "unattend/sysprep answer file — plaintext/base64 local-admin pw"
+- tag: powershell_history
+  status: live
+  producer: [yhwach/parsers/peas.py]
+  consumers: [high_ev_leads]
+  implies: [T1552.003]
+  note: "ConsoleHost_history.txt — creds/paths typed at the prompt"
+- tag: putty_session_reg
+  status: live
+  producer: [yhwach/parsers/peas.py]
+  consumers: [high_ev_leads]
+  implies: [T1552.001]
+  note: "saved PuTTY session — stored proxy/login password"
+- tag: firefox_logins_json
+  status: live
+  producer: [yhwach/parsers/peas.py]
+  consumers: [high_ev_leads]
+  implies: [T1555.003]
+  note: "logins.json + key4.db -> firefox_decrypt to plaintext creds"
+- tag: browser_wallet_extension
+  status: live
+  producer: [yhwach/parsers/peas.py]
+  consumers: [high_ev_leads]
+  implies: [T1555]
+  note: "wallet / password-manager extension local state"
+
+# --- context-set tags: intentionally set by the brain/operator from context,
+#     not by an automated parser (so they legitimately have no code producer). ---
+- tag: classifier_repo
+  status: context
+  consumers: [ml_classifier_poisoning]   # playbooks/supply_chain.yaml
+  implies: [LLM04]
+  note: "brain-set when a repo is identified as an ML classifier's training source (supply_chain.yaml)"
+
+# --- live state tags (representative; grows per slice) ---
+- tag: chrome_login_data
+  status: live
+  producer: [yhwach/interpret.py]
+  consumers: [high_ev_leads]
+  implies: [T1555.003]
+- tag: keepass_kdbx
+  status: live
+  producer: [yhwach/interpret.py]
+  consumers: [high_ev_leads]
+  implies: [T1555.005]
+- tag: dpapi_master_key
+  status: live
+  producer: [yhwach/interpret.py]
+  consumers: [high_ev_leads]
+  implies: [T1555.004]
+- tag: lsa_defaultpassword
+  status: live
+  producer: [yhwach/interpret.py]
+  consumers: [high_ev_leads]
+  implies: [T1552.001]
+- tag: seimpersonate
+  status: live
+  producer: [yhwach/interpret.py]
+  implies: [T1134.001]
+  note: "SeImpersonate token priv -> GodPotato (lesson L-godpotato)"
+- tag: adcs_vuln
+  status: live
+  producer: [yhwach/parsers/adcs.py]
+  implies: [T1649]
+  note: "generic ADCS flag; per-ESC tags land in a later slice"
+- tag: kerberoastable
+  status: live
+  producer: [yhwach/interpret.py, yhwach/parsers/netexec.py]
+  implies: [T1558.003]
+- tag: aws_credentials
+  status: live
+  producer: [yhwach/interpret.py]
+  implies: [T1552.005]
+  note: "lesson L-aws-imds"
+
+# --- new state tag introduced in this slice (P0) ---
+- tag: redis_unauth
+  status: live
+  producer: [yhwach/interpret.py]    # _redis_info on the redis_unauth_info action
+  consumers: [redis_write_rce]
+  implies: [T1213, CWE-306]
+  note: "unauth Redis INFO/PING -> version/config-gated CONFIG/MODULE/SLAVEOF write-RCE"

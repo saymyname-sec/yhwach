@@ -1,0 +1,18 @@
+name: ollama_authed
+description: Ollama behind bearer auth. Negative test — the unauth rule requires
+  auth=none, so it must NOT fire. Guards against the matcher ignoring the auth
+  condition.
+world_model:
+  engagement:
+    lab: fx_ollama_auth
+    scope: [10.10.10.0/24]
+  hosts:
+    - ip: 10.10.10.16
+      os: linux
+      stage: scanned
+      services:
+        - {port: 11434, proto: tcp, product: ollama}
+      surfaces:
+        - {kind: ollama, auth: bearer, service_port: 11434, meta: {}}
+expected:
+  must_not_include: [ollama_unauth_api]

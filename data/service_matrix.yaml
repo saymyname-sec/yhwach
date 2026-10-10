@@ -1,0 +1,319 @@
+# Yhwach — the service matrix: ONE source of truth for service identity.
+# `yhwach ref services [--query redis]`.
+#
+# Service identity is otherwise spread across PORT_KIND / _PRODUCT_KIND / WEB_PORTS /
+# PROBES_BY_PORT / surface.kind / rule `surface:` / ref packs / default_creds / cve_map —
+# eight places that can drift apart (that drift is the service-identity-drift bug class). This file
+# is the reference they are tested against (see tests/test_service_matrix.py).
+#
+# Schema per row:
+#   kind          canonical surface kind (== surface.kind == PORT_KIND value when port-classified)
+#   aka           other names it appears under
+#   tcp_ports     default TCP ports (asserted against PORT_KIND for classify:[port] rows)
+#   udp_ports     default UDP ports
+#   classify      how it is identified: [port] | [product] | [probe] | [fingerprint] (any combination)
+#   surface_kind  the surface.kind a rule keys on with `surface:`  (usually == kind)
+#   rules         playbook rule ids that consume this surface (may be empty until a later slice)
+#   ref_pack      the `yhwach ref` pack for its recall menu (may not exist until a later slice)
+#   default_creds true when data/default_creds.yaml has a row
+#   cve_products  product strings matched in data/cve_map.yaml
+#   taxonomy      the standard IDs this surface's techniques carry
+#   enum_ref      one-line "how to triage it" (mirrors coverage._ENUM_REF)
+#   service_enum  true when a live-but-untriaged surface should raise a service_enum gap
+
+# ---- data stores -----------------------------------------------------------
+- kind: redis
+  aka: [redis-server]
+  tcp_ports: [6379, 6380]
+  classify: [port, product]
+  surface_kind: redis
+  rules: []
+  ref_pack: datastores
+  default_creds: false
+  cve_products: [redis]
+  taxonomy: [T1213, CWE-306]
+  enum_ref: "redis-cli INFO/KEYS (unauth) -> default-creds -> version->CVE -> loot"
+  service_enum: true
+- kind: redis_sentinel
+  tcp_ports: [26379]
+  classify: [port]
+  surface_kind: redis_sentinel
+  ref_pack: datastores
+  taxonomy: [T1213]
+  service_enum: true
+- kind: memcached
+  tcp_ports: [11211]
+  classify: [port, product]
+  surface_kind: memcached
+  ref_pack: datastores
+  cve_products: [memcached]
+  taxonomy: [T1213, CWE-306]
+  enum_ref: "memcached stats/stats items (unauth) -> loot"
+  service_enum: true
+- kind: mongodb
+  aka: [mongo]
+  tcp_ports: [27017, 27018, 27019]
+  classify: [port, product]
+  surface_kind: mongodb
+  ref_pack: datastores
+  default_creds: true
+  cve_products: [mongodb]
+  taxonomy: [T1213]
+  enum_ref: "mongosh listDatabases (unauth) -> loot"
+  service_enum: true
+- kind: elasticsearch
+  tcp_ports: [9200, 9300]
+  classify: [port, product]
+  surface_kind: elasticsearch
+  ref_pack: datastores
+  default_creds: true
+  cve_products: [elasticsearch]
+  taxonomy: [T1213]
+  enum_ref: "curl /_cat/indices (unauth) -> version->CVE -> loot"
+  service_enum: true
+- kind: kibana
+  tcp_ports: [5601]
+  classify: [port]
+  surface_kind: kibana
+  ref_pack: datastores
+  default_creds: true
+  cve_products: [kibana]
+  taxonomy: [CVE-2019-7609]
+  service_enum: true
+- kind: mssql
+  aka: [microsoft sql server]
+  tcp_ports: [1433]
+  classify: [port, product]
+  surface_kind: mssql
+  ref_pack: datastores
+  default_creds: false
+  taxonomy: [T1190]
+  enum_ref: "try sa/default-creds; xp_dirtree UNC -> NetNTLMv2 capture"
+  service_enum: true
+- kind: mysql
+  aka: [mariadb]
+  tcp_ports: [3306]
+  classify: [port, product]
+  surface_kind: mysql
+  ref_pack: datastores
+  default_creds: true
+  taxonomy: [T1213]
+  service_enum: true
+- kind: postgres
+  aka: [postgresql]
+  tcp_ports: [5432]
+  classify: [port, product]
+  surface_kind: postgres
+  ref_pack: datastores
+  default_creds: true
+  taxonomy: [T1213]
+  service_enum: true
+- kind: kafka
+  tcp_ports: [9092]
+  classify: [port, product]
+  surface_kind: kafka
+  ref_pack: datastores
+  taxonomy: [CVE-2023-25194]
+  service_enum: true
+- kind: rabbitmq
+  tcp_ports: [15672]
+  classify: [port, product]
+  surface_kind: rabbitmq
+  ref_pack: datastores
+  default_creds: true
+  taxonomy: [T1213]
+  service_enum: true
+- kind: zookeeper
+  tcp_ports: [2181]
+  classify: [port, product]
+  surface_kind: zookeeper
+  ref_pack: datastores
+  taxonomy: [T1213]
+  service_enum: true
+
+# ---- cloud-native control plane -------------------------------------------
+- kind: apiserver
+  aka: [kube-apiserver, kubernetes]
+  tcp_ports: [6443, 8443]
+  classify: [port]
+  surface_kind: apiserver
+  rules: []
+  ref_pack: k8s-enum
+  cve_products: [kube-apiserver]
+  taxonomy: [T1613, CVE-2018-1002105, CWE-284]
+  enum_ref: "kubectl auth can-i --list --as=system:anonymous -> secrets/pods"
+  service_enum: true
+- kind: kubelet
+  tcp_ports: [10250]
+  classify: [port]
+  surface_kind: kubelet
+  ref_pack: k8s-enum
+  taxonomy: [T1613]
+  enum_ref: "curl -k https://<ip>:10250/pods -> /run exec"
+  service_enum: true
+- kind: kubelet_ro
+  tcp_ports: [10255]
+  classify: [port]
+  surface_kind: kubelet_ro
+  ref_pack: k8s-enum
+  taxonomy: [T1613]
+  service_enum: true
+- kind: etcd
+  tcp_ports: [2379, 2380]
+  classify: [port, product]
+  surface_kind: etcd
+  ref_pack: k8s-enum
+  taxonomy: [T1552.007]
+  enum_ref: "etcdctl get / --prefix (unauth) -> /registry/secrets"
+  service_enum: true
+- kind: docker_api
+  aka: [docker]
+  tcp_ports: [2375, 2376]
+  classify: [port, product]
+  surface_kind: docker_api
+  ref_pack: k8s-enum
+  taxonomy: [T1610, CWE-306]
+  enum_ref: "curl http://<ip>:2375/_ping + /version -> host-root-equivalent"
+  service_enum: true
+- kind: consul
+  tcp_ports: [8500, 8300]
+  classify: [port, product]
+  surface_kind: consul
+  ref_pack: k8s-enum
+  taxonomy: [T1552]
+  service_enum: true
+- kind: vault
+  tcp_ports: [8200]
+  classify: [port, probe]
+  surface_kind: vault
+  ref_pack: k8s-enum
+  taxonomy: [T1552]
+  service_enum: false
+
+# ---- AI surfaces (identified by probe, not port classification) -----------
+- kind: ollama
+  tcp_ports: [11434]
+  classify: [probe]
+  surface_kind: ollama
+  ref_pack: ai-infra
+  default_creds: true
+  cve_products: [ollama]
+  taxonomy: [LLM02, ATLAS-AML.T0040]
+  enum_ref: "GET /api/tags -> models; unauth by default"
+  service_enum: true
+- kind: chatbot
+  classify: [probe]
+  surface_kind: chatbot
+  ref_pack: owasp-llm
+  taxonomy: [LLM01, LLM02, LLM06]
+  enum_ref: "system-prompt leak -> tool/agency map -> injection"
+  service_enum: true
+- kind: openai_compat
+  classify: [probe]
+  surface_kind: openai_compat
+  ref_pack: ai-infra
+  taxonomy: [LLM06]
+  service_enum: true
+- kind: mcp
+  classify: [probe]
+  surface_kind: mcp
+  ref_pack: owasp-llm
+  taxonomy: [LLM06, ATLAS-AML.T0053]
+  enum_ref: "tools/list -> a privileged tool is the target"
+  service_enum: true
+- kind: gradio
+  classify: [probe]
+  surface_kind: gradio
+  ref_pack: ai-infra
+  cve_products: [gradio]
+  taxonomy: [LLM06]
+  service_enum: true
+- kind: a2a
+  classify: [probe]
+  surface_kind: a2a
+  ref_pack: owasp-llm
+  taxonomy: [LLM06, ATLAS-AML.T0053]
+  service_enum: true
+- kind: vectordb
+  aka: [qdrant, weaviate, chroma, milvus]
+  classify: [probe]
+  surface_kind: vectordb
+  ref_pack: ai-infra
+  taxonomy: [LLM08, ML03]
+  service_enum: true
+- kind: rag
+  classify: [probe]
+  surface_kind: rag
+  ref_pack: owasp-llm
+  taxonomy: [LLM01, ATLAS-AML.T0051.001]
+  service_enum: true
+
+# ---- web / CI-CD apps (fingerprinted) -------------------------------------
+- kind: jenkins
+  classify: [fingerprint]
+  surface_kind: jenkins
+  ref_pack: null
+  default_creds: true
+  cve_products: [jenkins]
+  taxonomy: [CVE-2024-23897]
+  service_enum: true
+- kind: gitlab
+  classify: [fingerprint]
+  surface_kind: gitlab
+  ref_pack: null
+  default_creds: true
+  cve_products: [gitlab]
+  taxonomy: [CVE-2023-7028]
+  service_enum: true
+- kind: gitea
+  classify: [fingerprint]
+  surface_kind: gitea
+  ref_pack: null
+  taxonomy: [T1195]
+  service_enum: true
+- kind: n8n
+  classify: [probe, fingerprint]
+  surface_kind: n8n
+  ref_pack: null
+  taxonomy: [CVE-2026-21858]
+  service_enum: true
+
+# ---- self-hosted web apps (fingerprinted by probe_webapp_products) ---------
+- {kind: grafana, classify: [fingerprint], surface_kind: grafana, default_creds: true, cve_products: [grafana], taxonomy: [T1190], enum_ref: "admin:admin -> version->CVE (yhwach ref default-creds -q grafana)", service_enum: true}
+- {kind: keycloak, classify: [fingerprint], surface_kind: keycloak, default_creds: true, taxonomy: [T1190], enum_ref: "admin console default creds + realm enum", service_enum: true}
+- {kind: minio, classify: [fingerprint], surface_kind: minio, default_creds: true, taxonomy: [T1190], enum_ref: "minioadmin:minioadmin -> bucket loot", service_enum: true}
+- {kind: confluence, classify: [fingerprint], surface_kind: confluence, cve_products: [confluence], taxonomy: [T1190], enum_ref: "version->CVE (OGNL / auth-bypass)", service_enum: true}
+- {kind: teamcity, classify: [fingerprint], surface_kind: teamcity, taxonomy: [T1190], enum_ref: "version->CVE (auth-bypass -> RCE)", service_enum: true}
+- {kind: nexus, classify: [fingerprint], surface_kind: nexus, default_creds: true, taxonomy: [T1190], enum_ref: "admin:admin123 + version->CVE", service_enum: true}
+- {kind: sonarqube, classify: [fingerprint], surface_kind: sonarqube, default_creds: true, taxonomy: [T1190], enum_ref: "admin:admin -> project tokens / SCM creds", service_enum: true}
+- {kind: superset, classify: [fingerprint], surface_kind: superset, default_creds: true, taxonomy: [T1190], enum_ref: "admin:admin + version->CVE", service_enum: true}
+- {kind: metabase, classify: [fingerprint], surface_kind: metabase, taxonomy: [T1190], enum_ref: "version->CVE (setup-token pre-auth RCE)", service_enum: true}
+- {kind: jupyterhub, classify: [fingerprint], surface_kind: jupyterhub, taxonomy: [T1190], enum_ref: "token-less access -> kernel exec", service_enum: true}
+- {kind: nextcloud, classify: [fingerprint], surface_kind: nextcloud, default_creds: true, taxonomy: [T1190], enum_ref: "weak admin + version->CVE", service_enum: true}
+- {kind: artifactory, classify: [fingerprint], surface_kind: artifactory, default_creds: true, taxonomy: [T1190], enum_ref: "admin:password -> repo/secret loot", service_enum: true}
+- {kind: jira, classify: [fingerprint], surface_kind: jira, taxonomy: [T1190], enum_ref: "version->CVE + unauth user/project enum", service_enum: true}
+
+# ---------------------------------------------------------------------------
+# Traditional / AD services. These are the most common surfaces in any engagement and
+# had no row at all, so a Domain Controller got no triage context anywhere —
+# `yhwach ref services smb` and the per-host dossier both returned nothing.
+#
+# service_enum: false on every one of them. They are already covered by the AD
+# and web playbooks, and flipping them on would flood `yhwach gaps` with a
+# service_enum debt the operator did not previously owe.
+# ---------------------------------------------------------------------------
+- {kind: smb, aka: [microsoft-ds, netbios-ssn, cifs], tcp_ports: [139, 445], classify: [port, product], surface_kind: smb, ref_pack: wadcoms, default_creds: false, taxonomy: [T1135, T1087.002], enum_ref: "null/guest session -> shares, users (RID brute), password policy; signing off -> relay", service_enum: false}
+- {kind: ldap, aka: [ldaps, globalcat], tcp_ports: [389, 636, 3268], classify: [port, product], surface_kind: ldap, ref_pack: wadcoms, default_creds: false, taxonomy: [T1087.002, T1552.001], enum_ref: "anonymous bind -> naming context; authed -> users, SPNs, descriptions (passwords leak here), LAPS, delegation, MAQ", service_enum: false}
+- {kind: kerberos, aka: [kerberos-sec], tcp_ports: [88], classify: [port, product], surface_kind: kerberos, ref_pack: wadcoms, default_creds: false, taxonomy: [T1558.003, T1558.004], enum_ref: "user enum via AS-REQ; AS-REP roast (no preauth); kerberoast SPNs once authed", service_enum: false}
+- {kind: winrm, aka: [microsoft httpapi, wsman], tcp_ports: [5985, 5986], classify: [port, product], surface_kind: winrm, ref_pack: wadcoms, default_creds: false, taxonomy: [T1021.006], enum_ref: "a valid cred here is a shell — spray the vault against it before anything exotic", service_enum: false}
+- {kind: ssh, aka: [openssh], tcp_ports: [22], classify: [port, product], surface_kind: ssh, ref_pack: gtfobins, default_creds: false, cve_products: [openssh], taxonomy: [T1021.004], enum_ref: "banner -> version->CVE; auth methods (password vs key-only); reuse vault creds and recovered keys", service_enum: false}
+- {kind: rdp, aka: [ms-wbt-server], tcp_ports: [3389], classify: [port, product], surface_kind: rdp, ref_pack: wadcoms, default_creds: false, taxonomy: [T1021.001], enum_ref: "NLA on/off + cert CN (often leaks the hostname and domain); reuse vault creds", service_enum: false}
+- {kind: ftp, aka: [vsftpd, proftpd, pure-ftpd], tcp_ports: [21], classify: [port, product], surface_kind: ftp, default_creds: true, cve_products: [vsftpd, proftpd], taxonomy: [T1083], enum_ref: "anonymous login -> listing; writable root -> webroot drop; version->CVE", service_enum: false}
+- {kind: web, aka: [http, https, nginx, apache, iis], classify: [probe], surface_kind: web, taxonomy: [T1190, CWE-200], enum_ref: "title/server/tech fingerprint -> content discovery -> params are the injection surface; 401/403 marks something worth having", service_enum: false}
+- {kind: web_upload, classify: [probe], surface_kind: web_upload, taxonomy: [T1190, CWE-434], enum_ref: "an upload form is also an indirect-injection vector when submissions are AI-screened", service_enum: false}
+# Message brokers. In PORT_KIND (so they classify) but had no row, so they also
+# briefed as nothing. service_enum: false — the broker playbooks already cover them.
+- {kind: activemq, aka: [apache activemq], tcp_ports: [8161], classify: [port, product], surface_kind: activemq, default_creds: true, cve_products: [activemq], taxonomy: [T1190], enum_ref: "admin:admin on the web console; version->CVE (CVE-2023-46604 is unauth RCE)", service_enum: false}
+- {kind: activemq_openwire, aka: [openwire], tcp_ports: [61616], classify: [port], surface_kind: activemq_openwire, cve_products: [activemq], taxonomy: [T1190], enum_ref: "OpenWire transport — the CVE-2023-46604 unauth RCE path; version comes from 8161", service_enum: false}
+- {kind: amqp, aka: [rabbitmq, qpid], tcp_ports: [5672], classify: [port, product], surface_kind: amqp, default_creds: true, cve_products: [rabbitmq], taxonomy: [T1190], enum_ref: "guest:guest (local-only by default, but often exposed); queues carry app secrets", service_enum: false}
+- {kind: mqtt, aka: [mosquitto], tcp_ports: [1883, 8883], classify: [port, product], surface_kind: mqtt, default_creds: false, taxonomy: [T1190], enum_ref: "subscribe to # unauthenticated -> every topic; device creds and tokens cross the bus in clear", service_enum: false}

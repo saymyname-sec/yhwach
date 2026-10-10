@@ -1,0 +1,39 @@
+# Known benign build/provisioning artifacts. NOT attack paths — filter from ranker output.
+# Each entry: what to match, where it typically appears, why it's noise.
+#
+# This list grows every lab where an operator wastes turns on a false lead.
+
+- artifact: cloudbase_init
+  match:
+    - user: cloudbase-init
+    - process: cloudbase-init.exe
+    - path: 'C:\Program Files\Cloudbase Solutions\**'
+    - service: cloudbase-init
+  reason: |
+    Cloud images commonly ship Cloudbase-Init for first-boot initialization.
+    The user, service, install path, and logs are provisioning
+    infrastructure, not a target. Confirmed: a dev artifact, never a lead.
+  authorized_only: true
+
+- artifact: default_administrator_placeholder
+  match:
+    - text: 'PleaseChangeMe'
+    - text: 'ChangeMeNow'
+    - text: 'Password123!'                  # only when found alone in a template
+  reason: |
+    Placeholder strings that appear in provisioning templates. Only a lead if paired
+    with a service that accepts it — otherwise noise. Rank the pairing, not the
+    string on its own.
+  authorized_only: true
+
+- artifact: provisioning_readme
+  match:
+    - path: '**/README-SETUP*.txt'
+    - path: '**/lab-setup*.md'
+  reason: |
+    Range/provisioning metadata files shipped with the target. Reading them is
+    fine, ranking them as an attack path is not.
+  authorized_only: true
+
+# Add more entries here as they're confirmed benign noise, not attack paths.
+# Format: match keys are OR-ed within an entry; entries are OR-ed across the file.

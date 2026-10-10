@@ -59,7 +59,7 @@ Inside yhwach:
 ```bash
 git clone https://github.com/saymyname-sec/yhwach ~/yhwach && cd ~/yhwach
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[mcp]"                         # add ,ui for the optional live board:  ".[mcp,ui]"
+pip install -e ".[mcp,ui]"                      # mcp = the server; ui = the board (recommended — see below)
 mkdir -p "$HOME/.local/share/yhwach/state"      # the DB directory (your first engage would also create it)
 yhwach doctor                                   # preflight check
 ```
@@ -142,11 +142,15 @@ Agent instructions alone won't keep the memory current (see above) — but witho
 - After any credential, finding, stage change, pivot or flag: record it in yhwach AND
   update the matching note in the same step. Never "later".
 - Never re-run an approach listed in `exhausted-approaches.md` without asking me.
+- Write each step into `notes/acme/chains/<ID>-<host>-<technique>.md` right after
+  running it (template: docs/templates/chain-note.md).
+- At every capture point run `scripts/yhwach-shot.sh -l acme -n <ID>-<step> --cmd -- <command>`
+  and paste the EMBED line it prints. If it prints SCREENSHOT-MISSING, write that token.
 - yhwach recalls options; I choose the attack path. Ask before any exploit.
 - Before `yhwach_add_cred`, check the lockout policy — recording a credential sprays it.
 ```
 
-The habit still has to come from you: check that it happened.
+The habit still has to come from you: check that it happened — and keep [the board](#the-board--how-you-drive) open so you can see at a glance whether it did.
 
 ### 1. Open the engagement
 
@@ -209,7 +213,16 @@ Before picking the next move, ask yhwach — then **you** choose:
 
 Yhwach recalls and ranks options; it never decides. The attack path is yours.
 
-### 5. Resume after a break or a context reset
+### 5. Drive from the board — when the agent runs dry, you bring the ideas
+
+This is the part people miss, and it's where yhwach earns its keep. Your agent will run out of ideas on a host long before the host is actually exhausted. **You** don't have to hold the whole estate in your head to see what it skipped — [the board](#the-board--how-you-drive) does. Keep it open in a browser the whole engagement:
+
+- **At the start of a host, and whenever the agent stalls, read the board yourself.** The *Recon* page shows, per host, which scans were run and which weren't; *Surfaces* lists every port, service, version and web path; *Map* shows what's reachable and what's still dark. You're looking for the thing nobody thought to check: a UDP sweep never run, an 8080 nobody touched, a share never listed, a vhost never fuzzed.
+- **Then feed that back as a concrete instruction.** The flow is usually *you* spotting something on the board and telling the agent to go look: *"The board shows 10.10.10.40 has 1433 open but no SQL enumeration — go at it,"* or *"ai01 has an ollama surface that was never triaged — probe it."* Yhwach remembers; you supply the curiosity.
+- **Completeness is something you confirm on the board, not something you assume.** Before you call a host done, the *Recon* matrix and the coverage panel should show every path checked. A green row is a checked box; a gap is an open door. (`yhwach_gaps` says the same thing in text — the board just lets you see it all at once.)
+- **The board never touches a target.** It's a read-only window; every action still runs through you and your agent.
+
+### 6. Resume after a break or a context reset
 
 Your chat context will be reset or compacted many times. The memory isn't:
 
@@ -246,59 +259,173 @@ At the end of each working session, run through this checklist with your agent:
 > [!WARNING]
 > - **Recording can send traffic.** `yhwach_add_cred` immediately tries the new credential against every matching service already in the memory, and an nmap ingest or `yhwach_scan` re-tests stored credentials against new services — real authentication attempts. Know the lockout policy before recording passwords, and stay within your authorised scope.
 > - **You enforce the scope.** The active tools (`scan`, `enum`, `probe`, `spray`) act on whatever you point them at.
-> - **Secrets are stored and shown in clear** — to the model (`yhwach_creds`) and on the live board. The board's `--redact` masks only part of it (see [Live board](#live-board-optional)).
+> - **Secrets are stored and shown in clear** — to the model (`yhwach_creds`) and on the board. The board's `--redact` masks only part of it (see [The board](#the-board--how-you-drive)).
+
+---
+
+## The board — how you drive
+
+**Run the board. It's not a dashboard you glance at — it's how you steer the engagement.** Your agent works one host at a time through a narrow window; the board is where *you* see the whole estate at once and spot what it skipped. Keep it open the whole time.
+
+```bash
+yhwach ui --lab acme --redact      # http://127.0.0.1:8799 — read-only, binds to localhost
+```
+
+Eight pages, each answering one question. The screenshots below are a small fictional engagement (`acme`).
+
+### Board — *where do I stand, and what's possible right now?*
+
+The landing page. Scored tiles at the top (points, hosts owned, pending scans, enum honesty, findings), then the **applicability inventory**: every technique that applies to the current state, split read-only vs. gated — the same recall menu as `yhwach_next`, across the whole estate. Below it, the coverage panel (*what you still owe*, with the exact scan to close each gap) and the hosts-by-stage columns.
+
+![The board page](docs/assets/board-overview.png)
+
+### Recon — *what has actually been looked at, per host?*
+
+The completeness check. One row per host; columns for full-port, version scan, UDP, services, surfaces, web paths, shares, principals, credential tries. A ✓ is a checked box, an ✗ is an open door. Thinnest hosts sort to the top. The scan ledger below shows the exact `nmap` argv behind every row. **This is the page you read before calling a host done** — and the one that shows you the port nobody enumerated.
+
+![The recon / enumeration-coverage page](docs/assets/board-recon.png)
+
+### Surfaces — *what's listening, and how much do we know about it?*
+
+Every service, version and web path in one inventory, plus a decoded view of AI surfaces (models, tools, endpoints a probe found) and a payloads-sent/answered log. This is where you browse ports and protocols looking for the next lead to hand the agent.
+
+### Identity — *what do we know about the AD, and what haven't we collected?*
+
+Password policy (and a loud warning when the lockout policy is unknown — spraying blind can lock out the estate), the principal roster, rights per principal, shares, and an "AD world model" panel that names what has **not** been collected yet, so an empty Groups panel never reads as "the domain is flat".
+
+### Map — *what can I reach, and what's still dark?*
+
+The pivot tree: every host as a node coloured by stage, tunnels drawn as edges, and per-subnet rollups (discovered / owned / open ports / pending / undiscovered). A subnet behind a tunnel with nothing discovered inside shows as reachable-but-empty — a whole segment waiting to be scanned. Click any node for its host page.
+
+![The network map / pivot tree](docs/assets/board-map.png)
+
+### Vault — *which credentials open what, and where haven't they been tried?*
+
+The credential vault (secret, what it opens, where it's validated, provenance), then the **credential × service matrix**: every credential is a row, every reachable service a column, each cell green (works / admin), red (failed) or grey (never tried). The grey cells are the question *"have my creds been tried everywhere they could be?"* — answered at a glance.
+
+![The credential vault and credential × service matrix](docs/assets/board-vault.png)
+
+### PoC — *can I prove what I captured?*
+
+Every objective and whether it has a reproducible chain behind it — including captured flags with **zero** recorded steps, the case that quietly loses points. Expand one to see its steps.
+
+### Report — *what can the write-up not yet support?*
+
+An evidence gap list (findings with no evidence line, captures with no chain, loot recorded but not saved locally), then the engagement-state summary and the full Markdown report, with both report files as downloads.
+
+### The host page
+
+Click a node on the map for one host's full picture: a dossier (*what this box is · what we hold here · open leads · what's still dark*), stage history, open ports, findings and every attempt run against it.
+
+![A single host's focus page](docs/assets/board-host.png)
+
+> [!WARNING]
+> `--redact` masks secrets in the credential vault and withholds finding evidence, host dossiers and notes. It does **not** redact the **PoC** page or the **full-report download** — those still show stored secrets. The board binds to localhost; don't expose it or screen-share those two pages.
 
 ---
 
 ## Notes with Obsidian
 
-Yhwach and your notes have **separate jobs**, and keeping both current is on you:
-
-- **Yhwach DB = the facts** — hosts, services, credentials, findings, stages, pivots. Queryable, structured, the source of truth for *what*.
-- **Obsidian vault = the story** — how you got in, why a path worked, the reproducible chain behind every flag. The source of truth for *how* and *why*.
+Yhwach holds the **facts**. Your Obsidian vault holds the **story and the evidence**: how you got in, why it worked, and the proof. **The report is written from the vault, not from yhwach.**
 
 > [!NOTE]
 > **Yhwach never reads your Obsidian vault, and nothing syncs the two automatically.** Your agent writes notes with its normal file tools — when you ask it to. Record the fact in yhwach and write the note in the same step, every time.
 
-### What yhwach generates for you
+The advice below comes from reviewing the vaults of real, finished engagements: a handful of notes carried the entire report, while others were created at kickoff and never filled. Put your effort where it pays. One folder per engagement, e.g. `~/notes/acme/`.
 
-| Command | Produces |
-|---|---|
-| `yhwach export-notes --lab acme --out <obsidian-vault>/acme/_yhwach` | Inventory notes built from the DB — *Services & Software*, *Vulnerabilities*, *Web*, *Users & Groups*, *Shares* — and one `hosts/<host>.md` per host, **including every in-scope address not yet scanned** (a /24 means ~254 files; keep the folder collapsed or excluded from graph view). **Each run overwrites these files**, so export them into their own subfolder and never type your own prose into them. Re-export after big ingests. |
-| `yhwach_poc_step` → `yhwach poc --lab acme --objective <name> --out <obsidian-vault>/acme/chains/<name>.md` | A reproducible chain: every step's command, output, script and source, in order — the backbone of your write-up. Without `--out` it is written to `~/.local/share/yhwach/chains/`, **outside your vault and shared by every lab** — so use objective names that are unique across engagements. |
-| `yhwach report --lab acme --out report.md` | A full Markdown engagement report: findings, hosts, pivots and the timeline. |
-| `yhwach recon --lab acme --host 10.10.10.5` | Everything known about one host — paste it into a note. |
-
-### What you write (or ask your agent to write)
-
-A note set that works well, one folder per engagement:
+### Report notes — these become the report
 
 | Note | Holds |
 |---|---|
-| `index.md` | Status board — links to every note, hosts / findings / credentials at a glance |
-| `overview.md` | The 30-second summary and one line per objective |
-| `attack-chain.md` | The end-to-end kill path, newest phase last |
-| `credentials.md` | Every credential: value, where it's valid, how it was obtained |
-| `network-map.md` | Subnets, routes, pivots, tunnels — who reaches what |
-| `next-steps.md` | Open leads, in order |
-| `exhausted-approaches.md` | Dead ends and decoys, **with why** they failed — never re-try blindly |
-| `resume.md` | Where you stopped and the very next move — read it first after any break |
-| `hosts/`, `findings/`, `chains/` | Your own per-host narrative, one note per finding, and the per-flag reproducible chains |
+| `chains/<ID>-<host>-<technique>.md` | **One per flag / objective — the deliverable.** Seven fixed sections ([below](#the-chain-note)): every command, its output and a screenshot, start to flag. |
+| `screenshots/` | Proof images, each paired with a `.txt` of the same command's output — made by [`scripts/yhwach-shot.sh`](scripts/yhwach-shot.sh) and embedded in the chain notes. |
+| `credentials.md` | A **master table at the top**: principal · secret · where it works · how it was obtained (link the chain) · last verified · durable or ephemeral. Move superseded values to a section at the bottom instead of correcting them in prose further down. |
+| `attack-chain.md` | The narrative: one dated phase per step forward, each linking its chain note. It becomes the report's summary. |
+| `scripts/` | Every exploit or helper you ran, with a header: what it does, where it came from, what you changed, how you ran it. Feeds *Source & modifications*. |
+| `loot/` | Small text loot (keys, configs) and an `.ORIGINAL` copy of every file you overwrite on a target, for cleanup. Large dumps stay outside the vault, referenced by path and hash. |
+| `index.md` | The status board while you work. At the end, the **submission summary**: one row per flag with its chain link and its proof **embedded** (a plain filename renders nothing). |
 
-The rule that makes it work: **every time something lands in yhwach, the matching note gets updated in the same step** — and before you end a session, `resume.md` is current.
+### Working notes — keep you oriented, stay out of the report
 
----
+| Note | Holds |
+|---|---|
+| `resume.md` | **One** rolling note, **overwritten** each session: where you are, how to reconnect, which access is durable (credentials, keys) and which is ephemeral (shells, tunnels, sessions), the next three moves, cleanup owed. Read it first after any break. |
+| `next-steps.md` | Open leads, ranked. What's left at the end becomes the report's *not captured* section. |
+| `exhausted-approaches.md` | Each dead end: what you tried, the result, **how confident** you are and **what you assumed** (tunnel up, fresh token, right credentials) — so it gets re-tested when that changes. Move an entry out when it turns out to work. |
+| `hosts/<host>.md` | One per host you touch, under **one** canonical name. Keep its status lines (access, privesc, loot, link to its chain) **updated in place**, not as appended session logs, and update it after exploitation, not only at recon. |
+| `network-map.md` | Subnets, routes, pivots and tunnels — and which of them die on a revert. |
 
-## Live board (optional)
+### Skip these — they ended up empty
+
+- **A new resume note every session.** They pile up and contradict each other. Keep one `resume.md`; archive old versions to `sessions/<date>.md`.
+- **An `overview.md` written at kickoff.** Nobody updates it. Keep the summary in `index.md`, or write the overview at the end.
+- **A half-used `findings/` folder.** Either one note per vulnerability (severity, evidence embed, link to its chain), or let section 2 of each chain note be the finding. Half-done leaves orphans.
+- **`yhwach export-notes` inventory notes** (*Services & Software*, *Shares*, *Users & Groups*, *Vulnerabilities*, *Web*). They are built only from structured records yhwach holds, and in practice they stayed empty. Export them (into their own `_yhwach/` folder — each run overwrites it) only if you feed those records, and re-export after each ingest.
+- **Non-chain notes in `chains/`** — resume points, deferred plans, idea lists. `chains/` holds exactly the deliverable.
+- **Tool artifacts** — C2 session stubs, cracking session files, temporary run scripts. Keep them out of the vault.
+
+### The chain note
+
+Start every chain from [`docs/templates/chain-note.md`](docs/templates/chain-note.md) (it works with Obsidian's *Templates* plugin). Seven sections, in this order:
+
+1. **Target + objective** — host, service, the proof file, points.
+2. **Vulnerability** — class / CVE / misconfiguration in a sentence or two. This *is* the finding.
+3. **Prerequisites** — exactly what a reader needs to start: tunnel, credentials (each linked to the chain that produced it), tools. Nothing else assumed.
+4. **Steps** — numbered. Each one: the exact command, the verbatim output from its `.txt`, one line on what it proves, the screenshot.
+5. **Proof** — one command run on the target as the compromised user, showing identity + hostname + flag together.
+6. **Source & modifications** — the full source of every script used, where it came from, and what you changed.
+7. **Cleanup / notes** — persistence installed, what's left on the target, what's durable and what's ephemeral.
+
+What separated report-ready chains from the rest:
+
+- **Each step written right after it ran.** Notes reconstructed at the end of a session — or screenshots retaken afterwards — miss state that's already gone.
+- **Commands that run as pasted:** real IPs, users and paths inline; no `$VARS`, `~/` or temp paths; no placeholders; no "same as step 2 of the other note" (make that note a prerequisite instead).
+- **Output pasted, not paraphrased** — copied from the `.txt`.
+- **A control step** where it helps: the blocked request before the bypass.
+- **A final re-run from zero:** revert, follow each chain note literally, re-capture, stamp *re-verified &lt;date&gt;*, and delete the superseded first-pass screenshots.
+
+`yhwach poc` gives section 4 a head start: `yhwach poc --lab acme --objective <name>` prints the steps you recorded with `yhwach_poc_step`. Paste them into the chain note and write the other six sections yourself. Don't point its `--out` at a note you edit by hand — it overwrites the file.
+
+### Proof screenshots — `scripts/yhwach-shot.sh`
 
 ```bash
-pip install -e ".[ui]"
-yhwach ui --lab acme --redact      # http://127.0.0.1:8799 — read-only view of the memory
+export YHWACH_VAULT="$HOME/notes"          # vault root; each lab is a folder in it
+~/yhwach/scripts/yhwach-shot.sh -l acme -n c1-web01-proof --cmd -- <the command that prints the proof>
+#   SAVED:  /home/you/notes/acme/screenshots/20261010-174506_c1-web01-proof.png
+#   OUTPUT: /home/you/notes/acme/screenshots/20261010-174506_c1-web01-proof.txt   (exit 0)
+#   EMBED:  ![[20261010-174506_c1-web01-proof.png]]
 ```
 
-A read-only web view of hosts, surfaces, the credential vault, the network / pivot map, PoC chains and the report. It binds to localhost by default.
+`--cmd` opens a terminal, runs the command in it, saves the output to the `.txt` (headed by the UTC time, `user@host` and the exact command line) and captures the whole screen. For a shell that's already open — a reverse shell, a C2 session — bring it to the front and use `--region --delay 3` to frame it yourself. The script prints an embed only for a file that really exists; otherwise it prints `⚠️ SCREENSHOT-MISSING` and exits 1. It needs a desktop session: ImageMagick `import` on X11, or `grim` + `slurp` on Wayland.
 
-`--redact` masks secrets in the credential vault and withholds finding evidence, host dossiers and notes on the board. It does **not** redact the **PoC chains** page or the **full-report download** — those still show stored secrets. Don't screen-share or expose those pages.
+What makes a screenshot count:
+
+- **Capture points:** the first shell, every privilege boundary, every web or AI request that lands, and the proof.
+- **The proof is the output of a command you ran on the target as the compromised user:** `whoami` / `id`, `hostname`, the IP and the flag, in one frame. A flag you downloaded and read on your own machine, or a value the target merely echoes back, isn't proof.
+- **AI targets:** the exact request **and** the real effect — the tool result, job trace or listener hit — not the model repeating your input.
+- **A clean frame:** an opaque terminal, no other chats or sessions visible (the whole screen is captured), no resizing during the capture, command lines short enough not to wrap.
+- **Label with the chain ID** (`-n c1-web01-proof`) so each image belongs to one note, and paste the embed on its **own line** — never in backticks or a code block, never split across lines.
+- **A capture point you missed gets the literal token `⚠️ SCREENSHOT-MISSING`** at that step — not a sentence about it — so the check below finds it.
+
+### Before you call it done — `scripts/yhwach-vault-check.py`
+
+```bash
+~/yhwach/scripts/yhwach-vault-check.py ~/notes/acme
+```
+
+A mechanical done-gate for one lab folder. It lists embeds that point at missing files or won't render, leftover `SCREENSHOT-MISSING` / `TODO` / `UNVERIFIED` markers, chain notes missing one of the seven sections, screenshots no note embeds, captures that saved output but no image, and links to notes that don't exist. It exits 1 while any chain note isn't done.
+
+> [!WARNING]
+> Your vault holds live secrets — credentials, keys, flags. Never sync it to a public location.
+
+### Also from yhwach
+
+| Command | Produces |
+|---|---|
+| `yhwach report --lab acme --out report.md` | A Markdown engagement report from the database — findings, hosts, pivots, timeline. Cross-check it against your chain notes. |
+| `yhwach recon --lab acme --host 10.10.10.5` | Everything yhwach knows about one host — paste what's useful into its host note. |
+
+---
 
 ---
 

@@ -336,10 +336,12 @@ tbody tr:hover{background:var(--surface2)}
 .nethost .hn{color:var(--ink2);font-size:.74rem}
 .nethost .hmeta{color:var(--ink2);font-size:.72rem;margin:.15rem 0 .4rem}
 .ports{display:flex;flex-direction:column;gap:.2rem}
-.port{display:flex;align-items:baseline;gap:.5rem;font-size:.78rem}
-.port .pn{color:var(--accent);font-weight:600;font-variant-numeric:tabular-nums;min-width:64px}
-.port .ps{color:var(--ink)}
-.port .pv{color:var(--muted);font-size:.72rem}
+.port{display:flex;align-items:baseline;gap:.5rem;font-size:.78rem;white-space:nowrap;overflow:hidden}
+.port.port-dim{opacity:.5}
+.port .pn{color:var(--accent);font-weight:600;font-variant-numeric:tabular-nums;min-width:64px;flex:none}
+.port .ps{color:var(--ink);flex:none}
+.port .pv{color:var(--muted);font-size:.72rem;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.details-fails summary,details.fails summary{list-style:revert}
 /* refresh toolbar + critical toast */
 .rtoolbar{display:flex;align-items:center;gap:.5rem;margin-right:.6rem}
 .upd{color:var(--ink2);font-size:.72rem;white-space:nowrap}
@@ -1794,9 +1796,14 @@ def _network_map(conn, eid: int) -> str:
                 if s["product"]
                 else ""
             )
-            auth = f" <span class='pv'>[{_esc(srf['auth'])}]</span>" if srf and srf["auth"] else ""
+            auth = (f" <span class='pv'>[{_esc(srf['auth'])}]</span>"
+                    if srf and srf["auth"] and srf["auth"] != "unknown" else "")
+            full = f"{s['product']} {s['version'] or ''}".strip() if s["product"] else name
+            noise = (not srf) and (not s["product"] or name in ("?", "tcpwrapped"))
+            pcls = "port port-dim" if noise else "port"
             ports_html += (
-                f"<div class='port'><span class='pn'>{s['port']}/{_esc(s['proto'])}</span>"
+                f"<div class='{pcls}' title='{_esc(full)}'>"
+                f"<span class='pn'>{s['port']}/{_esc(s['proto'])}</span>"
                 f"<span class='ps'>{_esc(name)}{star}{auth}</span>{ver}</div>"
             )
         if not ports_html:
@@ -2397,34 +2404,45 @@ def _creds_vault(conn, eid: int, *, reveal: bool = True,
             if validated_ip:
                 return f"<span class='ps'>{_esc(validated_ip)}</span>"
             return "<span class='mono'>untried</span>"
-        # A proven FAILURE used to render in the same green cell as a success —
-        # "this account is wrong" is worth as much as "this account works", and
-        # the two were indistinguishable.
-        proven, failed = "", ""
-        for a in rows:
-            tgt = _esc(a["host_ip"])
-            if a["port"]:
-                tgt += f":{a['port']}"
-            if a["proto"]:
-                tgt += f"/{_esc(a['proto'])}"
-            if a["result"] == "fail":
-                failed += (
-                    f"<span class='chip' style='color:#e67878;background:#d03b3b22;"
-                    f"margin:1px 2px'>{tgt}</span>")
-                continue
-            adm = a["result"] == "admin"
-            col = "#0ca30c" if adm else "#199e70"
-            mark = " ★" if adm else ""
-            proven += (
-                f"<span class='chip' style='color:{col};background:{col}22;margin:1px 2px'>"
-                f"{tgt}{mark}</span>"
-            )
-        if proven and failed:
-            return (f"<div>{proven}</div>"
-                    f"<div class='sub2' style='margin-top:.2rem'>failed: {failed}</div>")
+        # Condensed view: a cred sprayed across a /24 produces dozens of access
+        # rows. The signal is WHAT it opens (by service) + how many hosts — the
+        # per-host IPs are repetitive (the host is in the 'validated' column + the
+        # service matrix) and the failures are expected spray noise. So: proven ->
+        # distinct service chips (port/proto, no IP) + an "opens N" host count;
+        # failed -> one collapsed count with the full list behind <details>.
+        proven = [a for a in rows if a["result"] != "fail"]
+        failed = [a for a in rows if a["result"] == "fail"]
+        out = ""
+        if proven:
+            svc: dict[str, bool] = {}   # "port/proto" -> any host gave admin
+            for a in proven:
+                proto = _esc(a["proto"] or "?")
+                key = f"{a['port']}/{proto}" if a["port"] else proto
+                svc[key] = svc.get(key, False) or (a["result"] == "admin")
+            chips = ""
+            for key, adm in svc.items():
+                col = "#0ca30c" if adm else "#199e70"
+                mark = " ★" if adm else ""
+                chips += (f"<span class='chip' style='color:{col};background:{col}22;"
+                          f"margin:1px 2px'>{key}{mark}</span>")
+            n_hosts = len({a["host_ip"] for a in proven})
+            out += (f"<span class='chip' style='color:#0ca30c;background:#0ca30c22;"
+                    f"margin:1px 2px'>✓ opens {n_hosts}</span>{chips}")
         if failed:
-            return f"<div class='sub2'>failed: {failed}</div>"
-        return proven
+            items = ""
+            for a in failed:
+                tgt = _esc(a["host_ip"])
+                if a["port"]:
+                    tgt += f":{a['port']}"
+                if a["proto"]:
+                    tgt += f"/{_esc(a['proto'])}"
+                items += (f"<span class='chip' style='color:#e67878;background:#d03b3b22;"
+                          f"margin:1px 2px'>{tgt}</span>")
+            det = (f"<details class='fails'><summary class='sub2' style='cursor:pointer'>"
+                   f"✗ {len(failed)} failed</summary>"
+                   f"<div style='margin-top:.25rem'>{items}</div></details>")
+            out += f"<div style='margin-top:.25rem'>{det}</div>" if proven else det
+        return out or "<span class='mono'>untried</span>"
 
     _n_creds = len(creds)
     _shown_creds = creds if cap is None else creds[:cap]

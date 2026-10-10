@@ -59,7 +59,7 @@ Inside yhwach:
 ```bash
 git clone https://github.com/saymyname-sec/yhwach ~/yhwach && cd ~/yhwach
 python3 -m venv .venv && . .venv/bin/activate
-pip install -e ".[mcp]"                         # add ,ui for the optional live board:  ".[mcp,ui]"
+pip install -e ".[mcp,ui]"                      # mcp = the server; ui = the board (recommended — see below)
 mkdir -p "$HOME/.local/share/yhwach/state"      # the DB directory (your first engage would also create it)
 yhwach doctor                                   # preflight check
 ```
@@ -150,7 +150,7 @@ Agent instructions alone won't keep the memory current (see above) — but witho
 - Before `yhwach_add_cred`, check the lockout policy — recording a credential sprays it.
 ```
 
-The habit still has to come from you: check that it happened.
+The habit still has to come from you: check that it happened — and keep [the board](#the-board--how-you-drive) open so you can see at a glance whether it did.
 
 ### 1. Open the engagement
 
@@ -213,7 +213,16 @@ Before picking the next move, ask yhwach — then **you** choose:
 
 Yhwach recalls and ranks options; it never decides. The attack path is yours.
 
-### 5. Resume after a break or a context reset
+### 5. Drive from the board — when the agent runs dry, you bring the ideas
+
+This is the part people miss, and it's where yhwach earns its keep. Your agent will run out of ideas on a host long before the host is actually exhausted. **You** don't have to hold the whole estate in your head to see what it skipped — [the board](#the-board--how-you-drive) does. Keep it open in a browser the whole engagement:
+
+- **At the start of a host, and whenever the agent stalls, read the board yourself.** The *Recon* page shows, per host, which scans were run and which weren't; *Surfaces* lists every port, service, version and web path; *Map* shows what's reachable and what's still dark. You're looking for the thing nobody thought to check: a UDP sweep never run, an 8080 nobody touched, a share never listed, a vhost never fuzzed.
+- **Then feed that back as a concrete instruction.** The flow is usually *you* spotting something on the board and telling the agent to go look: *"The board shows 10.10.10.40 has 1433 open but no SQL enumeration — go at it,"* or *"ai01 has an ollama surface that was never triaged — probe it."* Yhwach remembers; you supply the curiosity.
+- **Completeness is something you confirm on the board, not something you assume.** Before you call a host done, the *Recon* matrix and the coverage panel should show every path checked. A green row is a checked box; a gap is an open door. (`yhwach_gaps` says the same thing in text — the board just lets you see it all at once.)
+- **The board never touches a target.** It's a read-only window; every action still runs through you and your agent.
+
+### 6. Resume after a break or a context reset
 
 Your chat context will be reset or compacted many times. The memory isn't:
 
@@ -250,7 +259,68 @@ At the end of each working session, run through this checklist with your agent:
 > [!WARNING]
 > - **Recording can send traffic.** `yhwach_add_cred` immediately tries the new credential against every matching service already in the memory, and an nmap ingest or `yhwach_scan` re-tests stored credentials against new services — real authentication attempts. Know the lockout policy before recording passwords, and stay within your authorised scope.
 > - **You enforce the scope.** The active tools (`scan`, `enum`, `probe`, `spray`) act on whatever you point them at.
-> - **Secrets are stored and shown in clear** — to the model (`yhwach_creds`) and on the live board. The board's `--redact` masks only part of it (see [Live board](#live-board-optional)).
+> - **Secrets are stored and shown in clear** — to the model (`yhwach_creds`) and on the board. The board's `--redact` masks only part of it (see [The board](#the-board--how-you-drive)).
+
+---
+
+## The board — how you drive
+
+**Run the board. It's not a dashboard you glance at — it's how you steer the engagement.** Your agent works one host at a time through a narrow window; the board is where *you* see the whole estate at once and spot what it skipped. Keep it open the whole time.
+
+```bash
+yhwach ui --lab acme --redact      # http://127.0.0.1:8799 — read-only, binds to localhost
+```
+
+Eight pages, each answering one question. The screenshots below are a small fictional engagement (`acme`).
+
+### Board — *where do I stand, and what's possible right now?*
+
+The landing page. Scored tiles at the top (points, hosts owned, pending scans, enum honesty, findings), then the **applicability inventory**: every technique that applies to the current state, split read-only vs. gated — the same recall menu as `yhwach_next`, across the whole estate. Below it, the coverage panel (*what you still owe*, with the exact scan to close each gap) and the hosts-by-stage columns.
+
+![The board page](docs/assets/board-overview.png)
+
+### Recon — *what has actually been looked at, per host?*
+
+The completeness check. One row per host; columns for full-port, version scan, UDP, services, surfaces, web paths, shares, principals, credential tries. A ✓ is a checked box, an ✗ is an open door. Thinnest hosts sort to the top. The scan ledger below shows the exact `nmap` argv behind every row. **This is the page you read before calling a host done** — and the one that shows you the port nobody enumerated.
+
+![The recon / enumeration-coverage page](docs/assets/board-recon.png)
+
+### Surfaces — *what's listening, and how much do we know about it?*
+
+Every service, version and web path in one inventory, plus a decoded view of AI surfaces (models, tools, endpoints a probe found) and a payloads-sent/answered log. This is where you browse ports and protocols looking for the next lead to hand the agent.
+
+### Identity — *what do we know about the AD, and what haven't we collected?*
+
+Password policy (and a loud warning when the lockout policy is unknown — spraying blind can lock out the estate), the principal roster, rights per principal, shares, and an "AD world model" panel that names what has **not** been collected yet, so an empty Groups panel never reads as "the domain is flat".
+
+### Map — *what can I reach, and what's still dark?*
+
+The pivot tree: every host as a node coloured by stage, tunnels drawn as edges, and per-subnet rollups (discovered / owned / open ports / pending / undiscovered). A subnet behind a tunnel with nothing discovered inside shows as reachable-but-empty — a whole segment waiting to be scanned. Click any node for its host page.
+
+![The network map / pivot tree](docs/assets/board-map.png)
+
+### Vault — *which credentials open what, and where haven't they been tried?*
+
+The credential vault (secret, what it opens, where it's validated, provenance), then the **credential × service matrix**: every credential is a row, every reachable service a column, each cell green (works / admin), red (failed) or grey (never tried). The grey cells are the question *"have my creds been tried everywhere they could be?"* — answered at a glance.
+
+![The credential vault and credential × service matrix](docs/assets/board-vault.png)
+
+### PoC — *can I prove what I captured?*
+
+Every objective and whether it has a reproducible chain behind it — including captured flags with **zero** recorded steps, the case that quietly loses points. Expand one to see its steps.
+
+### Report — *what can the write-up not yet support?*
+
+An evidence gap list (findings with no evidence line, captures with no chain, loot recorded but not saved locally), then the engagement-state summary and the full Markdown report, with both report files as downloads.
+
+### The host page
+
+Click a node on the map for one host's full picture: a dossier (*what this box is · what we hold here · open leads · what's still dark*), stage history, open ports, findings and every attempt run against it.
+
+![A single host's focus page](docs/assets/board-host.png)
+
+> [!WARNING]
+> `--redact` masks secrets in the credential vault and withholds finding evidence, host dossiers and notes. It does **not** redact the **PoC** page or the **full-report download** — those still show stored secrets. The board binds to localhost; don't expose it or screen-share those two pages.
 
 ---
 
@@ -356,17 +426,6 @@ A mechanical done-gate for one lab folder. It lists embeds that point at missing
 | `yhwach recon --lab acme --host 10.10.10.5` | Everything yhwach knows about one host — paste what's useful into its host note. |
 
 ---
-
-## Live board (optional)
-
-```bash
-pip install -e ".[ui]"
-yhwach ui --lab acme --redact      # http://127.0.0.1:8799 — read-only view of the memory
-```
-
-A read-only web view of hosts, surfaces, the credential vault, the network / pivot map, PoC chains and the report. It binds to localhost by default.
-
-`--redact` masks secrets in the credential vault and withholds finding evidence, host dossiers and notes on the board. It does **not** redact the **PoC chains** page or the **full-report download** — those still show stored secrets. Don't screen-share or expose those pages.
 
 ---
 

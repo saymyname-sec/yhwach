@@ -10,6 +10,11 @@
 > event replay hashes. **[README.md](README.md) + [AGENT.md](AGENT.md) are the live
 > picture;** the checklist below is kept as the historical record (items describing
 > the planner/`plan`/`selftest` reflect the ranker era).
+>
+> **Supported path = MCP server** (`yhwach mcp`, driven by Claude Code / Codex CLI, no API
+> key). The **self-driving runtime** (brain / judge / orchestrator / workers + provider
+> adapters, `yhwach run`) is **experimental and needs more work** — it stays in the tree as
+> a power mode but is not where investment goes. See [docs/experimental/](docs/experimental/).
 
 ## Status
 

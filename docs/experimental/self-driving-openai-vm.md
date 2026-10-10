@@ -1,3 +1,6 @@
+> ⚠️ **EXPERIMENTAL / WIP** — the API-key self-driving runtime is **not** the supported way to run yhwach.
+> The supported path is the MCP server (see the main [README](../../README.md)). This doc is kept for the experimental path and needs more work.
+
 # Self-Driving VM — OpenAI brain, no token limits
 
 > **What this VM is.** A Kali box that runs **yhwach's own self-driving loop** against authorized
@@ -19,7 +22,7 @@
 
 ## 1. Provision the VM (one-time)
 
-> What to install vs. what `git clone` brings is below; see [`setup.md`](setup.md) for the full
+> What to install vs. what `git clone` brings is below; see [`setup.md`](../setup.md) for the full
 > toolchain walkthrough. Quick version:
 
 ```bash

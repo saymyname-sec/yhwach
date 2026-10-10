@@ -1,3 +1,6 @@
+> ⚠️ **EXPERIMENTAL / WIP** — the API-key self-driving runtime is **not** the supported way to run yhwach.
+> The supported path is the MCP server (see the main [README](../../README.md)). This doc is kept for the experimental path and needs more work.
+
 # OpenAI over a custom / Azure gateway (Responses API)
 
 yhwach's self-driving brain can call an OpenAI-compatible model that lives behind

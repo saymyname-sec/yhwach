@@ -144,7 +144,7 @@ Agent instructions alone won't keep the memory current (see above) — but witho
 - Never re-run an approach listed in `exhausted-approaches.md` without asking me.
 - Write each step into `notes/acme/chains/<ID>-<host>-<technique>.md` right after
   running it (template: docs/templates/chain-note.md).
-- At every capture point run `scripts/yhwach-shot.sh -l acme -n <ID>-<step> --cmd -- <command>`
+- At every capture point run `docs/hooks/yhwach-shot.sh -l acme -n <ID>-<step> --cmd -- <command>`
   and paste the EMBED line it prints. If it prints SCREENSHOT-MISSING, write that token.
 - yhwach recalls options; I choose the attack path. Ask before any exploit.
 - Before `yhwach_add_cred`, check the lockout policy — recording a credential sprays it.
@@ -338,7 +338,7 @@ The advice below comes from reviewing the vaults of real, finished engagements: 
 | Note | Holds |
 |---|---|
 | `chains/<ID>-<host>-<technique>.md` | **One per flag / objective — the deliverable.** Seven fixed sections ([below](#the-chain-note)): every command, its output and a screenshot, start to flag. |
-| `screenshots/` | Proof images, each paired with a `.txt` of the same command's output — made by [`scripts/yhwach-shot.sh`](scripts/yhwach-shot.sh) and embedded in the chain notes. |
+| `screenshots/` | Proof images, each paired with a `.txt` of the same command's output — made by [`docs/hooks/yhwach-shot.sh`](docs/hooks/yhwach-shot.sh) and embedded in the chain notes. |
 | `credentials.md` | A **master table at the top**: principal · secret · where it works · how it was obtained (link the chain) · last verified · durable or ephemeral. Move superseded values to a section at the bottom instead of correcting them in prose further down. |
 | `attack-chain.md` | The narrative: one dated phase per step forward, each linking its chain note. It becomes the report's summary. |
 | `scripts/` | Every exploit or helper you ran, with a header: what it does, where it came from, what you changed, how you ran it. Feeds *Source & modifications*. |
@@ -386,17 +386,17 @@ What separated report-ready chains from the rest:
 
 `yhwach poc` gives section 4 a head start: `yhwach poc --lab acme --objective <name>` prints the steps you recorded with `yhwach_poc_step`. Paste them into the chain note and write the other six sections yourself. Don't point its `--out` at a note you edit by hand — it overwrites the file.
 
-### Proof screenshots — `scripts/yhwach-shot.sh`
+### Proof screenshots — `docs/hooks/yhwach-shot.sh`
 
 ```bash
 export YHWACH_VAULT="$HOME/notes"          # vault root; each lab is a folder in it
-~/yhwach/scripts/yhwach-shot.sh -l acme -n c1-web01-proof --cmd -- <the command that prints the proof>
+~/yhwach/docs/hooks/yhwach-shot.sh -l acme -n c1-web01-proof --cmd -- <the command that prints the proof>
 #   SAVED:  /home/you/notes/acme/screenshots/20261010-174506_c1-web01-proof.png
 #   OUTPUT: /home/you/notes/acme/screenshots/20261010-174506_c1-web01-proof.txt   (exit 0)
 #   EMBED:  ![[20261010-174506_c1-web01-proof.png]]
 ```
 
-`--cmd` opens a terminal, runs the command in it, saves the output to the `.txt` (headed by the UTC time, `user@host` and the exact command line) and captures the whole screen. For a shell that's already open — a reverse shell, a C2 session — bring it to the front and use `--region --delay 3` to frame it yourself. The script prints an embed only for a file that really exists; otherwise it prints `⚠️ SCREENSHOT-MISSING` and exits 1. It needs a desktop session: ImageMagick `import` on X11, or `grim` + `slurp` on Wayland.
+`--cmd` opens a terminal, runs the command in it, saves the output to the `.txt` (headed by the UTC time, `user@host` and the exact command line) and captures the whole screen. For a shell that's already open — a reverse shell, a C2 session — bring it to the front and use `--region --delay 3` to frame it yourself. The script prints an embed only for a file that really exists; otherwise it prints `⚠️ SCREENSHOT-MISSING` and exits 1. It needs a desktop session: ImageMagick `import` on X11, or `grim` + `slurp` on Wayland. Make it executable once (`chmod +x`) and, if you like, symlink it onto your `PATH`; configuration and the optional Claude Code hooks live in [docs/hooks/](docs/hooks/).
 
 What makes a screenshot count:
 

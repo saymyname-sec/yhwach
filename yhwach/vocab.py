@@ -108,6 +108,10 @@ VOCAB: dict[str, tuple[str, str]] = {
     "param": ("the affected parameter", '"id"'),
     "remove": ("artifact id to mark confirmed removed", "3"),
     "principal": ("an account/group name", '"svc_backup"'),
+    "findings": ("list of {title, severity, cls?, host?, tag?, evidence?} dicts",
+                 '[{"title":"Anon SMB","severity":"high","host":"10.0.0.5"}]'),
+    "creds": ("list of {identifier, secret, kind?, source?, provided?} dicts",
+              '[{"identifier":"svc","secret":"P@ss","kind":"password"}]'),
 }
 
 

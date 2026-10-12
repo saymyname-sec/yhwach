@@ -1874,6 +1874,72 @@ def tool_submission(db_path: Path | str, lab: str, program: str | None = None,
         return "\n".join(out)
 
 
+def tool_add_findings(db_path: Path | str, lab: str, findings: list) -> str:
+    """Record MANY findings in one call (I66). Each item is a dict:
+    {title, severity, cls?, host?, tag?, evidence?, location?}. One transaction;
+    the same per-instance dedupe and curated-freeze as yhwach_add_finding. Use
+    when an out-of-band tool produced a batch, instead of N round-trips.
+    """
+    if not isinstance(findings, list) or not findings:
+        return "pass a non-empty list of {title, severity, ...} findings."
+    added = updated = 0
+    tags: set[str] = set()
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        for f in findings:
+            if not isinstance(f, dict) or not f.get("title") or not f.get("severity"):
+                raise ValueError("each finding needs at least title and severity")
+            host_id = _host_id_for(conn, eid, f.get("host"))
+            _fid, created = yhdb.add_finding(
+                conn, host_id, None, f.get("cls") or "info", f["title"], f["severity"],
+                f.get("evidence") or f["title"], tag=f.get("tag"),
+                location=f.get("location"), engagement_id=eid)
+            added += int(created)
+            updated += int(not created)
+            if f.get("tag"):
+                tags.add(f["tag"])
+        yhdb.log_event(conn, eid, "finding", {"bulk": len(findings), "new": added})
+    tnote = f"; tags: {', '.join(sorted(tags))}" if tags else ""
+    return f"recorded {added} new + {updated} updated finding(s){tnote}"
+
+
+def tool_add_creds(db_path: Path | str, lab: str, creds: list) -> str:
+    """Record MANY credentials in one call (I66). Each item is a dict:
+    {identifier|user, secret, kind?, source?, provided?, spray_policy?}. One
+    transaction, then ONE autospray pass IF the engagement is armed (the spray
+    default comes from the engagement mode, never forced). Dumped-hash batches
+    should pass spray_policy='manual'.
+    """
+    if not isinstance(creds, list) or not creds:
+        return "pass a non-empty list of {identifier, secret, kind} creds."
+    added = updated = 0
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        for c in creds:
+            ident = c.get("identifier") or c.get("user")
+            if not isinstance(c, dict) or not ident:
+                raise ValueError("each cred needs an identifier and a secret")
+            _cid, created = yhdb.add_credential(
+                conn, eid, ident, c.get("secret"), c.get("kind") or "password",
+                c.get("source") or "bulk",
+                provenance="provided" if c.get("provided") else c.get("provenance"),
+                spray_policy=c.get("spray_policy"))
+            added += int(created)
+            updated += int(not created)
+        armed = _armed(conn, eid)
+        spray_note = " (autospray off: not armed)"
+        if armed:
+            try:
+                from yhwach import sprayer as yhspray
+
+                batch = yhspray.spray_all(conn, eid)
+                spray_note = f" (autospray: {len(batch.hits)} hit)"
+            except Exception as exc:  # noqa: BLE001
+                spray_note = f" (autospray error: {type(exc).__name__})"
+        yhdb.log_event(conn, eid, "credential", {"bulk": len(creds), "new": added})
+    return f"recorded {added} new + {updated} updated credential(s){spray_note}"
+
+
 def tool_own(db_path: Path | str, lab: str, host: str | None = None,
              principal: str | None = None) -> str:
     """Assert ownership of a host or principal won OUT-OF-BAND (a shell, a console,
@@ -2176,6 +2242,14 @@ TOOL_SPECS = [
      "Derive credential-reuse attack-graph edges from dumped hashes + validated access "
      "(CredValidOn, LocalAdminReuse as a star, SameHash). Idempotent; run after spraying "
      "provided creds or ingesting a secretsdump, then yhwach_paths. The fleet-lateral path."),
+    ("yhwach_add_findings", tool_add_findings,
+     "Record MANY findings in one call: findings=[{title, severity, cls?, host?, "
+     "tag?, evidence?, location?}, ...]. One transaction, same dedupe as "
+     "yhwach_add_finding. Use for a batch instead of N calls."),
+    ("yhwach_add_creds", tool_add_creds,
+     "Record MANY credentials in one call: creds=[{identifier, secret, kind?, "
+     "source?, provided?, spray_policy?}, ...]. One transaction, then ONE "
+     "autospray pass only if the engagement is armed."),
     ("yhwach_own", tool_own,
      "Assert ownership of a host or principal won OUT-OF-BAND (a shell/console yhwach "
      "didn't originate), so pathfind starts from it. host= advances to foothold; "

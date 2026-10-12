@@ -358,7 +358,7 @@ def _match_surfaces(
     if "findings_include" in when:
         clauses.append(
             "EXISTS (SELECT 1 FROM finding f WHERE f.host_id = h.id "
-            "AND f.tag = ? AND f.status = 'open')"
+            "AND f.tag = ? AND f.status IN ('open','confirmed','exploited'))"
         )
         params.append(when["findings_include"])
     if "vault" in when:  # `vault: nonempty` — engagement has recovered credentials
@@ -396,7 +396,7 @@ def _match_hosts(
         params.append(when["os"])
     clauses.append(
         "EXISTS (SELECT 1 FROM finding f WHERE f.host_id = h.id "
-        "AND f.tag = ? AND f.status = 'open')"
+        "AND f.tag = ? AND f.status IN ('open','confirmed','exploited'))"
     )
     params.append(when["findings_include"])
     if "vault" in when:

@@ -183,6 +183,22 @@ def test_netexec_parser() -> None:
     assert {"smb_signing_off", "domain_users", "admin_access", "writable_share"} <= tags
 
 
+def test_lockout_threshold_parsing() -> None:
+    """A threshold like 10/20/30/100 must NOT be read as 'no lockout' just
+    because it contains the digit 0 — that silently disabled the spray guard."""
+    from yhwach.parsers.netexec import _lockout_int
+
+    assert _lockout_int("Account Lockout Threshold: 10") == 10
+    assert _lockout_int("20") == 20
+    assert _lockout_int("30") == 30
+    assert _lockout_int("100") == 100
+    assert _lockout_int("5") == 5
+    # Disabled lockout still reads as 0.
+    assert _lockout_int("None") == 0
+    assert _lockout_int("no lockout") == 0
+    assert _lockout_int("0") == 0
+
+
 def test_ingest_netexec_creates_rows(eng) -> None:
     db, eid, hid = eng
     text = (

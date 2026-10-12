@@ -976,7 +976,7 @@ def _scalar(conn, sql, params=()) -> int:
 def _render_board(conn, eid: int, *, reveal: bool = True) -> str:
     n_crit = _scalar(
         conn,
-        "SELECT COUNT(*) FROM finding WHERE engagement_id=? AND status='open' AND severity='critical'",
+        "SELECT COUNT(*) FROM finding WHERE engagement_id=? AND status IN ('open','confirmed','exploited') AND severity='critical'",
         (eid,),
     )
     parts: list[str] = [f"<span data-crit='{n_crit}' hidden></span>"]
@@ -1087,7 +1087,7 @@ def _tiles(conn, eid: int) -> str:
         (eid,),
     )
     sev_rows = conn.execute(
-        "SELECT severity, COUNT(*) n FROM finding WHERE engagement_id=? AND status='open' "
+        "SELECT severity, COUNT(*) n FROM finding WHERE engagement_id=? AND status IN ('open','confirmed','exploited') "
         "GROUP BY severity",
         (eid,),
     ).fetchall()
@@ -2004,7 +2004,7 @@ def _host_detail(conn, eid: int, ip: str, *, reveal: bool = True) -> str:
 
     finds = conn.execute(
         "SELECT severity, title, COALESCE(tag,'') tag, COALESCE(class,'') cls "
-        "FROM finding WHERE host_id=? AND status='open' "
+        "FROM finding WHERE host_id=? AND status IN ('open','confirmed','exploited') "
         "ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
         "WHEN 'medium' THEN 2 ELSE 3 END, id",
         (h["id"],),
@@ -2130,10 +2130,10 @@ def _attack_path(conn, eid: int) -> str:
     # carrying a high/critical open finding (an entry point), plus their top lead.
     hosts = conn.execute(
         "SELECT h.ip, h.stage, COALESCE(h.role,'') role, "
-        "(SELECT f.tag FROM finding f WHERE f.host_id=h.id AND f.status='open' "
+        "(SELECT f.tag FROM finding f WHERE f.host_id=h.id AND f.status IN ('open','confirmed','exploited') "
         " AND COALESCE(f.tag,'')<>'' ORDER BY CASE f.severity WHEN 'critical' THEN 0 "
         " WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, f.id LIMIT 1) top_tag, "
-        "(SELECT f.severity FROM finding f WHERE f.host_id=h.id AND f.status='open' "
+        "(SELECT f.severity FROM finding f WHERE f.host_id=h.id AND f.status IN ('open','confirmed','exploited') "
         " ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
         " WHEN 'medium' THEN 2 ELSE 3 END, f.id LIMIT 1) top_sev "
         "FROM host h WHERE h.engagement_id=?",
@@ -2299,7 +2299,7 @@ def _findings(conn, eid: int) -> str:
     rows = conn.execute(
         "SELECT COALESCE(h.ip,'-') ip, f.severity, f.title, COALESCE(f.tag,'') tag, "
         "COALESCE(f.class,'') cls "
-        "FROM finding f LEFT JOIN host h ON h.id=f.host_id WHERE f.engagement_id=? AND f.status='open' "
+        "FROM finding f LEFT JOIN host h ON h.id=f.host_id WHERE f.engagement_id=? AND f.status IN ('open','confirmed','exploited') "
         "ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
         "WHEN 'medium' THEN 2 ELSE 3 END, f.id",
         (eid,),
@@ -3848,13 +3848,13 @@ def _report_gaps(conn, eid: int) -> str:
     no_ev = conn.execute(
         "SELECT f.severity, f.title, COALESCE(h.ip,'-') ip FROM finding f "
         "LEFT JOIN host h ON h.id=f.host_id "
-        "WHERE f.engagement_id=? AND f.status='open' AND COALESCE(TRIM(f.evidence),'')='' "
+        "WHERE f.engagement_id=? AND f.status IN ('open','confirmed','exploited') AND COALESCE(TRIM(f.evidence),'')='' "
         "ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
         "WHEN 'medium' THEN 2 ELSE 3 END, f.id",
         (eid,),
     ).fetchall()
     n_find = _scalar(
-        conn, "SELECT COUNT(*) FROM finding WHERE engagement_id=? AND status='open'", (eid,))
+        conn, "SELECT COUNT(*) FROM finding WHERE engagement_id=? AND status IN ('open','confirmed','exploited')", (eid,))
     blocks.append((
         "Findings with no evidence line",
         f"{len(no_ev)} of {n_find} open finding(s)",

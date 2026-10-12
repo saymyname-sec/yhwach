@@ -37,6 +37,7 @@ class NextMoves:
     coverage: list[HostCoverage] = field(default_factory=list)
     untried_creds: list[dict] = field(default_factory=list)
     objectives: list[dict] = field(default_factory=list)
+    burned: list[dict] = field(default_factory=list)
     pending_scan: int = 0
 
     @property
@@ -61,6 +62,28 @@ def _succeeded(conn: sqlite3.Connection, engagement_id: int) -> set[tuple]:
     }
 
 
+def _burned(conn: sqlite3.Connection, engagement_id: int) -> dict[tuple, dict]:
+    """(rule_id, host_ip) -> {reason, result, at} for moves tried and NOT proven.
+
+    A fail/blocked attempt retires a (rule, host) pair from recall so the menu
+    stops re-proposing kerberoast on a DC already roasted, or an ESC8 relay the
+    SOC blocked. Sticky by design: there is no time-based resurrection — the
+    operator re-lists with an explicit retry. A later success clears it (handled
+    by `_succeeded` taking precedence)."""
+    from yhwach import db as yhdb
+
+    out: dict[tuple, dict] = {}
+    # Oldest-first so the newest fail/blocked wins the dict slot.
+    for a in reversed(yhdb.list_attempts(conn, engagement_id)):
+        if a["result"] in ("fail", "blocked") and a["playbook_rule_id"]:
+            out[(a["playbook_rule_id"], a["host_ip"])] = {
+                "rule": a["playbook_rule_id"], "host": a["host_ip"],
+                "result": a["result"], "reason": a["reason"] or "",
+                "at": a["attempted_at"],
+            }
+    return out
+
+
 def next_moves(
     conn: sqlite3.Connection,
     engagement_id: int,
@@ -77,9 +100,17 @@ def next_moves(
         conn, engagement_id, host_ip=host_ip, techniques=techniques
     )
     done = _succeeded(conn, engagement_id)
-    cands = [c for c in cands if (c.technique_id, c.host_ip) not in done]
+    burned = _burned(conn, engagement_id)
+    for key in done:  # a later success un-burns a pair
+        burned.pop(key, None)
+    cands = [c for c in cands
+             if (c.technique_id, c.host_ip) not in done
+             and (c.technique_id, c.host_ip) not in burned]
     auto = [c for c in cands if c.autonomy == "proceed"]
     gated = [c for c in cands if c.autonomy != "proceed"]
+    burned_list = sorted(burned.values(), key=lambda b: b["at"], reverse=True)
+    if host_ip:
+        burned_list = [b for b in burned_list if b["host"] == host_ip]
 
     # Coverage here is the "started hosts" view — undiscovered hosts are the scan
     # queue (pending_scan), not an under-enumeration gap, so they don't double-count.
@@ -121,6 +152,7 @@ def next_moves(
         coverage=coverage,
         untried_creds=untried,
         objectives=objectives,
+        burned=burned_list,
         pending_scan=int(pending),
     )
 
@@ -171,6 +203,11 @@ def render_next(nm: NextMoves, *, gap_limit: int = 8) -> list[str]:
         for o in nm.objectives:
             pts = f" · {o['points']}pts" if o["points"] else ""
             miss.append(f"  - {o['label']} @ {o['ip']}{pts}")
+    if nm.burned:
+        miss.append("DEAD ENDS (tried, not re-proposed — pass retry to re-list):")
+        for b in nm.burned[:gap_limit]:
+            why = f" — {b['reason']}" if b["reason"] else ""
+            miss.append(f"  - {b['rule']} @ {b['host'] or '-'} [{b['result']}]{why}")
     if miss:
         lines.append("")
         lines += miss
@@ -201,5 +238,6 @@ def next_as_dict(nm: NextMoves) -> dict:
         "coverage_gaps": gaps_as_dicts(nm.coverage),
         "untried_creds": nm.untried_creds,
         "objectives": nm.objectives,
+        "burned": nm.burned,
         "pending_scan": nm.pending_scan,
     }

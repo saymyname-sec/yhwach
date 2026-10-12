@@ -97,14 +97,49 @@ def test_protocol_for_ports() -> None:
 
 
 def test_kind_matcher_matrix() -> None:
-    """password reaches every credentialed protocol; ntlm is PtH-only;
-    ssh_key/api_key are narrow; kerberos/dpapi never spray."""
+    """password reaches every credentialed protocol; ntlm is PtH-only on the
+    surfaces where nxc PtH is reliable (not ldap/ldaps); api_key/token are
+    never sprayed; kerberos/dpapi never spray."""
     assert "mssql" in yhspray.PROTOCOL_MATCHERS["password"]
     assert "ssh" in yhspray.PROTOCOL_MATCHERS["password"]
-    assert yhspray.PROTOCOL_MATCHERS["ntlm"] == {"smb", "winrm", "ldap", "ldaps", "mssql"}
+    assert yhspray.PROTOCOL_MATCHERS["ntlm"] == {"smb", "winrm", "mssql"}
     assert yhspray.PROTOCOL_MATCHERS["ssh_key"] == {"ssh"}
+    # api_key / token must not be sprayed (no bearer-to-every-web-root).
+    assert yhspray.PROTOCOL_MATCHERS["api_key"] == set()
+    assert yhspray.PROTOCOL_MATCHERS["token"] == set()
     assert yhspray.PROTOCOL_MATCHERS["kerberos"] == set()
     assert yhspray.PROTOCOL_MATCHERS["dpapi"] == set()
+
+
+def test_ntlm_sprays_with_hash_not_password(monkeypatch) -> None:
+    """An ntlm credential must be passed to nxc as -H (pass-the-hash), never
+    as -p (which guarantees a fail and burns the lockout budget)."""
+    import shutil as _shutil
+
+    captured: list[list[str]] = []
+
+    def fake_which(_name: str) -> str:
+        return "/usr/bin/nxc"
+
+    def fake_run(cmd: list[str], **_kw):
+        captured.append(cmd)
+        return 0, "[+] domain\\user (Pwn3d!)"
+
+    monkeypatch.setattr(_shutil, "which", fake_which)
+    monkeypatch.setattr(yhspray, "_run", fake_run)
+    res, _detail = yhspray._nxc(
+        "smb", "10.0.0.5", "user", "aad3b435b51404eeaad3b435b51404ee:" + "a" * 32,
+        kind="ntlm",
+    )
+    assert res == "admin"
+    assert "-H" in captured[0] and "-p" not in captured[0]
+
+
+def test_winrm_products_do_not_grab_plain_http() -> None:
+    """A bare HTTP service on an odd port must not be classified as WinRM
+    (which would spray every web server with nxc winrm)."""
+    assert yhspray._protocol_for(9090, "Apache httpd") != "winrm"
+    assert yhspray._protocol_for(5985, None) == "winrm"
 
 
 def test_candidate_selection_filters_by_matcher(tmp_db: Path) -> None:

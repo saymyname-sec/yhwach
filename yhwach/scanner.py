@@ -213,9 +213,17 @@ def pending_hosts(
     """
     q = ("SELECT ip FROM host WHERE engagement_id=? AND scan_needed=1 "
          "ORDER BY first_seen, ip")
+    ips = [r["ip"] for r in conn.execute(q, (engagement_id,)).fetchall()]
+    # Scope gate: a pasted/ingested nmap file can create a scan_needed=1 row for
+    # an out-of-scope IP; the queue drain must never scan it. Build the matcher
+    # once and filter here so every caller of the drain is gated.
+    from yhwach import scope as yhscope
+
+    matcher = yhscope.build_matcher(conn, engagement_id)
+    ips = [ip for ip in ips if matcher.allows(ip)[0]]
     if limit is not None:
-        q += f" LIMIT {int(limit)}"
-    return [r["ip"] for r in conn.execute(q, (engagement_id,)).fetchall()]
+        ips = ips[: int(limit)]
+    return ips
 
 
 def scan_pending(

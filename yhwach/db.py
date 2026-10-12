@@ -30,7 +30,7 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Bumped when the additive self-heal below gains a column/table. Stamped into
 # PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
 # NULL) has a version anchor to branch on. The additive path stays idempotent.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
@@ -67,6 +67,9 @@ _ADDED_COLUMNS = [
     # schema v5 — dumped hashes / cracked passwords are kept but NEVER auto-sprayed
     # (spraying a dumped domain hash across the estate is the loud, dangerous move).
     ("credential", "spray_policy", "TEXT"),
+    # schema v6 — reachability tri-state. A ping miss is 'unanswered', never 'dead'
+    # (Windows hosts drop ICMP); scope-only hosts are 'unseen' until confirmed up.
+    ("host", "alive", "TEXT"),
 ]
 
 # A finding is LIVE (feeds recall, the brief, the register) in these states;

@@ -753,6 +753,11 @@ def engagement_id_for(conn: sqlite3.Connection, lab: str) -> int | None:
     return row["id"] if row else None
 
 
+# The canonical engagement-kind enum (NULL kind == "lab"). Single source of truth
+# for the `engage --kind` choices, `yhwach init --kind`, and the profile docstrings.
+ENGAGEMENT_KINDS = ("lab", "ctf", "internal", "external", "web",
+                    "cloud", "redteam", "bounty", "retest")
+
 # Engagement kinds whose default posture is ARMED (active traffic allowed on a
 # memory write). Every other kind defaults to record_only — a client engagement
 # must be armed deliberately, in a terminal, not by taking a note.

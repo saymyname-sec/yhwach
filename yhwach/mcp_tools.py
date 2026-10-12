@@ -877,6 +877,52 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             tnote = (" tags: " + ", ".join(sorted({f.tag for f in cf}))) if cf else ""
             return f"{kind}: {len(cf)} CI/CD finding(s) recorded.{tnote}"
 
+        # MCP server enumeration -> the I52 asset model. Tool-list drift between
+        # probes is logged as an event (promoted to a finding only after review).
+        if kind == "mcp":
+            from yhwach.aisurface import DANGEROUS_SINKS
+            from yhwach.parsers.mcp import parse_mcp
+
+            if not host:
+                raise ValueError("kind=mcp needs a host (the MCP server)")
+            hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                                (eid, host)).fetchone()
+            if hrow is None:
+                raise ValueError(f"host {host} not found — scan/probe it first")
+            hid = int(hrow["id"])
+            srow = conn.execute(
+                "SELECT id FROM surface WHERE host_id=? AND kind='mcp' LIMIT 1", (hid,)).fetchone()
+            sid = int(srow["id"]) if srow else None
+            m = parse_mcp(Path(file).read_text(encoding="utf-8", errors="replace"))
+            drift = []
+            dangerous = 0
+            for t in m.tools:
+                _tid, _created, rugpulled = yhdb.add_ai_tool(
+                    conn, eid, t["name"], surface_id=sid, description=t["description"])
+                if rugpulled:
+                    drift.append(t["name"])
+                sk = conn.execute("SELECT sink FROM ai_tool WHERE engagement_id=? AND name=? "
+                                  "AND surface_id IS ?", (eid, t["name"], sid)).fetchone()
+                if sk and sk["sink"] in DANGEROUS_SINKS:
+                    yhdb.add_finding(conn, hid, None, "LLM06",
+                                     f"MCP tool reaches {sk['sink']}", "high",
+                                     f"'{t['name']}' -> {sk['sink']} sink (excessive agency)",
+                                     tag="excessive_agency", location=t["name"], engagement_id=eid)
+                    dangerous += 1
+            for r in m.resources:
+                yhdb.add_ai_data_source(conn, eid, r["name"], surface_id=sid, kind="resource")
+            if drift:
+                yhdb.log_event(conn, eid, "mcp_drift",
+                               {"host": host, "changed_tools": drift})
+            yhdb.log_event(conn, eid, "ingest", {"kind": "mcp", "tools": len(m.tools),
+                                                 "resources": len(m.resources),
+                                                 "prompts": len(m.prompts)})
+            drift_note = (f" ⚠ DRIFT: {len(drift)} tool desc changed ({', '.join(drift[:5])}) "
+                          "— logged as an event, review before promoting to a finding"
+                          if drift else "")
+            return (f"mcp on {host}: {len(m.tools)} tool(s) ({dangerous} dangerous-sink), "
+                    f"{len(m.resources)} resource(s), {len(m.prompts)} prompt(s).{drift_note}")
+
         valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
         if kind not in valid:
             raise ValueError(f"unknown kind '{kind}' (use nmap|{'|'.join(valid)})")
@@ -1782,7 +1828,7 @@ def _candidate_ids(db_path: Path | str, lab: str, host: str | None) -> set[str]:
 _INTERPRET_PARSERS = ("nmap", "netexec", "bloodhound", "certipy", "linpeas", "winpeas",
                       "web", "secretsdump", "potfile", "nessus", "openvas", "nuclei",
                       "httpx", "subfinder", "bbot", "burp", "har", "kubectl", "aws",
-                      "trivy", "prowler", "sarif", "poutine")
+                      "trivy", "prowler", "sarif", "poutine", "mcp")
 
 
 def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
@@ -2452,7 +2498,7 @@ TOOL_SPECS = [
      "add_cred autospray). ~5 candidates per known pattern, not a wordlist. "
      "targets? = comma-separated usernames to generate FOR (default: common svc accounts)."),
     ("yhwach_ingest", tool_ingest,
-     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|httpx|subfinder|bbot|burp|har|kubectl|aws|trivy|prowler|sarif|poutine|linpeas|winpeas|"
+     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|httpx|subfinder|bbot|burp|har|kubectl|aws|trivy|prowler|sarif|poutine|mcp|linpeas|winpeas|"
      "bloodhound|certipy|netexec|web). nmap adds software+CPE; bloodhound builds the "
      "principal/privilege/edge graph; netexec adds SMB shares/users/admin/policy; web "
      "adds web_app+paths (needs url). Host-scoped kinds need a host and set chaining tags."),

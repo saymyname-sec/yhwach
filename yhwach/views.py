@@ -113,8 +113,9 @@ VIEWS: dict[str, View] = {
     "vulns": View(
         "vulnerability v LEFT JOIN host h ON h.id = v.host_id",
         {"id": "v.id", "host_ip": "h.ip", "cve": "v.cve", "title": "v.title",
-         "cvss": "v.cvss", "state": "v.state", "source": "v.source"},
-        "v.engagement_id = ?", "v.cvss DESC", ["v.cve", "v.title"]),
+         "cvss": "v.cvss", "state": "v.state", "source": "v.source",
+         "plugin_id": "v.plugin_id", "port": "v.port", "solution": "v.solution"},
+        "v.engagement_id = ?", "v.cvss DESC", ["v.cve", "v.title", "v.plugin_id"]),
     "web_paths": View(
         "web_path wp JOIN web_app wa ON wa.id = wp.web_app_id JOIN host h ON h.id = wa.host_id",
         {"id": "wp.id", "host_ip": "h.ip", "base_url": "wa.base_url", "path": "wp.path",

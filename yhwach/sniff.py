@@ -15,6 +15,8 @@ import re
 # (kind, compiled test). Order matters: specific first.
 _SIGNS: list[tuple[str, re.Pattern]] = [
     ("nmap", re.compile(r"<nmaprun|Nmap scan report|Starting Nmap", re.I)),
+    ("nessus", re.compile(r"<NessusClientData_v2|<ReportHost\b|pluginID=")),
+    ("openvas", re.compile(r"<nvt\s+oid=|Greenbone|<get_results_response")),
     ("certipy", re.compile(r"Certipy|Certificate Templates|\bESC\d{1,2}\b")),
     ("bloodhound", re.compile(r'"ObjectIdentifier"|SharpHound|"PrincipalSID"|"meta"\s*:')),
     ("winpeas", re.compile(r"winpeas|Windows Local Privilege Escalation|AllowAutomaticUpdates|"

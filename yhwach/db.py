@@ -30,7 +30,7 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Bumped when the additive self-heal below gains a column/table. Stamped into
 # PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
 # NULL) has a version anchor to branch on. The additive path stays idempotent.
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
@@ -549,6 +549,24 @@ _ADDED_TABLES = {
         "  first_seen TEXT NOT NULL,"
         "  UNIQUE(engagement_id, surface_id, name))"
     ),
+    "plant": (
+        "CREATE TABLE IF NOT EXISTS plant ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  location TEXT NOT NULL,"
+        "  payload TEXT NOT NULL,"
+        "  canary TEXT NOT NULL,"
+        "  kind TEXT,"
+        "  planted_at TEXT NOT NULL,"
+        "  removed_at TEXT)"
+    ),
+    "plant_sighting": (
+        "CREATE TABLE IF NOT EXISTS plant_sighting ("
+        "  id INTEGER PRIMARY KEY,"
+        "  plant_id INTEGER NOT NULL REFERENCES plant(id),"
+        "  context TEXT,"
+        "  at TEXT NOT NULL)"
+    ),
 }
 
 
@@ -579,6 +597,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_payload_eng ON payload(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_ai_tool_eng ON ai_tool(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_ai_data_source_eng ON ai_data_source(engagement_id)",
+        "CREATE INDEX IF NOT EXISTS idx_plant_eng ON plant(engagement_id)",
+        "CREATE INDEX IF NOT EXISTS idx_plant_sighting_plant ON plant_sighting(plant_id)",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -1885,6 +1905,56 @@ def engagement_canary(conn: sqlite3.Connection, engagement_id: int) -> str:
     token = "c" + _secrets.token_hex(4)
     add_domain_fact(conn, engagement_id, "canary", token, source="payload")
     return token
+
+
+def add_plant(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    *,
+    location: str,
+    payload: str,
+    kind: str | None = None,
+    canary: str | None = None,
+) -> tuple[int, str]:
+    """Record an indirect-injection plant. Returns (id, canary) — a NEUTRAL marker
+    (derived from the engagement canary) to embed so a later sighting attributes
+    back to this plant."""
+    import secrets as _secrets
+
+    if not canary:
+        canary = engagement_canary(conn, engagement_id) + "-" + _secrets.token_hex(2)
+    cur = conn.execute(
+        "INSERT INTO plant (engagement_id, location, payload, canary, kind, planted_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (engagement_id, location, payload, canary, kind, _now_utc()))
+    return int(cur.lastrowid), canary
+
+
+def add_plant_sighting(conn: sqlite3.Connection, plant_id: int,
+                       *, context: str | None = None) -> int:
+    cur = conn.execute(
+        "INSERT INTO plant_sighting (plant_id, context, at) VALUES (?, ?, ?)",
+        (plant_id, context, _now_utc()))
+    return int(cur.lastrowid)
+
+
+def set_plant_removed(conn: sqlite3.Connection, plant_id: int) -> None:
+    conn.execute("UPDATE plant SET removed_at = ? WHERE id = ?", (_now_utc(), plant_id))
+
+
+def list_plants(conn: sqlite3.Connection, engagement_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT p.id, p.location, p.payload, p.canary, p.kind, p.planted_at, p.removed_at, "
+        "(SELECT COUNT(*) FROM plant_sighting s WHERE s.plant_id = p.id) AS sightings "
+        "FROM plant p WHERE p.engagement_id = ? ORDER BY p.id DESC",
+        (engagement_id,)).fetchall()
+
+
+def outstanding_plants(conn: sqlite3.Connection, engagement_id: int) -> list[sqlite3.Row]:
+    """Plants not yet confirmed removed — the cleanup obligation."""
+    return conn.execute(
+        "SELECT id, location, canary FROM plant WHERE engagement_id = ? AND removed_at IS NULL "
+        "ORDER BY id", (engagement_id,)).fetchall()
 
 
 def add_payload(

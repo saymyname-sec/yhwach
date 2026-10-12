@@ -800,6 +800,32 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             return (f"{kind}: {paths} web_path(s) recorded (metadata only — no bodies), "
                     f"{unresolved} request(s) to untracked hosts skipped.")
 
+        # Cloud / k8s enumeration -> findings on the cloud chaining tags + facts.
+        # Engagement-level (host optional); no secret values are ever stored.
+        if kind in ("kubectl", "aws"):
+            from yhwach.parsers import cloud as yhcloud
+
+            body = Path(file).read_text(encoding="utf-8", errors="replace")
+            if kind == "aws":
+                cres = yhcloud.parse_aws_sts(body)
+            else:
+                sub = yhcloud.detect_cloud_kind(body)
+                cres = {"pods": yhcloud.parse_pods_json,
+                        "secrets": yhcloud.parse_secrets_count,
+                        "can_i": yhcloud.parse_can_i}.get(sub, yhcloud.parse_can_i)(body)
+            hid = _host_id_for(conn, eid, host)
+            for key, value in cres.facts.items():
+                yhdb.add_domain_fact(conn, eid, key, value, source=kind)
+            for f in cres.findings:
+                yhdb.add_finding(conn, hid, None, f.cls, f.title, f.severity, f.evidence,
+                                 tag=f.tag, engagement_id=eid)
+            yhdb.log_event(conn, eid, "ingest",
+                           {"kind": kind, "findings": len(cres.findings),
+                            "facts": len(cres.facts)})
+            tnote = (" tags: " + ", ".join(sorted({f.tag for f in cres.findings if f.tag}))
+                     if cres.findings else "")
+            return (f"{kind}: {len(cres.findings)} finding(s), {len(cres.facts)} fact(s).{tnote}")
+
         valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
         if kind not in valid:
             raise ValueError(f"unknown kind '{kind}' (use nmap|{'|'.join(valid)})")
@@ -1696,7 +1722,7 @@ def _candidate_ids(db_path: Path | str, lab: str, host: str | None) -> set[str]:
 
 _INTERPRET_PARSERS = ("nmap", "netexec", "bloodhound", "certipy", "linpeas", "winpeas",
                       "web", "secretsdump", "potfile", "nessus", "openvas", "nuclei",
-                      "httpx", "subfinder", "bbot", "burp", "har")
+                      "httpx", "subfinder", "bbot", "burp", "har", "kubectl", "aws")
 
 
 def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
@@ -2265,7 +2291,7 @@ TOOL_SPECS = [
      "add_cred autospray). ~5 candidates per known pattern, not a wordlist. "
      "targets? = comma-separated usernames to generate FOR (default: common svc accounts)."),
     ("yhwach_ingest", tool_ingest,
-     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|httpx|subfinder|bbot|burp|har|linpeas|winpeas|"
+     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|httpx|subfinder|bbot|burp|har|kubectl|aws|linpeas|winpeas|"
      "bloodhound|certipy|netexec|web). nmap adds software+CPE; bloodhound builds the "
      "principal/privilege/edge graph; netexec adds SMB shares/users/admin/policy; web "
      "adds web_app+paths (needs url). Host-scoped kinds need a host and set chaining tags."),

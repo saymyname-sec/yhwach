@@ -137,6 +137,29 @@ VIEWS: dict[str, View] = {
          "objective": "l.objective", "caption": "e.caption", "sha256": "e.sha256",
          "path": "e.path", "contains_secret": "e.contains_secret", "at": "e.captured_at"},
         "e.engagement_id = ?", "e.id DESC", ["e.kind", "e.caption"]),
+    # schema v4 — engagement-memory ledgers
+    "notices": View(
+        "notice n",
+        {"id": "n.id", "kind": "n.kind", "body": "n.body", "finding_id": "n.finding_id",
+         "actor": "n.actor", "channel": "n.channel", "at": "n.at"},
+        "n.engagement_id = ?", "n.id DESC", ["n.kind", "n.body"]),
+    "activity": View(
+        "activity a LEFT JOIN host h ON h.id = a.host_id",
+        {"id": "a.id", "actor": "a.actor", "action": "a.action", "host_ip": "h.ip",
+         "target": "a.target", "command": "a.command", "result": "a.result", "at": "a.at"},
+        "a.engagement_id = ?", "a.id DESC", ["a.action", "a.target", "a.command"]),
+    "artifacts": View(
+        "artifact a LEFT JOIN host h ON h.id = a.host_id",
+        {"id": "a.id", "kind": "a.kind", "location": "a.location", "state": "a.state",
+         "host_ip": "h.ip", "note": "a.note", "created_at": "a.created_at",
+         "removed_at": "a.removed_at"},
+        "a.engagement_id = ?", "a.id DESC", ["a.kind", "a.location"]),
+    "submissions": View(
+        "submission s",
+        {"id": "s.id", "program": "s.program", "finding_id": "s.finding_id",
+         "endpoint": "s.endpoint", "param": "s.param", "cls": "s.cls",
+         "status": "s.status", "note": "s.note", "at": "s.submitted_at"},
+        "s.engagement_id = ?", "s.id DESC", ["s.program", "s.endpoint", "s.cls"]),
 }
 
 

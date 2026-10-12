@@ -684,3 +684,67 @@ CREATE TABLE IF NOT EXISTS evidence_link (
     UNIQUE(evidence_id, finding_id, objective)
 );
 CREATE INDEX IF NOT EXISTS idx_evidence_link_finding ON evidence_link(finding_id);
+
+-- schema v4 — engagement-memory ledgers (memory only; no report generation).
+-- Four typed, append-mostly logs an operator pulls from at write-up time:
+-- what the client was TOLD, what traffic yhwach ORIGINATED, what was LEFT on
+-- client systems, and what was SUBMITTED to a bounty program.
+
+-- G4a — the report communications log: what the client was told and when.
+CREATE TABLE IF NOT EXISTS notice (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    kind          TEXT NOT NULL,   -- critical_notification|status_update|stop|pause|resume|detection|scope_change
+    body          TEXT NOT NULL,
+    finding_id    INTEGER REFERENCES finding(id),  -- the finding a critical_notification is about
+    actor         TEXT,            -- who sent/recorded it
+    channel       TEXT,            -- email|call|chat|portal|...
+    at            TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notice_eng ON notice(engagement_id);
+
+-- I05 — the activity ledger: traffic yhwach ORIGINATED (plus commands the model
+-- logs). Partial by definition: yhwach never sees traffic it did not send.
+CREATE TABLE IF NOT EXISTS activity (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    host_id       INTEGER REFERENCES host(id),
+    actor         TEXT NOT NULL,   -- yhwach|operator|model
+    action        TEXT NOT NULL,   -- spray|scan|probe|command|...
+    target        TEXT,            -- host:port / url
+    command       TEXT,            -- argv, secrets redacted
+    result        TEXT,            -- success|fail|blocked|cached|error
+    at            TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_activity_eng ON activity(engagement_id);
+
+-- I39 — the artifact cleanup ledger: what yhwach left on CLIENT systems. The
+-- Kali-side listener/proxy is not a client artefact and is never recorded.
+CREATE TABLE IF NOT EXISTS artifact (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    host_id       INTEGER REFERENCES host(id),
+    kind          TEXT NOT NULL,   -- tunnel_agent|implant|webshell|file|account|service|...
+    location      TEXT NOT NULL,   -- path/host where it lives
+    state         TEXT NOT NULL DEFAULT 'rendered',  -- rendered|deployed|removed
+    note          TEXT,
+    created_at    TEXT NOT NULL,
+    removed_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_artifact_eng ON artifact(engagement_id);
+
+-- I20 — bounty submission memory: a thin log for duplicate-risk advice. It
+-- never changes a finding's status and never sorts recall.
+CREATE TABLE IF NOT EXISTS submission (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    program       TEXT,
+    finding_id    INTEGER REFERENCES finding(id),
+    endpoint      TEXT,
+    param         TEXT,
+    cls           TEXT,            -- vuln class, for program-level noise advice
+    status        TEXT,            -- operator-set label; advisory only
+    note          TEXT,
+    submitted_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_submission_eng ON submission(engagement_id);

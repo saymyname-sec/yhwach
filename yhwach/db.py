@@ -30,7 +30,7 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Bumped when the additive self-heal below gains a column/table. Stamped into
 # PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
 # NULL) has a version anchor to branch on. The additive path stays idempotent.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
@@ -435,6 +435,55 @@ _ADDED_TABLES = {
         "  checked_at TEXT NOT NULL,"
         "  UNIQUE(credential_id, host_id, proto, port))"
     ),
+    # -- schema v4 — engagement-memory ledgers (mirror db/schema.sql exactly) ---
+    "notice": (
+        "CREATE TABLE IF NOT EXISTS notice ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  kind TEXT NOT NULL,"
+        "  body TEXT NOT NULL,"
+        "  finding_id INTEGER REFERENCES finding(id),"
+        "  actor TEXT,"
+        "  channel TEXT,"
+        "  at TEXT NOT NULL)"
+    ),
+    "activity": (
+        "CREATE TABLE IF NOT EXISTS activity ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  host_id INTEGER REFERENCES host(id),"
+        "  actor TEXT NOT NULL,"
+        "  action TEXT NOT NULL,"
+        "  target TEXT,"
+        "  command TEXT,"
+        "  result TEXT,"
+        "  at TEXT NOT NULL)"
+    ),
+    "artifact": (
+        "CREATE TABLE IF NOT EXISTS artifact ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  host_id INTEGER REFERENCES host(id),"
+        "  kind TEXT NOT NULL,"
+        "  location TEXT NOT NULL,"
+        "  state TEXT NOT NULL DEFAULT 'rendered',"
+        "  note TEXT,"
+        "  created_at TEXT NOT NULL,"
+        "  removed_at TEXT)"
+    ),
+    "submission": (
+        "CREATE TABLE IF NOT EXISTS submission ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  program TEXT,"
+        "  finding_id INTEGER REFERENCES finding(id),"
+        "  endpoint TEXT,"
+        "  param TEXT,"
+        "  cls TEXT,"
+        "  status TEXT,"
+        "  note TEXT,"
+        "  submitted_at TEXT NOT NULL)"
+    ),
 }
 
 
@@ -457,6 +506,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_scope_entry_eng ON scope_entry(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_evidence_eng ON evidence(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_evidence_link_finding ON evidence_link(finding_id)",
+        "CREATE INDEX IF NOT EXISTS idx_notice_eng ON notice(engagement_id)",
+        "CREATE INDEX IF NOT EXISTS idx_activity_eng ON activity(engagement_id)",
+        "CREATE INDEX IF NOT EXISTS idx_artifact_eng ON artifact(engagement_id)",
+        "CREATE INDEX IF NOT EXISTS idx_submission_eng ON submission(engagement_id)",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -514,6 +567,9 @@ def init(db_path: Path | str, *, if_exists: str = "keep") -> None:
     conn = connect(path)
     try:
         conn.executescript(schema)
+        # Stamp the version on a fresh DB too, so it matches a self-healed one
+        # (schema.sql does not carry it). PRAGMA takes no bound params.
+        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
     finally:
         conn.close()
@@ -1415,6 +1471,265 @@ def evidence_for(conn: sqlite3.Connection, finding_id: int) -> list[sqlite3.Row]
         "SELECT e.id, e.kind, e.path, e.sha256, e.caption, e.captured_at FROM evidence e "
         "JOIN evidence_link l ON l.evidence_id = e.id WHERE l.finding_id = ? ORDER BY e.id",
         (finding_id,)).fetchall()
+
+
+# ---------------------------------------------------------------------------
+# Engagement-memory ledgers (schema v4) — what the client was told, what traffic
+# yhwach originated, what it left behind, and what was submitted. Memory only:
+# nothing here computes a score or renders a report.
+# ---------------------------------------------------------------------------
+NOTICE_KINDS = (
+    "critical_notification", "status_update", "stop", "pause", "resume",
+    "detection", "scope_change",
+)
+ACTIVITY_ACTORS = ("yhwach", "operator", "model")
+ARTIFACT_STATES = ("rendered", "deployed", "removed")
+
+# Flags whose following (or attached/= -joined) token is a secret, so the
+# activity ledger stores `-p ***` rather than the plaintext (the ps/argv leak).
+_SECRET_FLAGS = (
+    "-p", "--password", "--pass", "-H", "--hash", "--nthash", "-k", "--key",
+    "--token", "--secret", "--api-key",
+)
+_SECRET_FLAGS_ATTACHED = ("-p", "-H", "-k")  # short forms that glue the value on
+
+
+def redact_argv(cmd: str | None) -> str | None:
+    """Mask secret values in a command line before it is stored.
+
+    Whitespace is normalised (this is a memory aid, not a re-exec string), and a
+    value quoted with spaces may be only partly masked — so callers must never
+    treat a stored command as safe to run verbatim."""
+    if not cmd:
+        return cmd
+    out: list[str] = []
+    redact_next = False
+    for tok in cmd.split():
+        if redact_next:
+            out.append("***")
+            redact_next = False
+            continue
+        base = tok.split("=", 1)[0]
+        if "=" in tok and base in _SECRET_FLAGS:
+            out.append(base + "=***")
+        elif len(tok) > 2 and tok[:2] in _SECRET_FLAGS_ATTACHED:
+            out.append(tok[:2] + "***")
+        elif tok in _SECRET_FLAGS:
+            out.append(tok)
+            redact_next = True
+        else:
+            out.append(tok)
+    return " ".join(out)
+
+
+# -- G4a notice ledger -------------------------------------------------------
+def add_notice(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    *,
+    kind: str,
+    body: str,
+    finding_id: int | None = None,
+    actor: str | None = None,
+    channel: str | None = None,
+) -> int:
+    """Record one client communication (what was said and when)."""
+    if kind not in NOTICE_KINDS:
+        raise ValueError(f"unknown notice kind '{kind}' — use one of {', '.join(NOTICE_KINDS)}")
+    cur = conn.execute(
+        "INSERT INTO notice (engagement_id, kind, body, finding_id, actor, channel, at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (engagement_id, kind, body, finding_id, actor, channel, _now_utc()),
+    )
+    return int(cur.lastrowid)
+
+
+def list_notices(
+    conn: sqlite3.Connection, engagement_id: int, *, limit: int | None = None,
+) -> list[sqlite3.Row]:
+    sql = ("SELECT id, kind, body, finding_id, actor, channel, at FROM notice "
+           "WHERE engagement_id = ? ORDER BY id DESC")
+    params: list = [engagement_id]
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, params).fetchall()
+
+
+def uncommunicated_critical_findings(
+    conn: sqlite3.Connection, engagement_id: int,
+) -> list[sqlite3.Row]:
+    """Live critical findings with no critical_notification notice linked — the
+    QA rule: telling the client about a critical is blocking before close."""
+    marks = ", ".join("?" * len(LIVE_FINDING_STATUSES))
+    return conn.execute(
+        f"SELECT f.id, f.title, f.severity, f.status FROM finding f "
+        f"WHERE f.engagement_id = ? AND f.severity = 'critical' "
+        f"AND f.status IN ({marks}) "
+        f"AND NOT EXISTS (SELECT 1 FROM notice n WHERE n.engagement_id = f.engagement_id "
+        f"AND n.kind = 'critical_notification' AND n.finding_id = f.id) "
+        f"ORDER BY f.id",
+        (engagement_id, *LIVE_FINDING_STATUSES),
+    ).fetchall()
+
+
+# -- I05 activity ledger -----------------------------------------------------
+def add_activity(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    *,
+    actor: str,
+    action: str,
+    host_id: int | None = None,
+    target: str | None = None,
+    command: str | None = None,
+    result: str | None = None,
+) -> int:
+    """Append one originated action. `command` is redacted here, so a caller may
+    pass a raw command line without leaking a secret into the ledger."""
+    if actor not in ACTIVITY_ACTORS:
+        raise ValueError(f"unknown actor '{actor}' — use one of {', '.join(ACTIVITY_ACTORS)}")
+    cur = conn.execute(
+        "INSERT INTO activity (engagement_id, host_id, actor, action, target, "
+        "command, result, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (engagement_id, host_id, actor, action, target, redact_argv(command),
+         result, _now_utc()),
+    )
+    return int(cur.lastrowid)
+
+
+def list_activity(
+    conn: sqlite3.Connection, engagement_id: int, *, limit: int | None = None,
+) -> list[sqlite3.Row]:
+    sql = ("SELECT a.id, a.actor, a.action, a.target, a.command, a.result, a.at, "
+           "h.ip AS host_ip FROM activity a LEFT JOIN host h ON h.id = a.host_id "
+           "WHERE a.engagement_id = ? ORDER BY a.id DESC")
+    params: list = [engagement_id]
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, params).fetchall()
+
+
+# -- I39 artifact cleanup ledger ---------------------------------------------
+def add_artifact(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    *,
+    kind: str,
+    location: str,
+    host_id: int | None = None,
+    state: str = "rendered",
+    note: str | None = None,
+) -> int:
+    """Record something left on a client system that must be cleaned up."""
+    if state not in ARTIFACT_STATES:
+        raise ValueError(f"unknown state '{state}' — use one of {', '.join(ARTIFACT_STATES)}")
+    cur = conn.execute(
+        "INSERT INTO artifact (engagement_id, host_id, kind, location, state, note, "
+        "created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (engagement_id, host_id, kind, location, state, note, _now_utc()),
+    )
+    return int(cur.lastrowid)
+
+
+def set_artifact_state(
+    conn: sqlite3.Connection, artifact_id: int, state: str,
+) -> None:
+    """Advance an artifact (operator confirms the drop -> 'removed')."""
+    if state not in ARTIFACT_STATES:
+        raise ValueError(f"unknown state '{state}' — use one of {', '.join(ARTIFACT_STATES)}")
+    removed_at = _now_utc() if state == "removed" else None
+    conn.execute(
+        "UPDATE artifact SET state = ?, removed_at = ? WHERE id = ?",
+        (state, removed_at, artifact_id),
+    )
+
+
+def list_artifacts(
+    conn: sqlite3.Connection, engagement_id: int, *, outstanding_only: bool = False,
+) -> list[sqlite3.Row]:
+    sql = ("SELECT a.id, a.kind, a.location, a.state, a.note, a.created_at, "
+           "a.removed_at, h.ip AS host_ip FROM artifact a "
+           "LEFT JOIN host h ON h.id = a.host_id WHERE a.engagement_id = ?")
+    if outstanding_only:
+        sql += " AND a.state != 'removed'"
+    return conn.execute(sql + " ORDER BY a.id DESC", (engagement_id,)).fetchall()
+
+
+def outstanding_artifacts(
+    conn: sqlite3.Connection, engagement_id: int,
+) -> list[sqlite3.Row]:
+    """Artefacts not yet confirmed removed — these block a clean close."""
+    return list_artifacts(conn, engagement_id, outstanding_only=True)
+
+
+# -- I20 bounty submission memory --------------------------------------------
+def add_submission(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    *,
+    program: str | None = None,
+    finding_id: int | None = None,
+    endpoint: str | None = None,
+    param: str | None = None,
+    cls: str | None = None,
+    status: str | None = None,
+    note: str | None = None,
+) -> int:
+    cur = conn.execute(
+        "INSERT INTO submission (engagement_id, program, finding_id, endpoint, "
+        "param, cls, status, note, submitted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (engagement_id, program, finding_id, endpoint, param, cls, status, note,
+         _now_utc()),
+    )
+    return int(cur.lastrowid)
+
+
+def list_submissions(
+    conn: sqlite3.Connection, engagement_id: int, *, limit: int | None = None,
+) -> list[sqlite3.Row]:
+    sql = ("SELECT id, program, finding_id, endpoint, param, cls, status, note, "
+           "submitted_at FROM submission WHERE engagement_id = ? ORDER BY id DESC")
+    params: list = [engagement_id]
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, params).fetchall()
+
+
+def submission_duplicate_risk(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    *,
+    endpoint: str | None = None,
+    param: str | None = None,
+    cls: str | None = None,
+    program: str | None = None,
+) -> list[str]:
+    """Advisory duplicate-risk lines at two granularities (same endpoint+param;
+    same class program-wide). Advisory ONLY — never changes a finding's status."""
+    out: list[str] = []
+    if endpoint and param:
+        n = conn.execute(
+            "SELECT COUNT(*) FROM submission WHERE engagement_id = ? AND endpoint = ? "
+            "AND param = ?", (engagement_id, endpoint, param),
+        ).fetchone()[0]
+        if n:
+            out.append(f"likely duplicate: {n} prior submission(s) for {endpoint} param '{param}'")
+    if cls:
+        clauses = ["engagement_id = ?", "cls = ?"]
+        params: list = [engagement_id, cls]
+        if program:
+            clauses.append("program = ?")
+            params.append(program)
+        n = conn.execute(
+            f"SELECT COUNT(*) FROM submission WHERE {' AND '.join(clauses)}", params,
+        ).fetchone()[0]
+        if n:
+            scope = f"program '{program}'" if program else "this program set"
+            out.append(f"program noise: {n} prior '{cls}' submission(s) in {scope}")
+    return out
 
 
 def all_services_for_scanned_hosts(

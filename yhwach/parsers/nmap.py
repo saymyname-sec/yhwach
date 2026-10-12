@@ -57,6 +57,11 @@ class ScanMeta:
     args: str | None = None
     version_scan: bool = False
     coverage: list[ScanCoverage] = field(default_factory=list)
+    # A host-discovery-only run (-sn) or list scan (-sL) touched NO ports, so it
+    # records NO port coverage — recording top-1000 for a ping sweep was the bug.
+    ping_only: bool = False
+    # IPs nmap reported DOWN (ping miss). Honestly 'unanswered', never 'dead'.
+    down_ips: list[str] = field(default_factory=list)
 
 
 FULL_TCP_PORTS = 65535
@@ -92,9 +97,17 @@ def _count_port_spec(spec: str) -> tuple[int, bool]:
     return total, total >= FULL_TCP_PORTS
 
 
+_PING_ONLY_RE = re.compile(r"(?:^|\s)-s[nL]\b")
+
+
 def _meta_from_args(args: str) -> ScanMeta:
     """Derive coverage from an nmap command line (the only source for `-oN`)."""
     meta = ScanMeta(args=args.strip())
+    # -sn (ping/host-discovery) and -sL (list) scan NO ports. Record no coverage,
+    # so a pinged host still owes a real scan (yhwach_gaps keeps it honest).
+    if _PING_ONLY_RE.search(args):
+        meta.ping_only = True
+        return meta
     meta.version_scan = bool(re.search(r"(?:^|\s)-(?:sV|A)\b", args))
     proto = "udp" if re.search(r"(?:^|\s)-sU\b", args) else "tcp"
 
@@ -134,6 +147,17 @@ def parse_scan_meta(text: str) -> ScanMeta:
             return ScanMeta()
         args = root.get("args")
         meta = ScanMeta(args=args)
+        # Down hosts (ping miss) are recorded 'unanswered', not dropped as dead.
+        for host_elem in root.findall("host"):
+            st = host_elem.find("status")
+            if st is not None and st.get("state") == "down":
+                for addr in host_elem.findall("address"):
+                    if addr.get("addrtype") == "ipv4" and addr.get("addr"):
+                        meta.down_ips.append(addr.get("addr"))
+        if args and _PING_ONLY_RE.search(args):
+            # A ping/list scan: no port coverage regardless of any <scaninfo>.
+            meta.ping_only = True
+            return meta
         meta.version_scan = bool(args and re.search(r"(?:^|\s)-(?:sV|A)\b", args))
         if not meta.version_scan:
             # A probed service element is proof of -sV even if args are missing.
@@ -351,21 +375,25 @@ def insert_hosts(
             (engagement_id, parsed.ip),
         ).fetchone()
 
+        # A ping/list scan confirms the host is UP but scans no ports, so it must
+        # not advance the port-scan stage or pretend to have coverage — it only
+        # owes a real scan (scan_needed stays 1).
+        ping_only = bool(meta and meta.ping_only)
         if row is None:
             # First-time host: nmap is the discovery source. Keep scan_needed=1
-            # (the schema default) so PR-2's scanner still owes a canonical
-            # full-port + -sV pass — the ingested file may be a targeted
-            # top-100. scan_needed only clears once scan_coverage rows confirm
-            # the host has been fully covered.
+            # (the schema default) so the scanner still owes a canonical
+            # full-port + -sV pass — the ingested file may be a targeted top-100.
+            first_stage = "undiscovered" if ping_only else "scanned"
             cur = conn.execute(
                 "INSERT INTO host (engagement_id, ip, hostname, os, stage, "
-                "discovery_source, first_seen, last_updated) "
-                "VALUES (?, ?, ?, ?, 'scanned', 'nmap', ?, ?)",
+                "discovery_source, alive, first_seen, last_updated) "
+                "VALUES (?, ?, ?, ?, ?, 'nmap', 'alive', ?, ?)",
                 (
                     engagement_id,
                     parsed.ip,
                     parsed.hostname,
                     _os_class(parsed.os_hint),
+                    first_stage,
                     now,
                     now,
                 ),
@@ -373,13 +401,16 @@ def insert_hosts(
             host_id = int(cur.lastrowid)
         else:
             host_id = row["id"]
-            # Advance undiscovered -> scanned; otherwise leave the stage alone.
-            # scan_needed is left as-is here; the scanner (PR-2) reads
-            # scan_coverage to decide when a host is truly full-scanned.
-            new_stage = "scanned" if row["stage"] == "undiscovered" else row["stage"]
+            # Advance undiscovered -> scanned on a port scan; a ping scan leaves
+            # the stage alone. Either way the host is now confirmed alive.
+            if ping_only:
+                new_stage = row["stage"]
+            else:
+                new_stage = "scanned" if row["stage"] == "undiscovered" else row["stage"]
             conn.execute(
                 "UPDATE host SET hostname = COALESCE(?, hostname), "
-                "os = COALESCE(?, os), stage = ?, last_updated = ? WHERE id = ?",
+                "os = COALESCE(?, os), stage = ?, alive = 'alive', last_updated = ? "
+                "WHERE id = ?",
                 (parsed.hostname, _os_class(parsed.os_hint), new_stage, now, host_id),
             )
         hosts_touched += 1
@@ -424,6 +455,18 @@ def insert_hosts(
                     port_count=cov.port_count, full_range=cov.full_range,
                     version_scan=meta.version_scan, source=meta.args,
                 )
+
+    # Hosts nmap reported DOWN are 'unanswered' (a ping miss, not dead) — only
+    # annotate hosts we already track; never manufacture a row per dead IP in a
+    # swept /24, and never downgrade a host already confirmed alive.
+    if meta is not None:
+        for ip in meta.down_ips:
+            conn.execute(
+                "UPDATE host SET alive = CASE WHEN alive = 'alive' THEN 'alive' "
+                "ELSE 'unanswered' END, last_updated = ? "
+                "WHERE engagement_id = ? AND ip = ?",
+                (now, engagement_id, ip),
+            )
 
     return hosts_touched, services_touched
 

@@ -41,6 +41,8 @@ VOCAB: dict[str, tuple[str, str]] = {
     "limit": ("max rows/sections to return", "50"),
     "offset": ("rows to skip (paging)", "0"),
     "reveal": ("show secrets in the clear (default masked)", "true"),
+    "fmt": ("text|json (json returns a paged envelope with a next-call)", '"json"'),
+    "max_chars": ("cap output size; drops trailing rows and prints the next call", "4000"),
     "kind": ("the type/category for this call (tool-specific)", '"nmap"'),
     "severity": ("critical|high|medium|low|info", '"high"'),
     "status": ("open|confirmed|exploited|false_positive|duplicate|remediated|dead", '"confirmed"'),

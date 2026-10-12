@@ -333,6 +333,27 @@ def reuse(lab: str, db_path: str | None) -> None:
 
 @main.command()
 @click.option("--lab", required=True, help="Lab name.")
+@click.option("--payload", "payload", default=None, help="Payload sent; omit to list.")
+@click.option("--response", default=None, help="The response observed.")
+@click.option("--surface", default=None, help="chatbot|rag|mcp|web|...")
+@click.option("--host", default=None, help="Target host IP.")
+@click.option("--set", "set_id", default=None, type=int, help="Payload id to set a verdict on.")
+@click.option("--verdict", default=None, help="success|refused|blocked|unclear (with --set).")
+@click.option("--canary", is_flag=True, default=False, help="Print the engagement canary.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def payload(lab: str, payload: str | None, response: str | None, surface: str | None,
+            host: str | None, set_id: int | None, verdict: str | None, canary: bool,
+            db_path: str | None) -> None:
+    """Record / verdict / list injection payloads (I53)."""
+    from yhwach.mcp_tools import tool_payload
+
+    click.echo(tool_payload(_db_path(db_path), lab, payload=payload, response=response,
+                            surface=surface, host=host, verdict=verdict, set_id=set_id,
+                            canary=canary))
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
 @click.option("--host", default=None, help="Host IP won out-of-band -> foothold.")
 @click.option("--principal", default=None, help="Principal won out-of-band -> owned.")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")

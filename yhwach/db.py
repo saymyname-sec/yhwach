@@ -30,7 +30,7 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Bumped when the additive self-heal below gains a column/table. Stamped into
 # PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
 # NULL) has a version anchor to branch on. The additive path stays idempotent.
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
@@ -511,6 +511,20 @@ _ADDED_TABLES = {
         "  discovered_at TEXT NOT NULL,"
         "  UNIQUE(engagement_id, domain, key))"
     ),
+    "payload": (
+        "CREATE TABLE IF NOT EXISTS payload ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  host_id INTEGER REFERENCES host(id),"
+        "  surface TEXT,"
+        "  payload TEXT NOT NULL,"
+        "  response TEXT,"
+        "  canary TEXT,"
+        "  auto_verdict TEXT,"
+        "  verdict TEXT NOT NULL DEFAULT 'unclear',"
+        "  note TEXT,"
+        "  at TEXT NOT NULL)"
+    ),
 }
 
 
@@ -538,6 +552,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_artifact_eng ON artifact(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_submission_eng ON submission(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_domain_fact_eng ON domain_fact(engagement_id)",
+        "CREATE INDEX IF NOT EXISTS idx_payload_eng ON payload(engagement_id)",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -1725,6 +1740,72 @@ def list_submissions(
 ) -> list[sqlite3.Row]:
     sql = ("SELECT id, program, finding_id, endpoint, param, cls, status, note, "
            "submitted_at FROM submission WHERE engagement_id = ? ORDER BY id DESC")
+    params: list = [engagement_id]
+    if limit is not None:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, params).fetchall()
+
+
+PAYLOAD_VERDICTS = ("success", "refused", "blocked", "unclear")
+
+
+def engagement_canary(conn: sqlite3.Connection, engagement_id: int) -> str:
+    """A stable, NEUTRAL per-engagement canary token (no tool-fingerprinting
+    prefix). Generated once and stored, so an indirect-injection echo is
+    attributable to this engagement."""
+    import secrets as _secrets
+
+    row = conn.execute(
+        "SELECT value FROM domain_fact WHERE engagement_id = ? AND key = 'canary'",
+        (engagement_id,)).fetchone()
+    if row and row["value"]:
+        return row["value"]
+    token = "c" + _secrets.token_hex(4)
+    add_domain_fact(conn, engagement_id, "canary", token, source="payload")
+    return token
+
+
+def add_payload(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    *,
+    payload: str,
+    response: str | None = None,
+    surface: str | None = None,
+    host_id: int | None = None,
+    canary: str | None = None,
+    auto_verdict: str | None = None,
+    verdict: str = "unclear",
+    note: str | None = None,
+) -> int:
+    """Append an injection-test row. The heuristic `auto_verdict` is advisory;
+    `verdict` (operator) is the fact of record and defaults to 'unclear'."""
+    if verdict not in PAYLOAD_VERDICTS:
+        raise ValueError(f"unknown verdict '{verdict}' — use one of {', '.join(PAYLOAD_VERDICTS)}")
+    resp = response if response is None or len(response) <= 2000 else response[:2000] + "…"
+    cur = conn.execute(
+        "INSERT INTO payload (engagement_id, host_id, surface, payload, response, canary, "
+        "auto_verdict, verdict, note, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (engagement_id, host_id, surface, payload, resp, canary, auto_verdict, verdict,
+         note, _now_utc()),
+    )
+    return int(cur.lastrowid)
+
+
+def set_payload_verdict(conn: sqlite3.Connection, payload_id: int, verdict: str,
+                        *, note: str | None = None) -> None:
+    """The operator's override — the recorded fact of record for the test."""
+    if verdict not in PAYLOAD_VERDICTS:
+        raise ValueError(f"unknown verdict '{verdict}' — use one of {', '.join(PAYLOAD_VERDICTS)}")
+    conn.execute("UPDATE payload SET verdict = ?, note = COALESCE(?, note) WHERE id = ?",
+                 (verdict, note, payload_id))
+
+
+def list_payloads(conn: sqlite3.Connection, engagement_id: int, *,
+                  limit: int | None = None) -> list[sqlite3.Row]:
+    sql = ("SELECT id, surface, payload, response, canary, auto_verdict, verdict, note, at "
+           "FROM payload WHERE engagement_id = ? ORDER BY id DESC")
     params: list = [engagement_id]
     if limit is not None:
         sql += " LIMIT ?"

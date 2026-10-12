@@ -270,6 +270,78 @@ def schema(tool: str | None) -> None:
     click.echo(tool_schema(None, tool=tool))
 
 
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--body", default=None, help="Notice text; omit to list the log.")
+@click.option("--kind", default="status_update", help="Notice kind.")
+@click.option("--finding", default=None, type=int, help="Link to a finding id.")
+@click.option("--channel", default=None, help="How it was communicated (call|email|...).")
+@click.option("--actor", default=None, help="Who recorded it.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def notice(lab: str, body: str | None, kind: str, finding: int | None,
+           channel: str | None, actor: str | None, db_path: str | None) -> None:
+    """Record or list client communications (G4a)."""
+    from yhwach.mcp_tools import tool_notice
+
+    click.echo(tool_notice(_db_path(db_path), lab, body=body, kind=kind,
+                           finding=finding, channel=channel, actor=actor))
+
+
+@main.command(name="log")
+@click.option("--lab", required=True, help="Lab name.")
+@click.argument("action")
+@click.option("--command", default=None, help="The command you ran (secrets redacted).")
+@click.option("--host", default=None, help="Target host IP.")
+@click.option("--target", default=None, help="Target (host:port / url).")
+@click.option("--result", default=None, help="success|fail|blocked|cached|error.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def log_cmd(lab: str, action: str, command: str | None, host: str | None,
+            target: str | None, result: str | None, db_path: str | None) -> None:
+    """Record a hand-run command into the activity ledger (I05)."""
+    from yhwach.mcp_tools import tool_log
+
+    click.echo(tool_log(_db_path(db_path), lab, action, command=command,
+                        host=host, target=target, result=result))
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--location", default=None, help="Where it lives; omit to list.")
+@click.option("--kind", default="file", help="tunnel_agent|implant|webshell|file|account|service.")
+@click.option("--host", default=None, help="Host IP it is on.")
+@click.option("--note", default=None, help="Optional note.")
+@click.option("--remove", default=None, type=int, help="Artifact id to mark removed.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def artifact(lab: str, location: str | None, kind: str, host: str | None,
+             note: str | None, remove: int | None, db_path: str | None) -> None:
+    """Record, remove or list cleanup artefacts (I39)."""
+    from yhwach.mcp_tools import tool_artifact
+
+    click.echo(tool_artifact(_db_path(db_path), lab, location=location, kind=kind,
+                             host=host, note=note, remove=remove))
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--program", default=None, help="Bounty program name.")
+@click.option("--finding", default=None, type=int, help="Finding id.")
+@click.option("--endpoint", default=None, help="Affected endpoint/path.")
+@click.option("--param", default=None, help="Affected parameter.")
+@click.option("--cls", default=None, help="Vuln class (for program-noise advice).")
+@click.option("--status", default=None, help="Operator-set status label.")
+@click.option("--note", default=None, help="Optional note.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def submission(lab: str, program: str | None, finding: int | None, endpoint: str | None,
+               param: str | None, cls: str | None, status: str | None,
+               note: str | None, db_path: str | None) -> None:
+    """Record or list bounty submissions with duplicate-risk advice (I20)."""
+    from yhwach.mcp_tools import tool_submission
+
+    click.echo(tool_submission(_db_path(db_path), lab, program=program, finding=finding,
+                               endpoint=endpoint, param=param, cls=cls, status=status,
+                               note=note))
+
+
 @main.command(name="finding-set")
 @click.option("--lab", required=True, help="Lab name.")
 @click.option("--id", "finding_id", required=True, type=int, help="Finding id.")

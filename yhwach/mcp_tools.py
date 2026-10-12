@@ -760,6 +760,15 @@ def tool_pivot(
             conn, eid, "tunnel",
             {"via": via_host, "subnet": subnet, "kind": resolved_kind, "agent": agent_key},
         )
+        # Cleanup ledger (I39): the agent binary lands on the CLIENT host and must
+        # be removed at close. The Kali-side proxy/listener is NOT a client
+        # artefact, so it is never recorded. Only on first render to avoid dupes.
+        if created:
+            yhdb.add_artifact(
+                conn, eid, kind="tunnel_agent",
+                location=f"{agent_key} on {via_host}", host_id=hrow["id"],
+                note=f"{resolved_kind} agent for tunnel to {subnet}; confirm removal at cleanup",
+            )
         msg = (
             f"tunnel {'recorded' if created else 'already known'}: "
             f"{subnet} via {via_host} [kind={resolved_kind}, agent={agent_key}]"
@@ -1569,6 +1578,130 @@ def tool_schema(db_path: Path | str, tool: str | None = None) -> str:
     return vocab.catalog(TOOL_SPECS, tool=tool)
 
 
+def _host_id_for(conn, eid: int, ip: str | None) -> int | None:
+    if not ip:
+        return None
+    row = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                       (eid, ip)).fetchone()
+    return int(row["id"]) if row else None
+
+
+def _critical_warning(conn, eid: int) -> str | None:
+    missing = yhdb.uncommunicated_critical_findings(conn, eid)
+    if not missing:
+        return None
+    names = ", ".join(f"#{r['id']} {r['title']}" for r in missing[:5])
+    more = f" (+{len(missing) - 5} more)" if len(missing) > 5 else ""
+    return (f"⚠ {len(missing)} live CRITICAL finding(s) not yet notified: {names}{more} — "
+            "record a critical_notification before close.")
+
+
+def tool_notice(db_path: Path | str, lab: str, body: str | None = None,
+                kind: str = "status_update", finding: int | None = None,
+                channel: str | None = None, actor: str | None = None) -> str:
+    """The client communications log (G4a). With `body`, record what was said
+    (kind: critical_notification|status_update|stop|pause|resume|detection|
+    scope_change; link a critical to its finding). Without `body`, list the log.
+    Always flags live critical findings that have not been communicated.
+    """
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        if body:
+            try:
+                nid = yhdb.add_notice(conn, eid, kind=kind, body=body,
+                                      finding_id=finding, channel=channel, actor=actor)
+            except ValueError as e:
+                return f"[!] {e}"
+            yhdb.log_event(conn, eid, "notice", {"kind": kind, "finding": finding})
+            out = [f"recorded notice #{nid} [{kind}]"]
+        else:
+            rows = yhdb.list_notices(conn, eid, limit=50)
+            out = [f"{r['at']} [{r['kind']}]"
+                   + (f" f#{r['finding_id']}" if r["finding_id"] else "")
+                   + (f" ({r['channel']})" if r["channel"] else "") + f" — {r['body']}"
+                   for r in rows] or ["(no notices recorded)"]
+        warn = _critical_warning(conn, eid)
+        if warn:
+            out.append(warn)
+        return "\n".join(out)
+
+
+def tool_log(db_path: Path | str, lab: str, action: str, command: str | None = None,
+             host: str | None = None, target: str | None = None,
+             result: str | None = None) -> str:
+    """Record a command YOU (the model) ran yourself into the activity ledger
+    (I05), so the originated-traffic log is complete. The command is stored with
+    secrets redacted. yhwach's own spray/scan already log here; this covers the
+    moves you make by hand. The ledger is PARTIAL — only traffic yhwach or you
+    report, never what other tools sent.
+    """
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        hid = _host_id_for(conn, eid, host)
+        aid = yhdb.add_activity(conn, eid, actor="model", action=action, host_id=hid,
+                                target=target, command=command, result=result)
+        return f"logged activity #{aid} [{action}]"
+
+
+def tool_artifact(db_path: Path | str, lab: str, location: str | None = None,
+                  kind: str = "file", host: str | None = None,
+                  note: str | None = None, remove: int | None = None) -> str:
+    """The artifact cleanup ledger (I39): what you LEFT on client systems. With
+    `location`, record one (kind: tunnel_agent|implant|webshell|file|account|
+    service). With `remove=<id>`, mark it confirmed removed. Without either, list
+    — outstanding (not-removed) artefacts block a clean close. The Kali-side
+    listener/proxy is not a client artefact; do not record it.
+    """
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        if remove is not None:
+            yhdb.set_artifact_state(conn, int(remove), "removed")
+            out = [f"artifact #{remove} marked removed"]
+        elif location:
+            hid = _host_id_for(conn, eid, host)
+            aid = yhdb.add_artifact(conn, eid, kind=kind, location=location,
+                                    host_id=hid, note=note)
+            out = [f"recorded artifact #{aid} [{kind}] @ {location}"]
+        else:
+            rows = yhdb.list_artifacts(conn, eid)
+            out = [f"#{r['id']} [{r['state']}] {r['kind']} @ {r['location']}"
+                   + (f" ({r['host_ip']})" if r["host_ip"] else "")
+                   for r in rows] or ["(no artefacts recorded)"]
+        outstanding = yhdb.outstanding_artifacts(conn, eid)
+        if outstanding:
+            out.append(f"⚠ {len(outstanding)} artefact(s) not confirmed removed — "
+                       "not clean to close.")
+        return "\n".join(out)
+
+
+def tool_submission(db_path: Path | str, lab: str, program: str | None = None,
+                    finding: int | None = None, endpoint: str | None = None,
+                    param: str | None = None, cls: str | None = None,
+                    status: str | None = None, note: str | None = None) -> str:
+    """Bounty submission memory (I20). With an endpoint/finding/program, record a
+    submission and get an advisory duplicate-risk line (same endpoint+param, or
+    same class program-wide). Without, list submissions. Advisory ONLY — it never
+    changes a finding's status and never reorders recall.
+    """
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        adding = any(x is not None for x in (program, finding, endpoint))
+        if adding:
+            risk = yhdb.submission_duplicate_risk(
+                conn, eid, endpoint=endpoint, param=param, cls=cls, program=program)
+            sid = yhdb.add_submission(conn, eid, program=program, finding_id=finding,
+                                      endpoint=endpoint, param=param, cls=cls,
+                                      status=status, note=note)
+            out = [f"recorded submission #{sid}"]
+            out += [f"  ~ {r}" for r in risk]
+            return "\n".join(out)
+        rows = yhdb.list_submissions(conn, eid, limit=50)
+        out = [f"#{r['id']} {r['program'] or '-'} {r['endpoint'] or ''} "
+               f"{('param=' + r['param']) if r['param'] else ''} [{r['status'] or 'submitted'}]"
+               for r in rows] or ["(no submissions recorded)"]
+        return "\n".join(out)
+
+
 def tool_query(db_path: Path | str, lab: str, view: str,
                where: dict | None = None, q: str | None = None,
                fields: list | None = None, order: str | None = None,
@@ -1802,4 +1935,20 @@ TOOL_SPECS = [
      "Discover the tool surface: no arg lists every tool, the yhwach_query views and "
      "operators, and what each argument means; tool='yhwach_<name>' returns that tool's "
      "args + a runnable example. Pure discovery — call it when unsure of an arg or a view."),
+    ("yhwach_notice", tool_notice,
+     "Client communications log (what was told, when). With body=, record a notice "
+     "(kind: critical_notification|status_update|stop|pause|resume|detection|scope_change; "
+     "link a critical to its finding); without, list. Flags live criticals not yet notified."),
+    ("yhwach_log", tool_log,
+     "Record a command YOU ran by hand into the activity ledger (secrets redacted) so the "
+     "originated-traffic log is complete. yhwach's own spray/scan already log here. The "
+     "ledger is PARTIAL — only traffic yhwach or you report."),
+    ("yhwach_artifact", tool_artifact,
+     "Cleanup ledger: what you LEFT on client systems. location= records one "
+     "(kind: tunnel_agent|implant|webshell|file|account|service), remove=<id> confirms "
+     "removal, neither lists. Outstanding artefacts block a clean close."),
+    ("yhwach_submission", tool_submission,
+     "Bounty submission memory. endpoint/finding/program records a submission and returns a "
+     "duplicate-risk advisory (same endpoint+param, or same class program-wide); otherwise "
+     "lists. Advisory only — never changes a finding's status or recall order."),
 ]

@@ -357,6 +357,7 @@ CREATE TABLE IF NOT EXISTS principal (
     description   TEXT,
     home_host_id  INTEGER REFERENCES host(id),   -- for local accounts / where first seen
     source        TEXT,                  -- bloodhound|enum4linux|rid_brute|dcsync|manual
+    owned         INTEGER DEFAULT 0,     -- schema v9 (I46): operator-asserted control (yhwach_own)
     discovered_at TEXT    NOT NULL,
     updated_at    TEXT,
     UNIQUE(engagement_id, name, domain, type)

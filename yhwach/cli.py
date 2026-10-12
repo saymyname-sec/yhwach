@@ -333,6 +333,18 @@ def reuse(lab: str, db_path: str | None) -> None:
 
 @main.command()
 @click.option("--lab", required=True, help="Lab name.")
+@click.option("--host", default=None, help="Host IP won out-of-band -> foothold.")
+@click.option("--principal", default=None, help="Principal won out-of-band -> owned.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def own(lab: str, host: str | None, principal: str | None, db_path: str | None) -> None:
+    """Assert ownership of a host/principal won out-of-band (I46)."""
+    from yhwach.mcp_tools import tool_own
+
+    click.echo(tool_own(_db_path(db_path), lab, host=host, principal=principal))
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
 @click.option("--program", default=None, help="Bounty program name.")
 @click.option("--finding", default=None, type=int, help="Finding id.")
 @click.option("--endpoint", default=None, help="Affected endpoint/path.")

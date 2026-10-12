@@ -101,6 +101,12 @@ VOCAB: dict[str, tuple[str, str]] = {
     "out_dir": ("output directory", '"notes"'),
     "action": ("sub-command (tool-specific)", '"list"'),
     "tool": ("a yhwach tool name to describe", '"yhwach_add_finding"'),
+    "body": ("the notice text (what was communicated)", '"notified client of critical RCE"'),
+    "channel": ("how it was communicated", '"call"'),
+    "program": ("bounty program name", '"acme-bbp"'),
+    "endpoint": ("the affected endpoint/path", '"/api/users/{id}"'),
+    "param": ("the affected parameter", '"id"'),
+    "remove": ("artifact id to mark confirmed removed", "3"),
 }
 
 

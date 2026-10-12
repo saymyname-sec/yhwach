@@ -610,6 +610,20 @@ def _run_matrix(
             elif res == "skipped":
                 batch.skipped += 1
 
+    # Activity ledger (I05): one bounded summary row per spray run — yhwach
+    # originated this traffic. Per-attempt detail (incl. cached/blocked) already
+    # lives in credential_access, so a per-attempt copy here would grow without
+    # bound on every autospray re-run.
+    if batch.attempts and not dry_run:
+        sent = sum(1 for a in batch.attempts
+                   if a.result in ("success", "admin", "fail", "error"))
+        yhdb.add_activity(
+            conn, engagement_id, actor="yhwach", action="spray",
+            target=f"{len(creds)} cred(s) x {len(services)} service(s)",
+            result=(f"{len(batch.hits)} hit / {sent} sent / "
+                    f"{batch.blocked} blocked / {batch.skipped} skipped"),
+        )
+
     return batch
 
 

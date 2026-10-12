@@ -646,6 +646,48 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             return (f"{kind}: {rows} vulnerability row(s) across hosts, {promoted} promoted "
                     f"to a chaining tag (smb_signing_off / exploitable_cve).")
 
+        # nuclei JSONL -> potential vulnerabilities keyed on the template id; a
+        # credential-category template's extracts are loot, never sprayable creds.
+        if kind == "nuclei":
+            from yhwach.parsers.nuclei import parse_nuclei
+
+            findings = parse_nuclei(Path(file).read_text(encoding="utf-8", errors="replace"))
+            rows = promoted = looted = 0
+            for nf in findings:
+                if not nf.host_ip:
+                    continue
+                hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                                    (eid, nf.host_ip)).fetchone()
+                if hrow is None:
+                    cur = conn.execute(
+                        "INSERT INTO host (engagement_id, ip, stage, discovery_source, "
+                        "alive, first_seen) VALUES (?, ?, 'scanned', 'nuclei', 'alive', ?)",
+                        (eid, nf.host_ip, yhdb._now_utc()))
+                    hid = int(cur.lastrowid)
+                else:
+                    hid = int(hrow["id"])
+                _vid, created = yhdb.add_vulnerability(
+                    conn, eid, hid, nf.cves[0] if nf.cves else None, title=nf.name,
+                    cvss=nf.cvss, state="potential", source="nuclei",
+                    plugin_id=nf.template_id, port=nf.port,
+                    plugin_output=("; ".join(nf.extracted)[:600] or None))
+                rows += 1
+                if created and nf.is_credential:
+                    yhdb.add_loot(conn, eid, host_id=hid, type="nuclei_extract",
+                                  contains_secret=True,
+                                  summary=f"{nf.template_id}: {'; '.join(nf.extracted)[:140]}")
+                    looted += 1
+                if created and nf.promote_tag and nf.severity in ("critical", "high", "medium"):
+                    yhdb.add_finding(conn, hid, None, "scanner", nf.name,
+                                     nf.severity if nf.severity != "unknown" else "low",
+                                     (nf.url or nf.name)[:200], tag=nf.promote_tag,
+                                     engagement_id=eid)
+                    promoted += 1
+            yhdb.log_event(conn, eid, "ingest",
+                           {"kind": "nuclei", "vulns": rows, "promoted": promoted, "loot": looted})
+            return (f"nuclei: {rows} potential vuln(s), {promoted} promoted to a chaining tag, "
+                    f"{looted} credential extract(s) to loot.")
+
         valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
         if kind not in valid:
             raise ValueError(f"unknown kind '{kind}' (use nmap|{'|'.join(valid)})")
@@ -1541,7 +1583,7 @@ def _candidate_ids(db_path: Path | str, lab: str, host: str | None) -> set[str]:
 
 
 _INTERPRET_PARSERS = ("nmap", "netexec", "bloodhound", "certipy", "linpeas", "winpeas",
-                      "web", "secretsdump", "potfile", "nessus", "openvas")
+                      "web", "secretsdump", "potfile", "nessus", "openvas", "nuclei")
 
 
 def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
@@ -2012,7 +2054,7 @@ TOOL_SPECS = [
      "are cached in credential_access; force=True re-attempts. Uses nxc / curl; "
      "domain and local-auth are tried automatically on SMB/WinRM/MSSQL."),
     ("yhwach_interpret", tool_interpret,
-     "Turn pasted tool output into typed rows (auto-sniffs nmap/netexec/secretsdump/potfile/nessus/openvas/bloodhound/"
+     "Turn pasted tool output into typed rows (auto-sniffs nmap/netexec/secretsdump/potfile/nessus/openvas/nuclei/bloodhound/"
      "certipy/linpeas/winpeas/web; kind='x:<action_id>' runs an extractor; else loot+INFO). "
      "Names which recall rules the new facts unlocked. dry_run classifies without writing."),
     ("yhwach_query", tool_query,
@@ -2040,7 +2082,7 @@ TOOL_SPECS = [
      "add_cred autospray). ~5 candidates per known pattern, not a wordlist. "
      "targets? = comma-separated usernames to generate FOR (default: common svc accounts)."),
     ("yhwach_ingest", tool_ingest,
-     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|linpeas|winpeas|"
+     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|linpeas|winpeas|"
      "bloodhound|certipy|netexec|web). nmap adds software+CPE; bloodhound builds the "
      "principal/privilege/edge graph; netexec adds SMB shares/users/admin/policy; web "
      "adds web_app+paths (needs url). Host-scoped kinds need a host and set chaining tags."),

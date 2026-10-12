@@ -38,10 +38,12 @@ safe to point at client work. Delivered in phases:
 - The CTF/exam methodology router (`agent-mode.md`) moved to `docs/experimental/` as an
   optional lab router — it is no longer part of the supported setup.
 
-### Deprecated
-- The self-driving runtime (`yhwach run`, `brain`/`judge`/`orchestrator`/`workers`/
-  `providers`, the `[agent]` extra) is experimental and unsupported; see
-  `docs/experimental/`.
+### Removed
+- The self-driving runtime — `yhwach run`, the `brain`/`judge`/`orchestrator`/
+  `workers`/`control`/`runners`/`actions`/`dryrun` modules, the `providers/`
+  adapters, and the `[agent]`/`[agent-openai]` extras. yhwach is an advisor: the
+  MCP client is the brain and yhwach never calls a model. The code lives in git
+  history. The board's board tests now run in CI (the `[ui]` extra is installed).
 
 ### Fixed
 - A batch of verified safety bugs blocking client use: lockout-threshold misparsing,

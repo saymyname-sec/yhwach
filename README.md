@@ -22,7 +22,6 @@ Yhwach is the **memory** for that work. It keeps the whole engagement as **struc
 > - **Agent instructions are not enough to keep it current.** Nothing forces an agent to record every new host, credential or finding. If you don't feed yhwach, its picture of the engagement goes stale — and a stale map is worse than none.
 > - **Maintaining the memory is part of the job.** You update it regularly, through the whole engagement, the same way you'd keep a lab notebook.
 > - **One exception — recording can generate traffic.** Recording a credential (`yhwach_add_cred`) immediately tries it against every matching service already in memory, and an nmap ingest or `yhwach_scan` tries every stored credential against newly found services (via NetExec / curl). Know the lockout policy before you record passwords — see [Before you rely on it](#before-you-rely-on-it).
-> - The CLI also contains `yhwach run`, an **experimental, unsupported** loop that calls a model with an API key. It is not part of this workflow — ignore it (details in [docs/experimental/](docs/experimental/)).
 >
 > This is a different way of working with a pentest tool: **the human drives, the agent executes and records, yhwach remembers.** Used that way, it keeps a long, complicated engagement coherent. Used as a fire-and-forget robot, it won't work.
 
@@ -64,7 +63,7 @@ mkdir -p "$HOME/.local/share/yhwach/state"      # the DB directory (your first e
 yhwach doctor                                   # preflight check
 ```
 
-`yhwach doctor` also prints lines about an API key, the `[agent]` extra and HexStrike. Those concern the unsupported self-driving mode or optional backends — ignore them.
+`yhwach doctor` also prints lines about the optional `[mcp]`/`[ui]` extras and HexStrike reachability — install what you need and ignore the rest. It needs no API key.
 
 Yhwach keeps its database under one workspace: `$YHWACH_HOME`, else `$XDG_DATA_HOME/yhwach`, else `~/.local/share/yhwach` (`$YHWACH_DB` points at a DB file directly). One workspace can hold many engagements — each has its own **lab name**.
 
@@ -142,7 +141,7 @@ yhwach recon   --lab acme --host 10.10.10.5
 yhwach report  --lab acme --out report.md
 ```
 
-Run `yhwach --help` for the full list (it includes the unsupported `run` — ignore it).
+Run `yhwach --help` for the full list.
 
 ---
 

@@ -1,9 +1,14 @@
 # Agent Architecture
 
-> **Status: target-state blueprint.** This describes the agent yhwach is becoming,
-> not (yet) what the code does. Where it disagrees with `README.md` or
-> `ARCHITECTURE.md`, this document wins — those still describe the deleted
-> ranker engine (see [History](#history-what-changed-and-why)).
+> **Status: historical / aspirational — NOT how yhwach works now.** This document
+> describes a self-driving agent (an ORCHESTRATOR + BRAIN that calls a model and
+> drives itself). That runtime has been **removed**: yhwach is an *advisor with a
+> memory* — the MCP client is the brain and yhwach never calls a model. For the
+> accurate, current picture read **[ARCHITECTURE.md](ARCHITECTURE.md)**; where this
+> file disagrees with it, ARCHITECTURE.md wins. This document is kept for the design
+> history of the world model, knowledge engine, and safety model, much of which is
+> still current. The self-driving modules (`brain`/`judge`/`orchestrator`/`workers`/
+> `providers`, `yhwach run`) live only in git history.
 
 ## The pivot in one line
 

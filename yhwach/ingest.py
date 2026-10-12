@@ -62,11 +62,23 @@ def ingest_netexec(conn: sqlite3.Connection, eng_id: int, host_id: int, text: st
             conn, eng_id, int(crow["id"]), host_id, port=s.port, proto=s.proto,
             service_kind=s.proto, result="admin" if s.admin else "success", source="netexec")
         proven += 1
+    # I45 — domain-wide facts (MAQ, LDAP signing, channel binding, LAPS).
+    for key, value in res.domain_facts.items():
+        yhdb.add_domain_fact(conn, eng_id, key, value, domain=res.domain, source="netexec")
+    # Roastable hashes become crackable credentials, flagged manual so they are
+    # NEVER sprayed (they are offline-crack material, not an auth primitive).
+    kerb = 0
+    for kh in res.kerberos_hashes:
+        ident = kh.get("user") or f"{kh['kind']}_{kh['hash'][-8:]}"
+        yhdb.add_credential(conn, eng_id, ident, kh["hash"], "kerberos",
+                            kh["kind"], provenance="discovered", spray_policy="manual")
+        kerb += 1
     for f in res.findings:
         yhdb.add_finding(conn, host_id, None, f.cls, f.title, f.severity, f.evidence, tag=f.tag)
     return {
         "shares": len(res.shares), "principals": len(res.principals),
         "admin": len(set(res.admin_users)), "policy": bool(res.password_policy),
+        "domain_facts": len(res.domain_facts), "kerberos": kerb,
         "findings": len(res.findings), "creds_proven": proven,
     }
 

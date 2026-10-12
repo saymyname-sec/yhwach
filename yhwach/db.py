@@ -30,7 +30,7 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Bumped when the additive self-heal below gains a column/table. Stamped into
 # PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
 # NULL) has a version anchor to branch on. The additive path stays idempotent.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
@@ -490,6 +490,18 @@ _ADDED_TABLES = {
         "  note TEXT,"
         "  submitted_at TEXT NOT NULL)"
     ),
+    # schema v7 — domain-wide AD facts (mirror db/schema.sql exactly)
+    "domain_fact": (
+        "CREATE TABLE IF NOT EXISTS domain_fact ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  domain TEXT,"
+        "  key TEXT NOT NULL,"
+        "  value TEXT,"
+        "  source TEXT,"
+        "  discovered_at TEXT NOT NULL,"
+        "  UNIQUE(engagement_id, domain, key))"
+    ),
 }
 
 
@@ -516,6 +528,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_activity_eng ON activity(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_artifact_eng ON artifact(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_submission_eng ON submission(engagement_id)",
+        "CREATE INDEX IF NOT EXISTS idx_domain_fact_eng ON domain_fact(engagement_id)",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -2386,6 +2399,38 @@ def add_password_policy(
          complexity, source, _now_utc()),
     )
     return int(cur.lastrowid)
+
+
+def add_domain_fact(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    key: str,
+    value: str | None,
+    *,
+    domain: str | None = None,
+    source: str | None = None,
+) -> int:
+    """Upsert a domain-wide AD fact (deduped by engagement+domain+key). The last
+    observation wins — MAQ/LDAP-signing/LAPS state can change mid-engagement."""
+    cur = conn.execute(
+        "INSERT INTO domain_fact (engagement_id, domain, key, value, source, discovered_at) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(engagement_id, domain, key) DO UPDATE SET "
+        "value = excluded.value, source = COALESCE(excluded.source, domain_fact.source)",
+        (engagement_id, domain, key, value, source, _now_utc()),
+    )
+    return int(cur.lastrowid)
+
+
+def list_domain_facts(
+    conn: sqlite3.Connection, engagement_id: int, *, domain: str | None = None,
+) -> list[sqlite3.Row]:
+    q = "SELECT id, domain, key, value, source FROM domain_fact WHERE engagement_id = ?"
+    params: list = [engagement_id]
+    if domain is not None:
+        q += " AND domain = ?"
+        params.append(domain)
+    return conn.execute(q + " ORDER BY domain, key", params).fetchall()
 
 
 def add_objective(

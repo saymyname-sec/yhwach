@@ -138,6 +138,11 @@ VIEWS: dict[str, View] = {
          "objective": "l.objective", "caption": "e.caption", "sha256": "e.sha256",
          "path": "e.path", "contains_secret": "e.contains_secret", "at": "e.captured_at"},
         "e.engagement_id = ?", "e.id DESC", ["e.kind", "e.caption"]),
+    "domain_facts": View(
+        "domain_fact df",
+        {"id": "df.id", "domain": "df.domain", "key": "df.key", "value": "df.value",
+         "source": "df.source"},
+        "df.engagement_id = ?", "df.domain, df.key", ["df.key", "df.value"]),
     # schema v4 — engagement-memory ledgers
     "notices": View(
         "notice n",

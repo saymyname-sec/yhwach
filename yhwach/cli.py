@@ -2003,14 +2003,18 @@ def run(lab: str, host_ip: str | None, phase: str, allow_gated: bool, allow_spec
               help="Ping this HexStrike URL for reachability (e.g. http://127.0.0.1:8888).")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
 def doctor(lab: str | None, hexstrike_url: str | None, db_path: str | None) -> None:
-    """Preflight the box before an engagement: DB, technique catalog, optional
-    extras, API key, and HexStrike reachability. Prints a checklist and exits
-    non-zero if a hard requirement (writable DB dir, loadable catalog) fails.
-    Everything AI needs a key for is a soft check — `--dry-run` needs none.
+    """Preflight the box before an engagement: DB, DB permissions and filesystem,
+    technique catalog, optional extras, the traffic state (armed? in scope?), and
+    HexStrike reachability. Prints a checklist and exits non-zero if a hard
+    requirement (writable DB dir, loadable catalog) fails. The supported advisor
+    path needs no API key — yhwach never calls a model.
     """
     import importlib.util
     import socket
     from urllib.parse import urlparse
+
+    from yhwach import preflight as pf
+    from yhwach import scope as yhscope
 
     state = {"ok": True}
 
@@ -2054,6 +2058,37 @@ def doctor(lab: str | None, hexstrike_url: str | None, db_path: str | None) -> N
     else:
         note("DB permissions", "not enforced on this platform (Linux only)")
 
+    # -- DB filesystem (SQLite locking + a creds DB must stay on your box) ----
+    fstype = pf.mount_fstype_for(path)
+    if fstype is None:
+        note("DB filesystem", "could not determine (no /proc/mounts)")
+    elif pf.is_network_fs(fstype):
+        check(False, "DB on a local filesystem",
+              f"{fstype} is a network mount — SQLite locking is unsafe there and a "
+              "creds DB leaves your box; move it to local disk")
+    else:
+        note("DB filesystem", f"{fstype} (local)")
+
+    # -- traffic state (will active tools send packets right now?) -----------
+    env_off = pf.autospray_env_off()
+    if lab and path.exists():
+        try:
+            with yhdb.transaction(path) as conn:
+                eid2 = yhdb.engagement_id_for(conn, lab)
+                if eid2 is not None:
+                    armed = yhdb.engagement_armed(conn, eid2)
+                    scope_n = sum(1 for r in yhscope.list_scope_entries(conn, eid2)
+                                  if r["include"])
+                    note(pf.traffic_state_line(armed=armed, env_off=env_off,
+                                               scope_count=scope_n))
+                else:
+                    note("Traffic state", f"engagement '{lab}' not found")
+        except Exception as exc:
+            note("Traffic state", f"unavailable — {exc}")
+    else:
+        note("Traffic state", "pass --lab to show it"
+             + (" · YHWACH_AUTOSPRAY=0 (all active tools OFF)" if env_off else ""))
+
     # -- technique catalog ---------------------------------------------------
     try:
         from yhwach import knowledge as kn
@@ -2065,15 +2100,12 @@ def doctor(lab: str | None, hexstrike_url: str | None, db_path: str | None) -> N
 
     # -- deps / extras (soft) -----------------------------------------------
     check(have("yaml"), "core deps present")
+    note("MCP extra [mcp]", "ok" if have("mcp") else "missing — pip install 'yhwach[mcp]'")
     note("UI extra [ui]",
          "ok" if have("fastapi") and have("uvicorn") else "missing — pip install 'yhwach[ui]'")
     note("agent extra [agent]",
-         "ok" if have("anthropic")
-         else "missing — pip install 'yhwach[agent]' (live AI only; not --dry-run)")
-    note("MCP extra [mcp]", "ok" if have("mcp") else "missing — pip install 'yhwach[mcp]'")
-    note("ANTHROPIC_API_KEY",
-         "set" if os.environ.get("ANTHROPIC_API_KEY")
-         else "unset — use --dry-run (no key), or export it for live AI")
+         "ok (experimental self-driving path; unsupported)" if have("anthropic")
+         else "absent — not needed; the supported MCP path uses no API key")
 
     # -- HexStrike reachability ---------------------------------------------
     if hexstrike_url:

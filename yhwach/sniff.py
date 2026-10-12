@@ -28,6 +28,8 @@ _SIGNS: list[tuple[str, re.Pattern]] = [
     # Cloud enum: aws sts get-caller-identity JSON, then kubectl auth can-i.
     ("aws", re.compile(r'"UserId"\s*:.*"Account"\s*:|"Arn"\s*:\s*"arn:aws', re.S)),
     ("kubectl", re.compile(r"Non-Resource URLs|auth can-i", re.I)),
+    # SARIF (zizmor and other CI/CD scanners); poutine is too generic to sniff.
+    ("sarif", re.compile(r'schema[^"\n]*sarif|"version"\s*:\s*"2\.1\.0"', re.I)),
     ("certipy", re.compile(r"Certipy|Certificate Templates|\bESC\d{1,2}\b")),
     ("bloodhound", re.compile(r'"ObjectIdentifier"|SharpHound|"PrincipalSID"|"meta"\s*:')),
     ("winpeas", re.compile(r"winpeas|Windows Local Privilege Escalation|AllowAutomaticUpdates|"

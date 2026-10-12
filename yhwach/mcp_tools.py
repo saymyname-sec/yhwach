@@ -862,6 +862,21 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             return (f"prowler: {len(findings)} attack-relevant FAIL(s) recorded "
                     f"(compliance noise dropped).{tnote}")
 
+        # CI/CD scanner output -> gha_* tagged findings (engagement-level).
+        if kind in ("sarif", "poutine"):
+            from yhwach.parsers.cicd import parse_poutine, parse_sarif
+
+            body = Path(file).read_text(encoding="utf-8", errors="replace")
+            cf = (parse_sarif if kind == "sarif" else parse_poutine)(body)
+            for f in cf:
+                yhdb.add_finding(conn, None, None, "cicd",
+                                 f"{f.tool}: {f.title}", f.severity,
+                                 f"{f.rule} @ {f.path}" if f.path else f.rule,
+                                 tag=f.tag, location=f.path or None, engagement_id=eid)
+            yhdb.log_event(conn, eid, "ingest", {"kind": kind, "findings": len(cf)})
+            tnote = (" tags: " + ", ".join(sorted({f.tag for f in cf}))) if cf else ""
+            return f"{kind}: {len(cf)} CI/CD finding(s) recorded.{tnote}"
+
         valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
         if kind not in valid:
             raise ValueError(f"unknown kind '{kind}' (use nmap|{'|'.join(valid)})")
@@ -1759,7 +1774,7 @@ def _candidate_ids(db_path: Path | str, lab: str, host: str | None) -> set[str]:
 _INTERPRET_PARSERS = ("nmap", "netexec", "bloodhound", "certipy", "linpeas", "winpeas",
                       "web", "secretsdump", "potfile", "nessus", "openvas", "nuclei",
                       "httpx", "subfinder", "bbot", "burp", "har", "kubectl", "aws",
-                      "trivy", "prowler")
+                      "trivy", "prowler", "sarif", "poutine")
 
 
 def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
@@ -2328,7 +2343,7 @@ TOOL_SPECS = [
      "add_cred autospray). ~5 candidates per known pattern, not a wordlist. "
      "targets? = comma-separated usernames to generate FOR (default: common svc accounts)."),
     ("yhwach_ingest", tool_ingest,
-     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|httpx|subfinder|bbot|burp|har|kubectl|aws|trivy|prowler|linpeas|winpeas|"
+     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|httpx|subfinder|bbot|burp|har|kubectl|aws|trivy|prowler|sarif|poutine|linpeas|winpeas|"
      "bloodhound|certipy|netexec|web). nmap adds software+CPE; bloodhound builds the "
      "principal/privilege/edge graph; netexec adds SMB shares/users/admin/policy; web "
      "adds web_app+paths (needs url). Host-scoped kinds need a host and set chaining tags."),

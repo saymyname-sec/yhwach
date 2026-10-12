@@ -30,6 +30,7 @@ Inside yhwach:
 - **Python 3.11+** and `git`. **SQLite** comes with Python — nothing to install.
 - **An MCP client**: [Claude Code](https://docs.claude.com/en/docs/claude-code) or [Codex CLI](https://github.com/openai/codex). **Yhwach itself needs no API key.**
 - **Your usual toolset on `PATH`** (Kali works well): nmap, NetExec, impacket, BloodHound / SharpHound, certipy, … Yhwach records and recalls; it does not replace these tools, and it **ships no offensive binaries** — [`arsenal.manifest.yaml`](arsenal.manifest.yaml) only names and links the tools its playbooks mention, so you can fetch and vet them yourself.
+- **Recommended: an Obsidian MCP** registered in Claude Code / Codex (the **Local REST API** community plugin) — so your agent writes the engagement notes straight into your Obsidian vault as it works. yhwach holds the facts; the vault holds the write-up (see [Notes with Obsidian](#notes-with-obsidian)). Setup steps are in [docs/setup.md](docs/setup.md).
 - *Optional:* [HexStrike](https://github.com/0x4m4/hexstrike-ai) bound to loopback, as a delegated enumeration backend.
 
 ---
@@ -147,6 +148,8 @@ So that the terminal reads the **same database** as the MCP server, put the same
 ```bash
 echo 'export YHWACH_HOME="$HOME/.local/share/yhwach"' >> ~/.zshrc     # or ~/.bashrc
 ```
+
+> **Full walkthrough.** To set up the whole environment the way this methodology assumes — the offensive toolchain, HexStrike on loopback, the Obsidian MCP for notes, and registering every server — follow **[docs/setup.md](docs/setup.md)** from a fresh Kali box.
 
 ## Notes with Obsidian
 

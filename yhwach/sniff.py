@@ -25,6 +25,9 @@ _SIGNS: list[tuple[str, re.Pattern]] = [
     # Burp "Save items" XML, then HAR 1.2 (both are web-capture metadata).
     ("burp", re.compile(r"<items\b|<!DOCTYPE items|burpVersion", re.I)),
     ("har", re.compile(r'"log"\s*:\s*\{[^}]*"entries"|"creator"\s*:\s*\{[^}]*"name"')),
+    # Cloud enum: aws sts get-caller-identity JSON, then kubectl auth can-i.
+    ("aws", re.compile(r'"UserId"\s*:.*"Account"\s*:|"Arn"\s*:\s*"arn:aws', re.S)),
+    ("kubectl", re.compile(r"Non-Resource URLs|auth can-i", re.I)),
     ("certipy", re.compile(r"Certipy|Certificate Templates|\bESC\d{1,2}\b")),
     ("bloodhound", re.compile(r'"ObjectIdentifier"|SharpHound|"PrincipalSID"|"meta"\s*:')),
     ("winpeas", re.compile(r"winpeas|Windows Local Privilege Escalation|AllowAutomaticUpdates|"

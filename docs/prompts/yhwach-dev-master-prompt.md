@@ -9,7 +9,7 @@
 You are a senior offensive-tooling engineer working inside the `yhwach` repo. Yhwach is
 the **structured memory + curated knowledge core** for authorized red-team engagements and
 AI-security labs. Before you touch anything, read `README.md`,
-`AGENT.md`, `persona/operator.md`, `persona/notebook.md` and `docs/agent-mode.md` — they are
+`AGENT.md`, `persona/operator.md`, `persona/notebook.md` and `docs/experimental/agent-mode.md` — they are
 the live picture. Then run `yhwach brief` / `yhwach next` on a fixture lab to see today's
 advisor output with your own eyes.
 
@@ -133,7 +133,7 @@ The model only acts as well as the brief lets it. Improve the render, not the de
 - Every memory-writing action must also keep the vault current: `yhwach export_notes` scaffolds
   DB-derived tables (services/vulns/web/users/shares/per-host); the model writes only prose.
   `poc` + `poc_step` record the reproducible flag chain.
-- Make fold-back frictionless: the capture triggers in `docs/agent-mode.md` (cred → `add_cred`,
+- Make fold-back frictionless: the capture triggers in `docs/experimental/agent-mode.md` (cred → `add_cred`,
   finding → `add_finding`, proof → `poc`, new subnet → `pivot`) should each be one tool call.
 - **Acceptance:** after a simulated objective, `yhwach report` and the vault both reflect it with no
   manual bookkeeping; a fresh session resumes purely from DB + vault.

@@ -81,6 +81,41 @@ PORT_KIND: dict[int, str] = {
     2376: "docker_api",
     8500: "consul",
     8300: "consul",
+    # I43 — the classic network services every internal engagement meets. Read-only
+    # triage lives in playbooks/network-services.yaml; the dangerous moves
+    # (open-relay test, printer login, NFS mount, IPMI hash dump) are gated there.
+    23: "telnet",
+    25: "smtp",
+    465: "smtp",
+    587: "smtp",
+    110: "pop3",
+    995: "pop3",
+    143: "imap",
+    993: "imap",
+    53: "dns",
+    111: "rpcbind",         # NFS/portmapper
+    2049: "nfs",
+    135: "msrpc",           # endpoint mapper
+    515: "printer",         # LPD
+    631: "printer",         # IPP/CUPS
+    9100: "printer",        # raw / JetDirect
+    5900: "vnc",
+    5901: "vnc",
+    5902: "vnc",
+    5903: "vnc",
+    902: "esxi",            # VMware host agent
+}
+
+# UDP port -> surface kind. The classifier is now protocol-aware, so a UDP
+# service is never mistaken for a TCP one on the same port number (SNMP vs an
+# unrelated TCP 161, DNS 53/udp vs 53/tcp).
+UDP_PORT_KIND: dict[int, str] = {
+    161: "snmp",
+    162: "snmp",
+    623: "ipmi",
+    69: "tftp",
+    137: "netbios",
+    500: "ike",
 }
 
 # Ports worth an HTTP fingerprint when not matched by PORT_KIND.
@@ -109,16 +144,42 @@ _PRODUCT_KIND: dict[str, str] = {
     "etcd": "etcd",
     "docker": "docker_api",
     "memcache": "memcached",
+    # I43 — classic network services by nmap -sV product, for non-standard ports.
+    "telnet": "telnet",
+    "vnc": "vnc",
+    "postfix": "smtp",
+    "exim": "smtp",
+    "sendmail": "smtp",
+    "smtpd": "smtp",
+    "dovecot": "imap",
+    "courier": "imap",
+    "bind": "dns",
+    "dnsmasq": "dns",
+    "rpcbind": "rpcbind",
+    "portmapper": "rpcbind",
+    "nfs": "nfs",
+    "msrpc": "msrpc",
+    "snmp": "snmp",
+    "ipmi": "ipmi",
+    "vmware esxi": "esxi",
+    "vmware authentication": "esxi",
+    "cups": "printer",
+    "ipp": "printer",
+    "jetdirect": "printer",
+    "lpd": "printer",
 }
 
 
-def classify_service(product: str | None, port: int) -> str | None:
+def classify_service(product: str | None, port: int, proto: str = "tcp") -> str | None:
     """Map a service to a traditional surface kind (deterministic, no network).
 
-    Port first (the reliable signal); then fall through to the nmap `product`
-    string so a known service on a non-standard port is still classified.
+    Protocol-aware: a UDP service is classified from UDP_PORT_KIND (so SNMP on
+    161/udp is never confused with something on 161/tcp). Port first (the reliable
+    signal); then the nmap `product` string so a known service on a non-standard
+    port is still classified.
     """
-    kind = PORT_KIND.get(port)
+    table = UDP_PORT_KIND if (proto or "tcp").lower() == "udp" else PORT_KIND
+    kind = table.get(port)
     if kind:
         return kind
     if product:
@@ -295,10 +356,11 @@ def detect_traditional(
     port: int,
     product: str | None = None,
     *,
+    proto: str = "tcp",
     timeout: float = DEFAULT_TIMEOUT,
 ) -> TradResult | None:
     """Deterministic port match first; HTTP fingerprint for web ports otherwise."""
-    kind = classify_service(product, port)
+    kind = classify_service(product, port, proto)
     if kind:
         return TradResult(kind=kind, meta={"product": product})
     if port in WEB_PORTS:

@@ -1,0 +1,176 @@
+# I43 — classic network services every internal engagement meets. The surface
+# kinds come from the protocol-aware classify_service (TCP + UDP). Triage is
+# read_only by default; the dangerous moves are GATED (risk: propose) per the
+# reviewer correction: open-relay tests, printer default logins, NFS mounts and
+# IPMI hash dumps are NOT read-only.
+
+- id: snmp_triage
+  when: { surface: snmp }
+  class: traditional
+  likelihood: M
+  time_cost: low
+  emits:
+    - action: snmp_walk
+  maps: [T1046]
+  points: 10
+  risk: read_only
+  routes: 'hacktricks . pentesting/pentesting-snmp'
+  source: 'technique: SNMP public/private community walk (sysDescr, processes, routes)'
+  authorized_only: true
+
+- id: dns_triage
+  when: { surface: dns }
+  class: traditional
+  likelihood: M
+  time_cost: low
+  emits:
+    - action: dns_version
+    - action: dns_axfr
+  maps: [T1590.002]
+  points: 10
+  risk: read_only
+  routes: 'hacktricks . pentesting/pentesting-dns'
+  source: 'technique: DNS version.bind + AXFR zone-transfer attempt (read-only recon)'
+  authorized_only: true
+
+- id: rpcbind_triage
+  when: { surface: rpcbind }
+  class: traditional
+  likelihood: M
+  time_cost: low
+  emits:
+    - action: rpc_info
+  maps: [T1046]
+  points: 5
+  risk: read_only
+  routes: 'hacktricks . pentesting/pentesting-rpcbind'
+  source: 'technique: rpcinfo portmapper dump — reveals NFS/NIS/mountd behind 111'
+  authorized_only: true
+
+- id: nfs_triage
+  when: { surface: nfs }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: nfs_showmount
+    - action: nfs_mount          # GATED: mounting is an active change, not recon
+  maps: [T1039]
+  points: 15
+  risk: propose
+  routes: 'hacktricks . pentesting/nfs-service-pentesting'
+  source: 'technique: showmount -e exports (read-only) then no_root_squash mount (gated)'
+  authorized_only: true
+
+- id: msrpc_triage
+  when: { surface: msrpc }
+  class: traditional
+  likelihood: M
+  time_cost: low
+  emits:
+    - action: rpc_dump
+  maps: [T1046]
+  points: 5
+  risk: read_only
+  routes: 'hacktricks . pentesting/135-pentesting-msrpc'
+  source: 'technique: impacket rpcdump — enumerate the endpoint mapper interfaces'
+  authorized_only: true
+
+- id: telnet_triage
+  when: { surface: telnet }
+  class: traditional
+  likelihood: L
+  time_cost: low
+  emits:
+    - action: telnet_banner
+  maps: [T1046]
+  points: 5
+  risk: read_only
+  routes: 'hacktricks . pentesting/pentesting-telnet'
+  source: 'technique: telnet banner grab (device/OS fingerprint, default-cred hint)'
+  authorized_only: true
+
+- id: smtp_triage
+  when: { surface: smtp }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: smtp_enum_users     # VRFY/EXPN read-only user enumeration
+    - action: smtp_open_relay     # GATED: relaying mail is active abuse, not recon
+  maps: [T1087]
+  points: 10
+  risk: propose
+  routes: 'hacktricks . pentesting/pentesting-smtp'
+  source: 'technique: SMTP VRFY/EXPN user enum (read-only) then open-relay test (gated)'
+  authorized_only: true
+
+- id: mail_triage
+  when: { surface: imap }
+  class: traditional
+  likelihood: L
+  time_cost: low
+  emits:
+    - action: mail_banner
+  maps: [T1046]
+  points: 5
+  risk: read_only
+  routes: 'hacktricks . pentesting/pentesting-imap'
+  source: 'technique: IMAP/POP3 banner + CAPABILITY (auth methods, STARTTLS posture)'
+  authorized_only: true
+
+- id: vnc_triage
+  when: { surface: vnc }
+  class: traditional
+  likelihood: M
+  time_cost: low
+  emits:
+    - action: vnc_auth_check
+  maps: [T1021.005]
+  points: 15
+  risk: read_only
+  routes: 'hacktricks . pentesting/pentesting-vnc'
+  source: 'technique: VNC security-type probe — flags no-auth (type 1) screens'
+  authorized_only: true
+
+- id: ipmi_triage
+  when: { surface: ipmi }
+  class: traditional
+  likelihood: M
+  time_cost: low
+  emits:
+    - action: ipmi_dumphashes     # GATED: pulls crackable RAKP hashes
+  maps: [T1190]
+  points: 15
+  risk: propose
+  routes: 'hacktricks . pentesting/623-udp-ipmi'
+  source: 'technique: IPMI 2.0 RAKP hash retrieval (cipher-zero / dumphashes)'
+  authorized_only: true
+
+- id: printer_triage
+  when: { surface: printer }
+  class: traditional
+  likelihood: L
+  time_cost: low
+  emits:
+    - action: printer_default_login   # GATED: a login attempt, not recon
+  maps: [T1078.001]
+  points: 10
+  risk: propose
+  routes: 'hacktricks . pentesting/pentesting-printers'
+  source: 'technique: printer web/SNMP default creds + stored-credential disclosure (gated)'
+  authorized_only: true
+
+- id: esxi_triage
+  when: { surface: esxi }
+  class: traditional
+  likelihood: M
+  time_cost: low
+  emits:
+    - action: esxi_version
+  maps: [T1046]
+  points: 10
+  risk: read_only
+  routes: 'hacktricks . pentesting/pentesting-vmware-esxi'
+  source: 'technique: ESXi host-agent version fingerprint (CVE triage for the hypervisor)'
+  authorized_only: true

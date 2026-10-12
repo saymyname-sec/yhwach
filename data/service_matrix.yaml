@@ -317,3 +317,182 @@
 - {kind: activemq_openwire, aka: [openwire], tcp_ports: [61616], classify: [port], surface_kind: activemq_openwire, cve_products: [activemq], taxonomy: [T1190], enum_ref: "OpenWire transport — the CVE-2023-46604 unauth RCE path; version comes from 8161", service_enum: false}
 - {kind: amqp, aka: [rabbitmq, qpid], tcp_ports: [5672], classify: [port, product], surface_kind: amqp, default_creds: true, cve_products: [rabbitmq], taxonomy: [T1190], enum_ref: "guest:guest (local-only by default, but often exposed); queues carry app secrets", service_enum: false}
 - {kind: mqtt, aka: [mosquitto], tcp_ports: [1883, 8883], classify: [port, product], surface_kind: mqtt, default_creds: false, taxonomy: [T1190], enum_ref: "subscribe to # unauthenticated -> every topic; device creds and tokens cross the bus in clear", service_enum: false}
+
+# ---- I43 classic network services ------------------------------------------
+- kind: snmp
+  udp_ports: [161, 162]
+  classify: [port, product]
+  surface_kind: snmp
+  rules: [snmp_triage]
+  ref_pack: services
+  default_creds: false
+  cve_products: []
+  taxonomy: [T1046]
+  enum_ref: "snmpwalk public/private -> sysDescr, processes, routes, ARP"
+  service_enum: false
+- kind: dns
+  tcp_ports: [53]
+  udp_ports: [53]
+  classify: [port, product]
+  surface_kind: dns
+  rules: [dns_triage]
+  ref_pack: services
+  default_creds: false
+  cve_products: [bind, dnsmasq]
+  taxonomy: [T1590.002]
+  enum_ref: "version.bind + AXFR zone transfer (read-only recon)"
+  service_enum: false
+- kind: rpcbind
+  tcp_ports: [111]
+  classify: [port, product]
+  surface_kind: rpcbind
+  rules: [rpcbind_triage]
+  ref_pack: services
+  default_creds: false
+  cve_products: []
+  taxonomy: [T1046]
+  enum_ref: "rpcinfo -p -> NFS/NIS/mountd behind the portmapper"
+  service_enum: false
+- kind: nfs
+  tcp_ports: [2049]
+  classify: [port, product]
+  surface_kind: nfs
+  rules: [nfs_triage]
+  ref_pack: services
+  default_creds: false
+  cve_products: []
+  taxonomy: [T1039]
+  enum_ref: "showmount -e exports (read-only); no_root_squash mount is gated"
+  service_enum: false
+- kind: msrpc
+  tcp_ports: [135]
+  classify: [port, product]
+  surface_kind: msrpc
+  rules: [msrpc_triage]
+  ref_pack: services
+  default_creds: false
+  cve_products: []
+  taxonomy: [T1046]
+  enum_ref: "impacket rpcdump -> endpoint-mapper interfaces"
+  service_enum: false
+- kind: telnet
+  tcp_ports: [23]
+  classify: [port, product]
+  surface_kind: telnet
+  rules: [telnet_triage]
+  ref_pack: services
+  default_creds: true
+  cve_products: []
+  taxonomy: [T1046]
+  enum_ref: "banner grab -> device/OS fingerprint, default-cred hint"
+  service_enum: false
+- kind: smtp
+  tcp_ports: [25, 465, 587]
+  classify: [port, product]
+  surface_kind: smtp
+  rules: [smtp_triage]
+  ref_pack: services
+  default_creds: false
+  cve_products: [postfix, exim, sendmail]
+  taxonomy: [T1087]
+  enum_ref: "VRFY/EXPN user enum (read-only); open-relay test is gated"
+  service_enum: false
+- kind: imap
+  tcp_ports: [143, 993]
+  classify: [port, product]
+  surface_kind: imap
+  rules: [mail_triage]
+  ref_pack: services
+  default_creds: false
+  cve_products: [dovecot]
+  taxonomy: [T1046]
+  enum_ref: "banner + CAPABILITY -> auth methods, STARTTLS posture"
+  service_enum: false
+- kind: pop3
+  tcp_ports: [110, 995]
+  classify: [port, product]
+  surface_kind: pop3
+  rules: []
+  ref_pack: services
+  default_creds: false
+  cve_products: []
+  taxonomy: [T1046]
+  enum_ref: "banner + CAPA -> auth methods, STARTTLS posture"
+  service_enum: false
+- kind: vnc
+  tcp_ports: [5900, 5901, 5902, 5903]
+  classify: [port, product]
+  surface_kind: vnc
+  rules: [vnc_triage]
+  ref_pack: services
+  default_creds: false
+  cve_products: []
+  taxonomy: [T1021.005]
+  enum_ref: "VNC security-type probe -> flags no-auth (type 1) screens"
+  service_enum: false
+- kind: ipmi
+  udp_ports: [623]
+  classify: [port]
+  surface_kind: ipmi
+  rules: [ipmi_triage]
+  ref_pack: services
+  default_creds: true
+  cve_products: []
+  taxonomy: [T1190]
+  enum_ref: "IPMI 2.0 RAKP hash retrieval (gated); crack offline, never spray"
+  service_enum: false
+- kind: printer
+  tcp_ports: [515, 631, 9100]
+  classify: [port, product]
+  surface_kind: printer
+  rules: [printer_triage]
+  ref_pack: services
+  default_creds: true
+  cve_products: []
+  taxonomy: [T1078.001]
+  enum_ref: "web/SNMP default creds + stored scan-to-folder credential disclosure (gated)"
+  service_enum: false
+- kind: esxi
+  tcp_ports: [902]
+  classify: [port, product]
+  surface_kind: esxi
+  rules: [esxi_triage]
+  ref_pack: services
+  default_creds: false
+  cve_products: [vmware esxi]
+  taxonomy: [T1046]
+  enum_ref: "host-agent version fingerprint -> hypervisor CVE triage"
+  service_enum: false
+- kind: tftp
+  udp_ports: [69]
+  classify: [port]
+  surface_kind: tftp
+  rules: []
+  ref_pack: services
+  default_creds: false
+  cve_products: []
+  taxonomy: [T1046]
+  enum_ref: "unauth file read/write (config exfil) — try known filenames"
+  service_enum: false
+- kind: netbios
+  udp_ports: [137]
+  classify: [port]
+  surface_kind: netbios
+  rules: []
+  ref_pack: services
+  default_creds: false
+  cve_products: []
+  taxonomy: [T1046]
+  enum_ref: "nbtscan -> names/roles; a pre-SMB discovery signal"
+  service_enum: false
+- kind: ike
+  udp_ports: [500]
+  classify: [port]
+  surface_kind: ike
+  rules: []
+  ref_pack: services
+  default_creds: false
+  cve_products: []
+  taxonomy: [T1046]
+  enum_ref: "ike-scan -> VPN vendor/aggressive-mode PSK exposure"
+  service_enum: false

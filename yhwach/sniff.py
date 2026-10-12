@@ -22,6 +22,9 @@ _SIGNS: list[tuple[str, re.Pattern]] = [
     # bbot NDJSON events, then httpx JSONL (subfinder is too generic to sniff).
     ("bbot", re.compile(r'"type"\s*:\s*"(DNS_NAME|URL|OPEN_TCP_PORT|IP_ADDRESS)"')),
     ("httpx", re.compile(r'"webserver"\s*:|"cdn[_-]name"\s*:|"status[_-]code"\s*:.*"url"')),
+    # Burp "Save items" XML, then HAR 1.2 (both are web-capture metadata).
+    ("burp", re.compile(r"<items\b|<!DOCTYPE items|burpVersion", re.I)),
+    ("har", re.compile(r'"log"\s*:\s*\{[^}]*"entries"|"creator"\s*:\s*\{[^}]*"name"')),
     ("certipy", re.compile(r"Certipy|Certificate Templates|\bESC\d{1,2}\b")),
     ("bloodhound", re.compile(r'"ObjectIdentifier"|SharpHound|"PrincipalSID"|"meta"\s*:')),
     ("winpeas", re.compile(r"winpeas|Windows Local Privilege Escalation|AllowAutomaticUpdates|"

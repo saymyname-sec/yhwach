@@ -11,7 +11,7 @@
 >
 > Two ways to drive it, both on this box:
 > - **Autonomous:** `yhwach run --provider openai …` (the loop below). This is the default.
-> - **Manual (you drive):** the `yhwach` MCP tools / CLI, exactly as `docs/agent-mode.md` describes —
+> - **Manual (you drive):** the `yhwach` MCP tools / CLI, exactly as `agent-mode.md` (in this folder) describes —
 >   use it to take over a host, or to work a lead the loop parked.
 >
 > The engine, playbooks, arsenal and ref packs are the **same repo** as the Anthropic/Claude-Code

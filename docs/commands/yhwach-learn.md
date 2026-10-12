@@ -62,11 +62,11 @@ Likely **missing**, worth adding as rules+actions+tags:
 ## Also capture operator-usage lessons
 Where the vault shows the *operator* had to do something Yhwach should have driven or recorded
 (a cred not folded back, a note that was thin, a step Yhwach couldn't rank), improve
-`persona/operator.md`, `persona/notebook.md`, or `docs/agent-mode.md` — small, targeted edits.
+`persona/operator.md`, `persona/notebook.md`, or `docs/experimental/agent-mode.md` — small, targeted edits.
 
 ## Finish
 - Add a **calibration fixture** reconstructing a completed engagement's world model + `expected` top moves
-  (`tests/fixtures/labs/<lab>/…`) so `yhwach selftest` locks the real kill-path ranking.
+  (`tests/fixtures/labs/<lab>/…`) so the recall-menu regression tests lock the real kill-path techniques.
 - Print a summary table: chain → finding → Yhwach artifact(s) added → test. Confirm suite green.
 
 Constraints: every new rule `authorized_only: true`; no real creds/hostnames from the vault in

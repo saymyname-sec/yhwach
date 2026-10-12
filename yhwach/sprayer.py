@@ -226,8 +226,15 @@ def _candidate_creds(
          "WHERE engagement_id = ? AND COALESCE(provenance,'discovered') != 'provided'")
     params: list = [engagement_id]
     if cred_id is not None:
+        # An explicitly named cred may be sprayed even if spray_policy='manual'
+        # (the operator chose it deliberately); the sweep below never includes one.
         q += " AND id = ?"
         params.append(cred_id)
+    else:
+        # Dumped hashes / cracked passwords (spray_policy='manual') are excluded
+        # from the broad sweep — spraying a dumped domain hash estate-wide is the
+        # loud, lockout-risking move this guard exists to prevent (G2c).
+        q += " AND COALESCE(spray_policy,'auto') != 'manual'"
     rows = conn.execute(q, params).fetchall()
     if protocol is None:
         # Any cred whose kind is in the matcher (kerberos/dpapi filtered out).

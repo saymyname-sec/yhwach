@@ -30,7 +30,7 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Bumped when the additive self-heal below gains a column/table. Stamped into
 # PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
 # NULL) has a version anchor to branch on. The additive path stays idempotent.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
@@ -64,6 +64,9 @@ _ADDED_COLUMNS = [
     ("finding", "group_key", "TEXT"),
     ("finding", "curated", "INTEGER NOT NULL DEFAULT 0"),
     ("finding", "author", "TEXT"),
+    # schema v5 — dumped hashes / cracked passwords are kept but NEVER auto-sprayed
+    # (spraying a dumped domain hash across the estate is the loud, dangerous move).
+    ("credential", "spray_policy", "TEXT"),
 ]
 
 # A finding is LIVE (feeds recall, the brief, the register) in these states;
@@ -1040,6 +1043,8 @@ def add_credential(
     source: str,
     source_host_id: int | None = None,
     provenance: str | None = None,
+    principal_id: int | None = None,
+    spray_policy: str | None = None,
 ) -> tuple[int, bool]:
     """Add/update a credential (deduped by engagement+identifier+kind).
 
@@ -1070,8 +1075,11 @@ def add_credential(
         conn.execute(
             "UPDATE credential SET secret = COALESCE(?, secret), source = ?, "
             "source_host_id = COALESCE(source_host_id, ?), "
-            "provenance = COALESCE(?, provenance) WHERE id = ?",
-            (secret, merged_source, source_host_id, prov, existing["id"]),
+            "provenance = COALESCE(?, provenance), "
+            "principal_id = COALESCE(principal_id, ?), "
+            "spray_policy = COALESCE(?, spray_policy) WHERE id = ?",
+            (secret, merged_source, source_host_id, prov, principal_id,
+             spray_policy, existing["id"]),
         )
         # If the secret actually changed, the cached 'fail' rows were for the
         # OLD secret — drop them so a password-spray with a new candidate
@@ -1084,9 +1092,10 @@ def add_credential(
         return int(existing["id"]), False
     cur = conn.execute(
         "INSERT INTO credential (engagement_id, identifier, secret, kind, source, "
-        "source_host_id, discovered_at, provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "source_host_id, discovered_at, provenance, principal_id, spray_policy) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (engagement_id, identifier, secret, kind, source, source_host_id,
-         _now_utc(), provenance),
+         _now_utc(), provenance, principal_id, spray_policy),
     )
     return int(cur.lastrowid), True
 

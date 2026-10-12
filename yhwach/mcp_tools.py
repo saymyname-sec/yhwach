@@ -2143,6 +2143,46 @@ def tool_own(db_path: Path | str, lab: str, host: str | None = None,
         return "; ".join(out)
 
 
+def tool_payload(db_path: Path | str, lab: str, payload: str | None = None,
+                 response: str | None = None, surface: str | None = None,
+                 host: str | None = None, verdict: str | None = None,
+                 set_id: int | None = None, canary: bool = False) -> str:
+    """The injection payload/response/verdict ledger (I53). With `payload`, record
+    a test (+ optional `response`); a heuristic suggests a verdict but the stored
+    verdict stays 'unclear' until you confirm it — the regex is never the fact of
+    record. `set_id`+`verdict` records your verdict. `canary=True` returns this
+    engagement's neutral canary to seed indirect-injection payloads. No arg lists.
+    """
+    from yhwach import payloads as plmod
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        if canary:
+            return f"engagement canary: {yhdb.engagement_canary(conn, eid)}"
+        if set_id is not None:
+            if not verdict:
+                return "pass verdict= (success|refused|blocked|unclear) with set_id"
+            try:
+                yhdb.set_payload_verdict(conn, int(set_id), verdict)
+            except ValueError as e:
+                return f"[!] {e}"
+            return f"payload #{set_id} verdict -> {verdict}"
+        if payload:
+            can = yhdb.engagement_canary(conn, eid)
+            auto = plmod.classify_payload_response(payload, response, canary=can)
+            hid = _host_id_for(conn, eid, host)
+            pid = yhdb.add_payload(conn, eid, payload=payload, response=response,
+                                   surface=surface, host_id=hid, canary=can,
+                                   auto_verdict=auto, verdict="unclear")
+            return (f"payload #{pid} recorded. heuristic suggests '{auto}' (advisory) — "
+                    f"confirm with yhwach_payload(set_id={pid}, verdict=...).")
+        rows = yhdb.list_payloads(conn, eid, limit=50)
+        out = [f"#{r['id']} [{r['verdict']}" + (f"/auto:{r['auto_verdict']}"
+               if r["auto_verdict"] and r["auto_verdict"] != r["verdict"] else "")
+               + f"] {(r['surface'] or '')} {r['payload'][:60]}" for r in rows]
+        return "\n".join(out) or "(no payloads recorded)"
+
+
 def tool_reuse(db_path: Path | str, lab: str) -> str:
     """Derive credential-reuse attack-graph edges from dumped hashes and validated
     access (G2e): CredValidOn (a proven cred links its principal to the host),
@@ -2418,6 +2458,11 @@ TOOL_SPECS = [
      "Bounty submission memory. endpoint/finding/program records a submission and returns a "
      "duplicate-risk advisory (same endpoint+param, or same class program-wide); otherwise "
      "lists. Advisory only — never changes a finding's status or recall order."),
+    ("yhwach_payload", tool_payload,
+     "Injection payload/response/verdict ledger. payload= records a test (a "
+     "heuristic suggests success|refused|unclear, advisory only — verdict stays "
+     "'unclear' until you confirm via set_id+verdict). canary=true returns the "
+     "engagement's neutral canary for indirect-injection payloads. No arg lists."),
     ("yhwach_reuse", tool_reuse,
      "Derive credential-reuse attack-graph edges from dumped hashes + validated access "
      "(CredValidOn, LocalAdminReuse as a star, SameHash). Idempotent; run after spraying "

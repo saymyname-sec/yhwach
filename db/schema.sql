@@ -819,3 +819,26 @@ CREATE TABLE IF NOT EXISTS ai_data_source (
     UNIQUE(engagement_id, surface_id, name)
 );
 CREATE INDEX IF NOT EXISTS idx_ai_data_source_eng ON ai_data_source(engagement_id);
+
+-- schema v12 (I54) — indirect-injection plant tracker. A plant is an injection
+-- left in a writable source (a RAG doc, a profile field, a filename); it fires
+-- elsewhere, later. Each plant carries a NEUTRAL canary so a sighting is
+-- attributable. Outstanding (not-removed) plants are a cleanup obligation.
+CREATE TABLE IF NOT EXISTS plant (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    location      TEXT NOT NULL,     -- where it was planted (source/URL/field)
+    payload       TEXT NOT NULL,
+    canary        TEXT NOT NULL,     -- neutral marker, no tool fingerprint
+    kind          TEXT,              -- rag|profile|filename|ticket|email|...
+    planted_at    TEXT NOT NULL,
+    removed_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_plant_eng ON plant(engagement_id);
+CREATE TABLE IF NOT EXISTS plant_sighting (
+    id        INTEGER PRIMARY KEY,
+    plant_id  INTEGER NOT NULL REFERENCES plant(id),
+    context   TEXT,                  -- where/how the canary was observed firing
+    at        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_plant_sighting_plant ON plant_sighting(plant_id);

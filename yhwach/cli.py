@@ -331,6 +331,25 @@ def reuse(lab: str, db_path: str | None) -> None:
     click.echo(tool_reuse(_db_path(db_path), lab))
 
 
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--location", default=None, help="Where the plant goes (with --payload).")
+@click.option("--payload", "payload", default=None, help="The injection text.")
+@click.option("--kind", default=None, help="rag|profile|filename|ticket|email|...")
+@click.option("--sight", default=None, type=int, help="Plant id to record a sighting for.")
+@click.option("--context", default=None, help="Where/how the canary fired (with --sight).")
+@click.option("--remove", default=None, type=int, help="Plant id to mark removed.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def plant(lab: str, location: str | None, payload: str | None, kind: str | None,
+          sight: int | None, context: str | None, remove: int | None,
+          db_path: str | None) -> None:
+    """Track indirect-injection plants / sightings / cleanup (I54)."""
+    from yhwach.mcp_tools import tool_plant
+
+    click.echo(tool_plant(_db_path(db_path), lab, location=location, payload=payload,
+                          kind=kind, sight=sight, context=context, remove=remove))
+
+
 @main.command(name="ai-tool")
 @click.option("--lab", required=True, help="Lab name.")
 @click.option("--name", default=None, help="Agent tool name; omit to list.")

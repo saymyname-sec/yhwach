@@ -2189,6 +2189,38 @@ def tool_own(db_path: Path | str, lab: str, host: str | None = None,
         return "; ".join(out)
 
 
+def tool_plant(db_path: Path | str, lab: str, location: str | None = None,
+               payload: str | None = None, kind: str | None = None,
+               sight: int | None = None, context: str | None = None,
+               remove: int | None = None) -> str:
+    """Indirect-injection plant tracker (I54). With location+payload, record a
+    plant and get a NEUTRAL canary to embed. sight=<id> records a sighting (the
+    canary fired somewhere). remove=<id> marks it cleaned up. No arg lists, with
+    the outstanding cleanup checklist. A plant left in client data blocks a clean
+    close.
+    """
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        if sight is not None:
+            yhdb.add_plant_sighting(conn, int(sight), context=context)
+            return f"sighting recorded for plant #{sight}"
+        if remove is not None:
+            yhdb.set_plant_removed(conn, int(remove))
+            return f"plant #{remove} marked removed"
+        if location and payload:
+            pid, canary = yhdb.add_plant(conn, eid, location=location, payload=payload, kind=kind)
+            return (f"plant #{pid} at {location} — embed this neutral canary so a sighting "
+                    f"attributes back: {canary}")
+        rows = yhdb.list_plants(conn, eid)
+        out = [f"#{r['id']} [{'removed' if r['removed_at'] else 'LIVE'}] {r['kind'] or ''} "
+               f"@ {r['location']} · {r['sightings']} sighting(s) · canary {r['canary']}"
+               for r in rows] or ["(no plants recorded)"]
+        live = yhdb.outstanding_plants(conn, eid)
+        if live:
+            out.append(f"⚠ CLEANUP: {len(live)} plant(s) still live — remove before close.")
+        return "\n".join(out)
+
+
 def tool_ai_tool(db_path: Path | str, lab: str, name: str | None = None,
                  description: str | None = None, host: str | None = None,
                  sink: str | None = None) -> str:
@@ -2565,6 +2597,11 @@ TOOL_SPECS = [
      "Bounty submission memory. endpoint/finding/program records a submission and returns a "
      "duplicate-risk advisory (same endpoint+param, or same class program-wide); otherwise "
      "lists. Advisory only — never changes a finding's status or recall order."),
+    ("yhwach_plant", tool_plant,
+     "Indirect-injection plant tracker. location+payload records a plant and "
+     "returns a NEUTRAL canary to embed; sight=<id> records the canary firing; "
+     "remove=<id> marks cleanup. No arg lists + the cleanup checklist. A live "
+     "plant in client data blocks a clean close."),
     ("yhwach_ai_tool", tool_ai_tool,
      "Record an agent tool exposed by an AI surface. Its sink (shell/code/sql/"
      "email/http/file) is classified from name/description; a dangerous sink "

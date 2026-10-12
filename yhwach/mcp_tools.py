@@ -785,7 +785,8 @@ def tool_probe(db_path: Path | str, lab: str, host: str | None = None,
                 )
                 if ai:
                     hits.append(ai)
-            trad = detect_traditional(session, s["ip"], s["port"], s["product"], timeout=timeout)
+            trad = detect_traditional(session, s["ip"], s["port"], s["product"],
+                                     proto=s.get("proto", "tcp"), timeout=timeout)
             # The traditional detector is a probe run too: without a row, a
             # service with no surface might have been swept and matched nothing,
             # or never been touched at all.

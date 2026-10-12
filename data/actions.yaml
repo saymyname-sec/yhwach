@@ -134,3 +134,58 @@ webapp_setup_probe:
   cmd: "curl -s --max-time 8 http://{host}:{port}/api/session/properties"
   parses_as: webapp_setup_probe
   risk: read_only
+
+# --- I43 classic network services — triage commands -----------------------------
+snmp_walk:
+  cmd: "snmpwalk -v2c -c public {host}"
+  risk: read_only
+  note: "try community strings public/private; -v1 if v2c refused"
+dns_version:
+  cmd: "dig +short chaos txt version.bind @{host}"
+  risk: read_only
+dns_axfr:
+  cmd: "dig AXFR @{host}"
+  risk: read_only
+  note: "append the zone/domain; AXFR is read-only recon"
+rpc_info:
+  cmd: "rpcinfo -p {host}"
+  risk: read_only
+rpc_dump:
+  cmd: "impacket-rpcdump {host}"
+  risk: read_only
+nfs_showmount:
+  cmd: "showmount -e {host}"
+  risk: read_only
+nfs_mount:
+  cmd: "mount -t nfs {host}:/EXPORT /mnt/nfs -o nolock,vers=3"
+  risk: exploit
+  note: "GATED: mounting is an active change; confirm scope + cleanup ledger"
+telnet_banner:
+  cmd: "nc -nv -w3 {host} {port}"
+  risk: read_only
+smtp_enum_users:
+  cmd: "smtp-user-enum -M VRFY -U users.txt -t {host}"
+  risk: read_only
+  note: "VRFY/EXPN user enumeration; falls back to RCPT if VRFY disabled"
+smtp_open_relay:
+  cmd: "swaks --server {host} --to ext@example.com --from spoof@{host}"
+  risk: propose
+  note: "GATED: an open-relay test sends mail; get explicit go-ahead"
+mail_banner:
+  cmd: "nc -nv -w3 {host} {port}"
+  risk: read_only
+vnc_auth_check:
+  cmd: "nmap --script vnc-info -p {port} {host}"
+  risk: read_only
+  note: "flags security-type 1 (no auth) screens"
+ipmi_dumphashes:
+  cmd: "nmap -sU -p 623 --script ipmi-dumphashes {host}"
+  risk: propose
+  note: "GATED: pulls crackable RAKP hashes; crack offline, never spray"
+printer_default_login:
+  cmd: "nmap --script 'snmp-info or http-default-accounts' {host}"
+  risk: propose
+  note: "GATED: a login attempt; printers store domain creds for scan-to-folder"
+esxi_version:
+  cmd: "nmap --script vmware-version -p {port} {host}"
+  risk: read_only

@@ -826,6 +826,42 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
                      if cres.findings else "")
             return (f"{kind}: {len(cres.findings)} finding(s), {len(cres.facts)} fact(s).{tnote}")
 
+        # trivy -> vuln/software on a host; prowler FAILs -> attack-relevant
+        # cloud findings (engagement-level). Compliance-matrix rows are dropped.
+        if kind in ("trivy", "prowler"):
+            from yhwach.parsers.cloudposture import parse_prowler, parse_trivy
+
+            body = Path(file).read_text(encoding="utf-8", errors="replace")
+            if kind == "trivy":
+                if not host:
+                    raise ValueError("kind=trivy needs a host (the node/image's host)")
+                hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                                    (eid, host)).fetchone()
+                if hrow is None:
+                    raise ValueError(f"host {host} not found — ingest a scan first")
+                hid = int(hrow["id"])
+                n = 0
+                for v in parse_trivy(body):
+                    yhdb.add_vulnerability(
+                        conn, eid, hid, v.cve, title=v.title[:200],
+                        state="confirmed", source="trivy",
+                        plugin_id=f"trivy:{v.pkg}:{v.cve}",
+                        solution=(f"upgrade {v.pkg} to {v.fixed}" if v.fixed else None),
+                        exploit_available=False)
+                    n += 1
+                yhdb.log_event(conn, eid, "ingest", {"kind": "trivy", "vulns": n})
+                return f"trivy: {n} vulnerability row(s) on {host}."
+            findings = parse_prowler(body)
+            for f in findings:
+                yhdb.add_finding(conn, None, None, "cloud-posture",
+                                 f"{f.title}" + (f" ({f.resource})" if f.resource else ""),
+                                 f.severity, f"{f.check_id} [{f.service}]", tag=f.tag,
+                                 location=f.resource or None, engagement_id=eid)
+            yhdb.log_event(conn, eid, "ingest", {"kind": "prowler", "findings": len(findings)})
+            tnote = (" tags: " + ", ".join(sorted({f.tag for f in findings}))) if findings else ""
+            return (f"prowler: {len(findings)} attack-relevant FAIL(s) recorded "
+                    f"(compliance noise dropped).{tnote}")
+
         valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
         if kind not in valid:
             raise ValueError(f"unknown kind '{kind}' (use nmap|{'|'.join(valid)})")
@@ -1722,7 +1758,8 @@ def _candidate_ids(db_path: Path | str, lab: str, host: str | None) -> set[str]:
 
 _INTERPRET_PARSERS = ("nmap", "netexec", "bloodhound", "certipy", "linpeas", "winpeas",
                       "web", "secretsdump", "potfile", "nessus", "openvas", "nuclei",
-                      "httpx", "subfinder", "bbot", "burp", "har", "kubectl", "aws")
+                      "httpx", "subfinder", "bbot", "burp", "har", "kubectl", "aws",
+                      "trivy", "prowler")
 
 
 def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
@@ -2291,7 +2328,7 @@ TOOL_SPECS = [
      "add_cred autospray). ~5 candidates per known pattern, not a wordlist. "
      "targets? = comma-separated usernames to generate FOR (default: common svc accounts)."),
     ("yhwach_ingest", tool_ingest,
-     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|httpx|subfinder|bbot|burp|har|kubectl|aws|linpeas|winpeas|"
+     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|httpx|subfinder|bbot|burp|har|kubectl|aws|trivy|prowler|linpeas|winpeas|"
      "bloodhound|certipy|netexec|web). nmap adds software+CPE; bloodhound builds the "
      "principal/privilege/edge graph; netexec adds SMB shares/users/admin/policy; web "
      "adds web_app+paths (needs url). Host-scoped kinds need a host and set chaining tags."),

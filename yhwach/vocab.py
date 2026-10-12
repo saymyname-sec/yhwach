@@ -107,6 +107,7 @@ VOCAB: dict[str, tuple[str, str]] = {
     "endpoint": ("the affected endpoint/path", '"/api/users/{id}"'),
     "param": ("the affected parameter", '"id"'),
     "remove": ("artifact id to mark confirmed removed", "3"),
+    "principal": ("an account/group name", '"svc_backup"'),
 }
 
 

@@ -1,11 +1,10 @@
 """UI: the yhwach live board — a pure read view over the memory DB.
 
-A dashboard showing what the agent/workers are doing: the pivot tree, the gaze
-(live worker heartbeats), the credential vault, hosts/tags/findings and the
-attack path. It talks to the world model **read-only** — no control surface, so
-a crashed or hostile UI can't corrupt a run (drive the engagement from the
-CLI/MCP). The kill-switch/approval-inbox were removed; gating still lives in
-`yhwach.control` for the CLI path.
+A dashboard over the engagement memory: the pivot tree, the credential vault,
+hosts/tags/findings and the attack path. It talks to the world model
+**read-only** — no control surface, so a crashed or hostile UI can't corrupt the
+memory (drive the engagement from the CLI/MCP). The kill-switch/approval-inbox
+were removed along with the self-driving runtime.
 
 Design: a self-contained dark console styled after Yhwach's "The Almighty" — a
 black, many-eyed oracle in a magenta reishi storm (void black + Almighty magenta

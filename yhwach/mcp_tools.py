@@ -539,6 +539,54 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
                 except Exception as exc:  # noqa: BLE001
                     spray_note = f"; autospray error: {type(exc).__name__}"
             return f"nmap ingested: {h} hosts, {s} services; coverage {cov}{tail}{spray_note}"
+
+        # Dumped secrets are domain-wide, not host-bound, and land in the vault
+        # flagged spray_policy='manual' so they are NEVER auto-sprayed (G2c).
+        if kind == "secretsdump":
+            from yhwach.parsers.secrets import parse_secretsdump
+
+            creds = parse_secretsdump(Path(file).read_text(encoding="utf-8", errors="replace"))
+            src_host = _host_id_for(conn, eid, host)
+            new = machines = empties = 0
+            for c in creds:
+                machines += c.is_machine
+                empties += c.empty_password
+                prow = conn.execute(
+                    "SELECT id FROM principal WHERE engagement_id=? AND lower(name)=lower(?) "
+                    "LIMIT 1", (eid, c.identifier)).fetchone()
+                _cid, created = yhdb.add_credential(
+                    conn, eid, c.identifier, c.nt_hash, "ntlm", "secretsdump",
+                    source_host_id=src_host, provenance="discovered",
+                    principal_id=int(prow["id"]) if prow else None, spray_policy="manual")
+                new += created
+            yhdb.log_event(conn, eid, "ingest",
+                           {"kind": "secretsdump", "hashes": len(creds), "new": new})
+            return (f"secretsdump: {len(creds)} NT hash(es) ({machines} machine, "
+                    f"{empties} empty-password), {new} new. spray_policy=manual — never "
+                    f"auto-sprayed; crack offline, then ingest the potfile.")
+
+        if kind == "potfile":
+            from yhwach.parsers.secrets import parse_potfile
+
+            cracked = parse_potfile(Path(file).read_text(encoding="utf-8", errors="replace"))
+            promoted = unmatched = 0
+            for ch in cracked:
+                rows = conn.execute(
+                    "SELECT identifier, principal_id FROM credential WHERE engagement_id=? "
+                    "AND kind='ntlm' AND lower(secret)=?", (eid, ch.nt_hash)).fetchall()
+                if not rows:
+                    unmatched += 1
+                for r in rows:
+                    yhdb.add_credential(
+                        conn, eid, r["identifier"], ch.plaintext, "password", "cracked",
+                        provenance="discovered", principal_id=r["principal_id"],
+                        spray_policy="manual")
+                    promoted += 1
+            yhdb.log_event(conn, eid, "ingest",
+                           {"kind": "potfile", "cracked": len(cracked), "promoted": promoted})
+            return (f"potfile: {len(cracked)} cracked hash(es), {promoted} promoted to "
+                    f"plaintext ({unmatched} not matching a dumped hash). spray_policy=manual.")
+
         valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
         if kind not in valid:
             raise ValueError(f"unknown kind '{kind}' (use nmap|{'|'.join(valid)})")
@@ -1430,7 +1478,8 @@ def _candidate_ids(db_path: Path | str, lab: str, host: str | None) -> set[str]:
         return set()
 
 
-_INTERPRET_PARSERS = ("nmap", "netexec", "bloodhound", "certipy", "linpeas", "winpeas", "web")
+_INTERPRET_PARSERS = ("nmap", "netexec", "bloodhound", "certipy", "linpeas", "winpeas",
+                      "web", "secretsdump", "potfile")
 
 
 def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
@@ -1438,8 +1487,8 @@ def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
                    title: str | None = None, dry_run: bool = False) -> str:
     """Turn pasted tool output into typed rows — the single text entry point.
 
-    `kind='auto'` sniffs the output (nmap, netexec, bloodhound, certipy, linpeas,
-    winpeas, web) and ingests it the same way `yhwach_ingest` would, but from
+    `kind='auto'` sniffs the output (nmap, netexec, secretsdump, potfile, bloodhound,
+    certipy, linpeas, winpeas, web) and ingests it the same way `yhwach_ingest` would, but from
     text you paste rather than a file on the server. Name `kind='x:<action_id>'`
     to run one of the deterministic interpret extractors on the text. Anything
     unrecognised is stored as loot plus an INFO finding so nothing is lost.
@@ -1856,7 +1905,7 @@ TOOL_SPECS = [
      "are cached in credential_access; force=True re-attempts. Uses nxc / curl; "
      "domain and local-auth are tried automatically on SMB/WinRM/MSSQL."),
     ("yhwach_interpret", tool_interpret,
-     "Turn pasted tool output into typed rows (auto-sniffs nmap/netexec/bloodhound/"
+     "Turn pasted tool output into typed rows (auto-sniffs nmap/netexec/secretsdump/potfile/bloodhound/"
      "certipy/linpeas/winpeas/web; kind='x:<action_id>' runs an extractor; else loot+INFO). "
      "Names which recall rules the new facts unlocked. dry_run classifies without writing."),
     ("yhwach_query", tool_query,
@@ -1884,7 +1933,7 @@ TOOL_SPECS = [
      "add_cred autospray). ~5 candidates per known pattern, not a wordlist. "
      "targets? = comma-separated usernames to generate FOR (default: common svc accounts)."),
     ("yhwach_ingest", tool_ingest,
-     "Ingest a tool-output file into the world model (kind=nmap|linpeas|winpeas|"
+     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|linpeas|winpeas|"
      "bloodhound|certipy|netexec|web). nmap adds software+CPE; bloodhound builds the "
      "principal/privilege/edge graph; netexec adds SMB shares/users/admin/policy; web "
      "adds web_app+paths (needs url). Host-scoped kinds need a host and set chaining tags."),

@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS credential (
     principal_id        INTEGER REFERENCES principal(id),  -- realm-aware link to the identity graph
     discovered_at       TEXT    NOT NULL,
     provenance          TEXT,              -- provided | discovered | derived | guess (NULL=discovered)
+    spray_policy        TEXT,              -- auto (NULL) | manual (dumped hashes/cracked pw — never auto-sprayed)
     UNIQUE(engagement_id, identifier, kind)
 );
 

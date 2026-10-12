@@ -121,9 +121,15 @@ def tool_status(db_path: Path | str, lab: str) -> str:
         svc = conn.execute(
             "SELECT COUNT(*) n FROM service s JOIN host h ON h.id=s.host_id WHERE h.engagement_id=?",
             (eid,)).fetchone()["n"]
+        reach = dict(conn.execute(
+            "SELECT COALESCE(alive,'unseen') a, COUNT(*) n FROM host WHERE engagement_id=? "
+            "GROUP BY COALESCE(alive,'unseen')", (eid,)).fetchall())
         vault_rows = yhdb.list_credentials(conn, eid)
     lines = [f"Engagement '{lab}':"]
     lines += [f"  {r['stage']}: {r['n']}" for r in stages] or ["  (no hosts)"]
+    if reach:
+        lines.append("  reach: " + ", ".join(
+            f"{k}={reach[k]}" for k in ("alive", "unanswered", "unseen") if reach.get(k)))
     lines.append(f"  services={svc}  vault={len(vault_rows)}")
     if vault_rows:
         # Compact vault preview — identifier(kind); full secrets via yhwach_creds.
@@ -506,8 +512,17 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             meta = parse_scan_meta(nmap_text)
             parsed = parse_nmap(nmap_text)
             h, s = insert_hosts(conn, eid, parsed, meta)
+            # An out-of-band full-range TCP pass (-p-) settles the scan debt for
+            # the hosts it covered. UDP is additive and never clears it. (The
+            # scanner clears its own quick/full runs by mode; this is for files
+            # the operator ingests by hand.)
+            if any(c.full_range and c.proto == "tcp" for c in meta.coverage):
+                for ph in parsed:
+                    conn.execute("UPDATE host SET scan_needed = 0 "
+                                 "WHERE engagement_id = ? AND ip = ?", (eid, ph.ip))
             yhdb.log_event(conn, eid, "ingest", {"kind": "nmap", "hosts": h, "services": s})
-            cov = "; ".join(f"{c.proto} {c.ports}" for c in meta.coverage) or "unknown"
+            cov = ("ping sweep (no ports scanned)" if meta.ping_only
+                   else "; ".join(f"{c.proto} {c.ports}" for c in meta.coverage) or "unknown")
             gaps = enum_gaps(conn, eid)
             tail = f"; {len(gaps)} host(s) under-enumerated (yhwach_gaps)" if gaps else ""
             # Auto-spray hook: for each host that just got new services, try

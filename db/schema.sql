@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS host (
     tags              TEXT,                  -- comma-separated: dev_artifact, high_ev, ai_host, ...
     discovery_source  TEXT,                  -- schema v2: scope|nmap|finding|cred|cert_san|operator (see yhwach.discovery)
     scan_needed       INTEGER DEFAULT 1,     -- schema v2: 1 = host still owes a full-port + -sV pass
+    alive             TEXT,                  -- schema v6: alive | unanswered | unseen (NULL=unseen); a ping miss is NOT dead
     first_seen        TEXT    NOT NULL,
     last_updated      TEXT,
     UNIQUE(engagement_id, ip)

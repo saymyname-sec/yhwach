@@ -45,8 +45,8 @@ _H = "host h"
 VIEWS: dict[str, View] = {
     "hosts": View(
         _H, {"id": "h.id", "ip": "h.ip", "hostname": "h.hostname", "os": "h.os",
-             "stage": "h.stage", "tags": "h.tags", "scan_needed": "h.scan_needed",
-             "discovery_source": "h.discovery_source"},
+             "stage": "h.stage", "alive": "COALESCE(h.alive,'unseen')", "tags": "h.tags",
+             "scan_needed": "h.scan_needed", "discovery_source": "h.discovery_source"},
         "h.engagement_id = ?", "h.ip", ["h.ip", "h.hostname"]),
     "services": View(
         "service s JOIN host h ON h.id = s.host_id",

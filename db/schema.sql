@@ -857,3 +857,20 @@ CREATE TABLE IF NOT EXISTS host_fact (
     UNIQUE(host_id, key)
 );
 CREATE INDEX IF NOT EXISTS idx_host_fact_host ON host_fact(host_id);
+
+-- schema v14 (I24) — the role-by-endpoint authorization matrix from captured
+-- traffic. One row per (session, templated endpoint, method); a 2xx ever seen
+-- means that role reached it. A cell with no row is UNOBSERVED, which is NOT the
+-- same as denied. Requests with no identifiable session go to the 'unassigned'
+-- session bucket.
+CREATE TABLE IF NOT EXISTS authz (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    session       TEXT NOT NULL,     -- role fingerprint (or 'unassigned')
+    endpoint      TEXT NOT NULL,     -- templated path ({id})
+    method        TEXT NOT NULL,
+    status        INTEGER,
+    at            TEXT NOT NULL,
+    UNIQUE(engagement_id, session, endpoint, method)
+);
+CREATE INDEX IF NOT EXISTS idx_authz_eng ON authz(engagement_id);

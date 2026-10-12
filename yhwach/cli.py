@@ -352,6 +352,16 @@ def plant(lab: str, location: str | None, payload: str | None, kind: str | None,
 
 @main.command()
 @click.option("--lab", required=True, help="Lab name.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def authz(lab: str, db_path: str | None) -> None:
+    """Role-by-endpoint authorization matrix from captured traffic (I24)."""
+    from yhwach.mcp_tools import tool_authz
+
+    click.echo(tool_authz(_db_path(db_path), lab))
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
 @click.option("--host", required=True, help="Host IP to evaluate.")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
 def methodology(lab: str, host: str, db_path: str | None) -> None:

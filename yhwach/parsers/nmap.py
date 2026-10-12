@@ -271,11 +271,61 @@ def _cert_names(host_elem) -> list[str]:
 
 
 def parse_nmap(text: str, *, include_open_filtered: bool = False) -> list[ParsedHost]:
-    """Auto-detect XML (`-oX`) vs normal (`-oN`) nmap output and parse either."""
+    """Auto-detect the format and parse: XML (-oX), greppable (-oG), masscan
+    (list / "Discovered open port"), else normal (-oN)."""
     head = text.lstrip()[:256].lower()
     if head.startswith("<?xml") or "<nmaprun" in head:
         return parse_nmap_xml_text(text, include_open_filtered=include_open_filtered)
+    if "discovered open port" in text.lower() or re.search(r"^open\s+\w+\s+\d+\s+\d", text, re.M):
+        return _parse_masscan(text)
+    if re.search(r"^Host:\s*\S+.*\bPorts:", text, re.M):
+        return _parse_greppable(text)
     return parse_nmap_normal(text, include_open_filtered=include_open_filtered)
+
+
+_GREP_HOST = re.compile(r"^Host:\s*(?P<ip>\d{1,3}(?:\.\d{1,3}){3})\s*\((?P<name>[^)]*)\)")
+_MASSCAN_DISC = re.compile(r"Discovered open port (?P<port>\d+)/(?P<proto>\w+) on "
+                           r"(?P<ip>\d{1,3}(?:\.\d{1,3}){3})", re.I)
+_MASSCAN_LIST = re.compile(r"^open\s+(?P<proto>\w+)\s+(?P<port>\d+)\s+"
+                           r"(?P<ip>\d{1,3}(?:\.\d{1,3}){3})", re.M)
+
+
+def _parse_greppable(text: str) -> list[ParsedHost]:
+    """nmap -oG: `Host: <ip> (<name>)\\tPorts: 22/open/tcp//ssh//OpenSSH//, ...`."""
+    hosts: dict[str, ParsedHost] = {}
+    for line in text.splitlines():
+        hm = _GREP_HOST.match(line.strip())
+        if not hm:
+            continue
+        ip = hm.group("ip")
+        h = hosts.setdefault(ip, ParsedHost(ip=ip, hostname=(hm.group("name") or None) or None))
+        pm = re.search(r"\bPorts:\s*(?P<ports>.+?)(?:\tIgnored|\Z)", line)
+        if not pm:
+            continue
+        for spec in pm.group("ports").split(","):
+            f = spec.strip().split("/")
+            if len(f) < 3 or f[1] != "open":
+                continue
+            port = int(f[0]) if f[0].isdigit() else None
+            if port is None:
+                continue
+            product = (f[6].strip() if len(f) > 6 and f[6].strip() else None)
+            h.services.append(ParsedService(port=port, proto=f[2] or "tcp",
+                                             product=(f[4].strip() or None) if len(f) > 4 else None,
+                                             version=product))
+    return list(hosts.values())
+
+
+def _parse_masscan(text: str) -> list[ParsedHost]:
+    """masscan `Discovered open port N/proto on IP` or list `open proto N IP ts`."""
+    hosts: dict[str, ParsedHost] = {}
+    for m in list(_MASSCAN_DISC.finditer(text)) + list(_MASSCAN_LIST.finditer(text)):
+        ip = m.group("ip")
+        h = hosts.setdefault(ip, ParsedHost(ip=ip))
+        port = int(m.group("port"))
+        if not any(s.port == port and s.proto == m.group("proto") for s in h.services):
+            h.services.append(ParsedService(port=port, proto=m.group("proto")))
+    return list(hosts.values())
 
 
 def _parse_root(root, *, include_open_filtered: bool = False) -> list[ParsedHost]:

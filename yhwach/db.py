@@ -30,7 +30,7 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Bumped when the additive self-heal below gains a column/table. Stamped into
 # PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
 # NULL) has a version anchor to branch on. The additive path stays idempotent.
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
@@ -70,6 +70,12 @@ _ADDED_COLUMNS = [
     # schema v6 — reachability tri-state. A ping miss is 'unanswered', never 'dead'
     # (Windows hosts drop ICMP); scope-only hosts are 'unseen' until confirmed up.
     ("host", "alive", "TEXT"),
+    # schema v8 (G2a) — scanner-vuln columns so a Nessus/OpenVAS row is keyed and
+    # carries its remediation + output excerpt, not just a CVE.
+    ("vulnerability", "plugin_id", "TEXT"),
+    ("vulnerability", "port", "INTEGER"),
+    ("vulnerability", "solution", "TEXT"),
+    ("vulnerability", "plugin_output", "TEXT"),
 ]
 
 # A finding is LIVE (feeds recall, the brief, the register) in these states;
@@ -1949,28 +1955,43 @@ def add_vulnerability(
     exploit_ref: str | None = None,
     exploit_available: bool = False,
     source: str | None = None,
+    plugin_id: str | None = None,
+    port: int | None = None,
+    solution: str | None = None,
+    plugin_output: str | None = None,
 ) -> tuple[int, bool]:
-    """Record a version->CVE hypothesis (deduped by host+cve+software)."""
+    """Record a vulnerability. A scanner row (plugin_id given) dedupes on
+    host+plugin_id+port; a version->CVE hypothesis dedupes on host+cve+software."""
     now = _now_utc()
-    existing = conn.execute(
-        "SELECT id FROM vulnerability WHERE host_id = ? AND cve IS ? AND software_id IS ?",
-        (host_id, cve, software_id),
-    ).fetchone()
+    if plugin_id is not None:
+        existing = conn.execute(
+            "SELECT id FROM vulnerability WHERE host_id = ? AND plugin_id = ? AND port IS ?",
+            (host_id, plugin_id, port),
+        ).fetchone()
+    else:
+        existing = conn.execute(
+            "SELECT id FROM vulnerability WHERE host_id = ? AND cve IS ? AND software_id IS ?",
+            (host_id, cve, software_id),
+        ).fetchone()
     if existing is not None:
         conn.execute(
             "UPDATE vulnerability SET state = ?, cvss = COALESCE(?, cvss), "
             "title = COALESCE(?, title), exploit_ref = COALESCE(?, exploit_ref), "
-            "exploit_available = ?, source = COALESCE(?, source), updated_at = ? WHERE id = ?",
-            (state, cvss, title, exploit_ref, 1 if exploit_available else 0, source, now,
-             existing["id"]),
+            "exploit_available = ?, source = COALESCE(?, source), "
+            "cve = COALESCE(?, cve), solution = COALESCE(?, solution), "
+            "plugin_output = COALESCE(?, plugin_output), updated_at = ? WHERE id = ?",
+            (state, cvss, title, exploit_ref, 1 if exploit_available else 0, source,
+             cve, solution, plugin_output, now, existing["id"]),
         )
         return int(existing["id"]), False
     cur = conn.execute(
         "INSERT INTO vulnerability (engagement_id, host_id, software_id, service_id, cve, "
-        "title, cvss, state, exploit_ref, exploit_available, source, discovered_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "title, cvss, state, exploit_ref, exploit_available, source, plugin_id, port, "
+        "solution, plugin_output, discovered_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (engagement_id, host_id, software_id, service_id, cve, title, cvss, state,
-         exploit_ref, 1 if exploit_available else 0, source, now),
+         exploit_ref, 1 if exploit_available else 0, source, plugin_id, port,
+         solution, plugin_output, now),
     )
     return int(cur.lastrowid), True
 

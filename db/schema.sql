@@ -327,7 +327,11 @@ CREATE TABLE IF NOT EXISTS vulnerability (
     state             TEXT    NOT NULL DEFAULT 'potential',  -- potential|confirmed|exploited|patched|false_positive
     exploit_ref       TEXT,              -- searchsploit id | msf module | nuclei template | URL
     exploit_available INTEGER DEFAULT 0,
-    source            TEXT,              -- version_match|nuclei|searchsploit|nvd|manual
+    source            TEXT,              -- version_match|nuclei|searchsploit|nvd|manual|nessus|openvas
+    plugin_id         TEXT,              -- schema v8 (G2a): scanner plugin/NVT id (Nessus pluginID, OpenVAS OID)
+    port              INTEGER,           -- schema v8: the affected port the scanner reported
+    solution          TEXT,              -- schema v8: the scanner's remediation text
+    plugin_output     TEXT,              -- schema v8: a capped plugin-output excerpt
     discovered_at     TEXT    NOT NULL,
     updated_at        TEXT
 );

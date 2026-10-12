@@ -757,6 +757,49 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             return (f"{kind}: {domains} in-scope domain(s), {webapps} web_app(s), "
                     f"{cdn_n} CDN-fronted (no host row), {skipped} out-of-scope skipped.")
 
+        # Captured proxy traffic -> web_path METADATA (method/params/auth/status)
+        # for requests whose host we already track. Bodies are NEVER stored here.
+        if kind in ("burp", "har"):
+            from yhwach.parsers.httpcap import parse_burp, parse_har
+
+            reqs = (parse_burp if kind == "burp" else parse_har)(
+                Path(file).read_text(encoding="utf-8", errors="replace"))
+            paths = unresolved = 0
+            app_cache: dict[tuple, int] = {}
+            for rq in reqs:
+                # Resolve the request's host to a tracked host: by captured IP,
+                # then by hostname, then via the domain table. Never invent one.
+                hid = None
+                for sql, val in (
+                    ("SELECT id FROM host WHERE engagement_id=? AND ip=?", rq.ip),
+                    ("SELECT id FROM host WHERE engagement_id=? AND ip=?", rq.host),
+                    ("SELECT id FROM host WHERE engagement_id=? AND LOWER(hostname)=LOWER(?)", rq.host),
+                    ("SELECT host_id FROM domain WHERE engagement_id=? AND LOWER(name)=LOWER(?) "
+                     "AND host_id IS NOT NULL", rq.host),
+                ):
+                    if not val:
+                        continue
+                    row = conn.execute(sql, (eid, val)).fetchone()
+                    if row and row[0] is not None:
+                        hid = int(row[0])
+                        break
+                if hid is None:
+                    unresolved += 1
+                    continue
+                key = (hid, rq.base_url)
+                if key not in app_cache:
+                    wid, _ = yhdb.add_web_app(conn, hid, rq.base_url, scheme=rq.scheme)
+                    app_cache[key] = wid
+                yhdb.add_web_path(
+                    conn, app_cache[key], rq.path, method=rq.method, status=rq.status,
+                    params=",".join(rq.params) or None, auth_required=rq.auth_required,
+                    source=kind)
+                paths += 1
+            yhdb.log_event(conn, eid, "ingest",
+                           {"kind": kind, "paths": paths, "unresolved_host": unresolved})
+            return (f"{kind}: {paths} web_path(s) recorded (metadata only — no bodies), "
+                    f"{unresolved} request(s) to untracked hosts skipped.")
+
         valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
         if kind not in valid:
             raise ValueError(f"unknown kind '{kind}' (use nmap|{'|'.join(valid)})")
@@ -1653,7 +1696,7 @@ def _candidate_ids(db_path: Path | str, lab: str, host: str | None) -> set[str]:
 
 _INTERPRET_PARSERS = ("nmap", "netexec", "bloodhound", "certipy", "linpeas", "winpeas",
                       "web", "secretsdump", "potfile", "nessus", "openvas", "nuclei",
-                      "httpx", "subfinder", "bbot")
+                      "httpx", "subfinder", "bbot", "burp", "har")
 
 
 def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
@@ -2222,7 +2265,7 @@ TOOL_SPECS = [
      "add_cred autospray). ~5 candidates per known pattern, not a wordlist. "
      "targets? = comma-separated usernames to generate FOR (default: common svc accounts)."),
     ("yhwach_ingest", tool_ingest,
-     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|httpx|subfinder|bbot|linpeas|winpeas|"
+     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|httpx|subfinder|bbot|burp|har|linpeas|winpeas|"
      "bloodhound|certipy|netexec|web). nmap adds software+CPE; bloodhound builds the "
      "principal/privilege/edge graph; netexec adds SMB shares/users/admin/policy; web "
      "adds web_app+paths (needs url). Host-scoped kinds need a host and set chaining tags."),

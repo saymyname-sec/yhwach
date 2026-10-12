@@ -1522,6 +1522,40 @@ def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
             f"Name kind='x:<action_id>' to run an extractor, or a parser kind.")
 
 
+def tool_action(db_path: Path | str, lab: str, action_id: str,
+                host: str | None = None, port: int | None = None) -> str:
+    """Render one recall action as a runnable command for a concrete target.
+
+    Fills {host}/{port}; a secret stays a `$YH_SECRET` env reference (never the
+    value — compose it in your shell). Returns the command, the fold-back call
+    to make with its output, and a ref. An action with no template is 'manual'.
+    """
+    from yhwach import actions_ref
+
+    # Resolve the engagement so an unknown lab still errors consistently.
+    with yhdb.transaction(db_path) as conn:
+        _eng(conn, lab)
+    r = actions_ref.render(action_id, host=host, port=port)
+    if r is None:
+        return (f"{action_id}: manual (no command template) — run it by hand, "
+                f"then record the result with yhwach_interpret or yhwach_add_finding.")
+    out = [f"$ {r['cmd']}"]
+    missing = actions_ref.unfilled(r["cmd"])
+    if missing:
+        _flag = {"{host}": "host", "{port}": "port", "{url}": "url", "{domain}": "domain"}
+        out.append("# incomplete — not runnable as-is; pass "
+                   + ", ".join(_flag.get(m, m) for m in missing)
+                   + f" (unfilled: {', '.join(missing)})")
+    if r.get("needs"):
+        out.append(f"needs: {', '.join(r['needs'])}")
+    if r.get("then"):
+        out.append(f"then: yhwach_interpret(kind='{r['then']['kind']}'"
+                   + (f", host={host}" if host else "") + ")  # feed the output back")
+    if r.get("ref"):
+        out.append(f"ref: {r['ref']}")
+    return "\n".join(out)
+
+
 def tool_query(db_path: Path | str, lab: str, view: str,
                where: dict | None = None, q: str | None = None,
                fields: list | None = None, order: str | None = None,
@@ -1674,6 +1708,10 @@ TOOL_SPECS = [
      "Query a named read view (hosts|services|surfaces|findings|creds|principals|"
      "shares|loot|objectives|attempts|events|software|vulns|web_paths|scan_coverage|"
      "probe_runs) with where/q/fields/order/limit. Read-only; secrets masked unless reveal."),
+    ("yhwach_action", tool_action,
+     "Render one recall action id as a runnable command for host/port (secrets stay "
+     "$YH_SECRET env refs), with the fold-back yhwach_interpret call and a ref. "
+     "Manual actions (no template) say so."),
     ("yhwach_attempt", tool_attempt,
      "Record a tried move (result: success|fail|blocked|partial). fail/blocked "
      "retire that (rule,host) from yhwach_next; success marks it done. Pass a "

@@ -157,6 +157,36 @@ def next_moves(
     )
 
 
+def _cand_detail(c: kn.Candidate, ip: str) -> list[str]:
+    """The actionable lines under a candidate: why-now, *every* runnable command
+    the technique emits (each with its own fold-back call), a ref, and the source.
+
+    A technique often emits several distinct read-only tools (e.g. smb null-session
+    emits nxc --shares, enum4linux-ng AND smbmap) — the recall menu exists so the
+    operator misses none, so we render all of them, not just the first."""
+    from yhwach import actions_ref
+
+    out: list[str] = []
+    if c.chained_from:
+        out.append(f"        why: unlocked by finding tag `{c.chained_from}`")
+    ref: str | None = None
+    for aid in c.emits:
+        rendered = actions_ref.render(aid, host=ip, port=c.port)
+        if not rendered:
+            continue
+        out.append(f"        $ {rendered['cmd']}")
+        if rendered.get("then"):
+            out.append(f"        then: yhwach_interpret(kind='{rendered['then']['kind']}', host={ip})")
+        if ref is None and rendered.get("ref"):
+            ref = rendered["ref"]
+    ref = ref or c.routes
+    if ref:
+        out.append(f"        ref: {ref}")
+    if c.source:
+        out.append(f"        src: {c.source}")
+    return out
+
+
 def _by_host(cands: list[kn.Candidate]) -> list[tuple[str, list[kn.Candidate]]]:
     groups: dict[str, list[kn.Candidate]] = {}
     for c in cands:
@@ -177,6 +207,7 @@ def render_next(nm: NextMoves, *, gap_limit: int = 8) -> list[str]:
                 surf = c.surface_kind or "host"
                 maps = f"  [{'/'.join(c.maps)}]" if c.maps else ""
                 lines.append(f"    - {c.technique_id} ({surf}{star}){maps}")
+                lines += _cand_detail(c, ip)
     if nm.gated:
         lines.append("GATED — needs your go-ahead:")
         for ip, cs in _by_host(nm.gated):
@@ -185,6 +216,7 @@ def render_next(nm: NextMoves, *, gap_limit: int = 8) -> list[str]:
                 chain = f" chains<-{c.chained_from}" if c.chained_from else ""
                 surf = c.surface_kind or "host"
                 lines.append(f"    - {c.technique_id} ({surf}) [{c.risk}{chain}]")
+                lines += _cand_detail(c, ip)
     if not nm.auto and not nm.gated:
         lines.append("(no applicable techniques remain — enumerate more or advance a host)")
 
@@ -216,6 +248,12 @@ def render_next(nm: NextMoves, *, gap_limit: int = 8) -> list[str]:
 
 
 def _cand_as_dict(c: kn.Candidate) -> dict:
+    from yhwach import actions_ref
+
+    actions = []
+    for aid in c.emits:
+        r = actions_ref.render(aid, host=c.host_ip, port=c.port)
+        actions.append({"action": aid, **(r or {"cmd": None, "parses_as": None})})
     return {
         "technique_id": c.technique_id,
         "host_ip": c.host_ip,
@@ -225,7 +263,13 @@ def _cand_as_dict(c: kn.Candidate) -> dict:
         "technique_class": c.technique_class,
         "maps": list(c.maps),
         "chained_from": c.chained_from,
+        "why_now": c.chained_from,
         "routes": c.routes,
+        "ref": c.routes,
+        "source": c.source,
+        "rationale": c.rationale,
+        "emits": list(c.emits),
+        "actions": actions,
         "points": c.points,
     }
 

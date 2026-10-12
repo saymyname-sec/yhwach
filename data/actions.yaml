@@ -1,0 +1,136 @@
+# Action reference — the runnable command + how to feed its output back, per
+# emitted action id. This is the command source for the LIVE recall wire
+# (yhwach next and yhwach_action). The legacy autonomous runner keeps its own
+# yhwach/runners.py _COMMANDS map and does NOT read this file, so the two are
+# parallel and can drift — keep a new/changed command in sync by hand.
+#
+# Each entry:
+#   cmd        str   template with {host}/{port}/{url}/{domain} placeholders;
+#                    a {secret_ref} is rendered as an env var, never the value.
+#   parses_as  str   feed the output back with yhwach_interpret kind='x:<this>'
+#                    (an interpret extractor id) — or an ingest kind.
+#   needs      list  prerequisites (cred, wordlist, listener, shell_on_host).
+#   risk       str   read_only | propose | exploit (advisory; the rule's risk wins).
+#   ref        str   where to read more (a `yhwach ref` pointer or doctrine).
+#   note       str   one-line why/what.
+# An action id absent here is 'manual' — the operator runs it by hand.
+
+# --- SMB / AD — null-session recon (read-only) ---------------------------------
+netexec_smb_null:
+  cmd: "nxc smb {host} -u '' -p '' --shares"
+  parses_as: netexec_smb_null
+  risk: read_only
+  ref: "yhwach ref wadcoms -q smb"
+  note: "null-session share list"
+probe_writable_smb_share:
+  cmd: "nxc smb {host} -u '' -p '' --shares"
+  parses_as: netexec_smb_null
+  risk: read_only
+smbmap_shares:
+  cmd: "smbmap -H {host}"
+  parses_as: smbmap_shares
+  risk: read_only
+enum4linux_ng:
+  cmd: "enum4linux-ng -A {host}"
+  parses_as: enum4linux_ng
+  risk: read_only
+netexec_ldap:
+  cmd: "nxc ldap {host}"
+  parses_as: netexec_ldap
+  risk: read_only
+ldapsearch_anon:
+  cmd: "ldapsearch -x -H ldap://{host} -s base namingcontexts"
+  parses_as: ldapsearch_anon
+  risk: read_only
+netexec_pass_pol:
+  cmd: "nxc smb {host} -u '' -p '' --pass-pol"
+  parses_as: netexec_pass_pol
+  risk: read_only
+  note: "read the lockout policy BEFORE any spray"
+netexec_rid_brute:
+  cmd: "nxc smb {host} -u '' -p '' --rid-brute"
+  parses_as: netexec_rid_brute
+  risk: read_only
+netexec_maq:
+  cmd: "nxc ldap {host} -u '' -p '' -M maq"
+  parses_as: netexec_maq
+  risk: read_only
+netexec_get_desc_users:
+  cmd: "nxc ldap {host} -u '' -p '' -M get-desc-users"
+  parses_as: netexec_get_desc_users
+  risk: read_only
+ldap_anon_dump:
+  cmd: "nxc ldap {host} -u '' -p '' --users"
+  parses_as: ldap_anon_dump
+  risk: read_only
+
+# --- Web / app recon — read-only GETs ------------------------------------------
+jenkins_auth_check:
+  cmd: "curl -s --max-time 8 http://{host}:{port}/api/json"
+  risk: read_only
+jenkins_oauth2proxy_bypass:
+  cmd: "curl -si --max-time 8 http://{host}:{port}/api/json/x.css"
+  risk: propose
+  note: "oauth2-proxy skip_auth_routes suffix bypass"
+gitlab_public_repos:
+  cmd: "curl -s --max-time 8 http://{host}:{port}/api/v4/projects?per_page=20"
+  risk: read_only
+
+# --- AI surfaces — HTTP probes (read-only GETs) --------------------------------
+probe_ollama_models:
+  cmd: "curl -s --max-time 8 http://{host}:{port}/api/tags"
+  parses_as: probe_ollama_models
+  risk: read_only
+probe_ollama_version:
+  cmd: "curl -s --max-time 8 http://{host}:{port}/api/version"
+  parses_as: probe_ollama_version
+  risk: read_only
+probe_openapi_spec:
+  cmd: "curl -s --max-time 8 http://{host}:{port}/openapi.json"
+  parses_as: probe_openapi_spec
+  risk: read_only
+  ref: "yhwach ref ai-attacks -q tool_arg_injection"
+enumerate_models:
+  cmd: "curl -s --max-time 8 http://{host}:{port}/v1/models"
+  parses_as: enumerate_models
+  risk: read_only
+mcp_tools_list:
+  cmd: "curl -s --max-time 8 http://{host}:{port}/tools"
+  parses_as: mcp_tools_list
+  risk: read_only
+  ref: "yhwach ref ai-attacks -q mcp_attack"
+gradio_api_enumerate:
+  cmd: "curl -s --max-time 8 http://{host}:{port}/config"
+  risk: read_only
+probe_n8n_version:
+  cmd: "curl -s --max-time 8 http://{host}:{port}/rest/settings"
+  risk: read_only
+
+# --- Kubernetes — anonymous read-only enum -------------------------------------
+apiserver_version:
+  cmd: "curl -sk --max-time 8 https://{host}:{port}/version"
+  parses_as: apiserver_version
+  risk: read_only
+apiserver_anonymous_rbac_review:
+  cmd: >-
+    curl -sk --max-time 8 -XPOST
+    https://{host}:{port}/apis/authorization.k8s.io/v1/selfsubjectrulesreviews
+    -H 'Content-Type: application/json'
+    -d '{"kind":"SelfSubjectRulesReview","apiVersion":"authorization.k8s.io/v1","spec":{"namespace":"default"}}'
+  parses_as: apiserver_anonymous_rbac_review
+  risk: read_only
+  ref: "yhwach ref services -q apiserver"
+kubelet_pods_list:
+  cmd: "curl -sk --max-time 8 https://{host}:{port}/pods"
+  parses_as: kubelet_pods_list
+  risk: read_only
+
+# --- Data stores / app setup — unauth reads ------------------------------------
+redis_unauth_info:
+  cmd: "redis-cli -h {host} -p {port} INFO server"
+  parses_as: redis_unauth_info
+  risk: read_only
+webapp_setup_probe:
+  cmd: "curl -s --max-time 8 http://{host}:{port}/api/session/properties"
+  parses_as: webapp_setup_probe
+  risk: read_only

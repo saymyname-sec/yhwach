@@ -230,6 +230,24 @@ def interpret(file: str, lab: str, kind: str, host_ip: str | None, url: str | No
         sys.exit(2)
 
 
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.argument("action_id")
+@click.option("--host", "host_ip", default=None, help="Target host IP.")
+@click.option("--port", default=None, type=int, help="Target port.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def action(lab: str, action_id: str, host_ip: str | None, port: int | None,
+           db_path: str | None) -> None:
+    """Render a recall action id as a runnable command for a target."""
+    from yhwach.mcp_tools import tool_action
+
+    try:
+        click.echo(tool_action(_db_path(db_path), lab, action_id, host=host_ip, port=port))
+    except ValueError as e:
+        click.echo(f"[!] {e}", err=True)
+        sys.exit(2)
+
+
 @main.command(name="finding-set")
 @click.option("--lab", required=True, help="Lab name.")
 @click.option("--id", "finding_id", required=True, type=int, help="Finding id.")

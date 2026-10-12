@@ -19,12 +19,49 @@ _KIND_RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"(login|signin|auth|sso|oauth)", re.I), "login"),
     (re.compile(r"(upload|import|fileupload)", re.I), "upload"),
     (re.compile(r"(admin|manage|console|dashboard|wp-admin|phpmyadmin)", re.I), "admin"),
-    (re.compile(r"(api|graphql|v1|v2|rest|swagger|openapi|\.json)", re.I), "api"),
+    # I23 — split specific API shapes out of the generic 'api' kind (before it).
+    (re.compile(r"/graphql\b|/graphiql\b", re.I), "graphql"),
+    (re.compile(r"(swagger|openapi|api-docs|/v2/api-docs|\.wadl)", re.I), "api_spec"),
+    (re.compile(r"(actuator|phpinfo|server-status|/debug\b|/trace\b|stacktrace|_profiler)",
+                re.I), "debug_page"),
+    (re.compile(r"(api|v1|v2|rest|\.json)", re.I), "api"),
     (re.compile(r"(config|\.env|settings|web\.config|\.htaccess|credentials)", re.I), "config"),
 ]
 
 # Paths worth auto-flagging as interesting regardless of status.
-_INTERESTING_KINDS = {"source", "backup", "login", "upload", "admin", "api", "config"}
+_INTERESTING_KINDS = {"source", "backup", "login", "upload", "admin", "api", "config",
+                      "graphql", "api_spec", "debug_page"}
+
+# I23 — parameter-name sets for param-driven chaining tags (independent of kind:
+# a path can be an 'api' AND an idor_candidate AND carry a redirect param).
+_IDOR_PARAMS = {"id", "uid", "user_id", "userid", "account", "acct", "number", "no",
+                "order", "orderid", "invoice", "doc", "docid", "file", "fileid",
+                "pid", "record", "rid", "cid", "key"}
+_REDIRECT_PARAMS = {"redirect", "redirect_uri", "redirecturl", "redir", "url", "next",
+                    "return", "returnurl", "dest", "destination", "callback", "continue",
+                    "goto", "to", "rurl"}
+
+
+def chaining_tags(path: str) -> list[str]:
+    """Parameter-driven chaining tags for a path+query: 'idor_candidate' (an
+    id-like or numeric parameter / numeric path segment) and 'redirect_param'
+    (an open-redirect/SSRF-shaped parameter name)."""
+    tags: list[str] = []
+    base, _, query = path.partition("?")
+    pnames: dict[str, str] = {}
+    for kv in query.split("&"):
+        if not kv:
+            continue
+        name, _, val = kv.partition("=")
+        if name:
+            pnames[name.lower()] = val
+    if set(pnames) & _REDIRECT_PARAMS:
+        tags.append("redirect_param")
+    numeric_val = any(v.isdigit() for v in pnames.values())
+    numeric_seg = any(seg.isdigit() for seg in base.split("/") if seg)
+    if (set(pnames) & _IDOR_PARAMS) or numeric_val or numeric_seg:
+        tags.append("idor_candidate")
+    return tags
 
 
 @dataclass

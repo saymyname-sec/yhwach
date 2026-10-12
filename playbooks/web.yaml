@@ -286,3 +286,74 @@
   source: 'metabase . leaked setup-token -> pre-auth RCE (CVE-2023-38646)'
   technique: metabase_setup_rce
   authorized_only: true
+
+# --- I23 finer web chaining surfaces ---------------------------------------
+- id: web_graphql_recon
+  when: { findings_include: graphql }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: graphql_introspection
+  maps: [CWE-200]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'OWASP API . GraphQL introspection enumerates the full schema'
+  authorized_only: true
+
+- id: web_api_spec_recon
+  when: { findings_include: api_spec }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: fetch_api_spec
+  maps: [CWE-200]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'OWASP API . a published spec is the endpoint+auth contract'
+  authorized_only: true
+
+- id: web_debug_page_review
+  when: { findings_include: debug_page }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: fetch_debug_page
+  maps: [CWE-215]
+  points: 10
+  risk: read_only
+  routes: 'HexStrike web stack'
+  source: 'technique: actuator/phpinfo/stacktrace leak env, tokens, internals'
+  authorized_only: true
+
+- id: web_idor_probe
+  when: { findings_include: idor_candidate }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: idor_probe
+  maps: [CWE-639]
+  points: 15
+  risk: propose
+  routes: 'HexStrike web stack'
+  source: 'OWASP WSTG-ATHZ-04 . swap the object reference across two sessions'
+  authorized_only: true
+
+- id: web_open_redirect_probe
+  when: { findings_include: redirect_param }
+  class: traditional
+  likelihood: M
+  time_cost: fast
+  emits:
+    - action: open_redirect_probe
+  maps: [CWE-601]
+  points: 10
+  risk: propose
+  routes: 'HexStrike web stack'
+  source: 'OWASP WSTG-CLNT-04 . redirect param -> open redirect / SSRF pivot'
+  authorized_only: true

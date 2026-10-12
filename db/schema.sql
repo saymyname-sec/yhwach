@@ -842,3 +842,18 @@ CREATE TABLE IF NOT EXISTS plant_sighting (
     at        TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_plant_sighting_plant ON plant_sighting(plant_id);
+
+-- schema v13 (I35) — the negative-evidence primitive. A host_fact records what
+-- enumeration CHECKED (e.g. smb_signing=false, spooler=running), so a methodology
+-- item can move off UNKNOWN. Without it every checklist item sits at UNKNOWN
+-- forever. Written by NetExec banners / ldap-checker / spooler / MAQ / LAPS.
+CREATE TABLE IF NOT EXISTS host_fact (
+    id        INTEGER PRIMARY KEY,
+    host_id   INTEGER NOT NULL REFERENCES host(id),
+    key       TEXT NOT NULL,
+    value     TEXT,
+    source    TEXT,
+    at        TEXT NOT NULL,
+    UNIQUE(host_id, key)
+);
+CREATE INDEX IF NOT EXISTS idx_host_fact_host ON host_fact(host_id);

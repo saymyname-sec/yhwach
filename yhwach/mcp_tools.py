@@ -609,6 +609,43 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
                     f"plaintext ({unmatched} not matching a dumped hash). "
                     f"spray_policy=manual.{reuse_note}")
 
+        # Vuln-scanner exports are host-keyed by their own content (each row names
+        # its host), so no `host` arg; info-severity rows are kept for coverage.
+        if kind in ("nessus", "openvas"):
+            from yhwach.parsers.nessus import parse_nessus, parse_openvas, promote_tag
+
+            text = Path(file).read_text(encoding="utf-8", errors="replace")
+            vulns = (parse_nessus if kind == "nessus" else parse_openvas)(text)
+            rows = promoted = 0
+            for v in vulns:
+                if not v.host_ip:
+                    continue
+                hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                                    (eid, v.host_ip)).fetchone()
+                if hrow is None:
+                    cur = conn.execute(
+                        "INSERT INTO host (engagement_id, ip, stage, discovery_source, "
+                        "alive, first_seen) VALUES (?, ?, 'scanned', ?, 'alive', ?)",
+                        (eid, v.host_ip, kind, yhdb._now_utc()))
+                    hid = int(cur.lastrowid)
+                else:
+                    hid = int(hrow["id"])
+                yhdb.add_vulnerability(
+                    conn, eid, hid, v.cves[0] if v.cves else None, title=v.title,
+                    cvss=v.cvss, state="potential", source=kind, plugin_id=v.plugin_id,
+                    port=v.port, solution=v.solution, plugin_output=v.output)
+                rows += 1
+                tag = promote_tag(v)
+                if tag:
+                    yhdb.add_finding(conn, hid, None, "scanner", v.title,
+                                     v.severity if v.severity != "info" else "low",
+                                     (v.output or v.title)[:200], tag=tag, engagement_id=eid)
+                    promoted += 1
+            yhdb.log_event(conn, eid, "ingest",
+                           {"kind": kind, "vulns": rows, "promoted": promoted})
+            return (f"{kind}: {rows} vulnerability row(s) across hosts, {promoted} promoted "
+                    f"to a chaining tag (smb_signing_off / exploitable_cve).")
+
         valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
         if kind not in valid:
             raise ValueError(f"unknown kind '{kind}' (use nmap|{'|'.join(valid)})")
@@ -1503,7 +1540,7 @@ def _candidate_ids(db_path: Path | str, lab: str, host: str | None) -> set[str]:
 
 
 _INTERPRET_PARSERS = ("nmap", "netexec", "bloodhound", "certipy", "linpeas", "winpeas",
-                      "web", "secretsdump", "potfile")
+                      "web", "secretsdump", "potfile", "nessus", "openvas")
 
 
 def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
@@ -1951,7 +1988,7 @@ TOOL_SPECS = [
      "are cached in credential_access; force=True re-attempts. Uses nxc / curl; "
      "domain and local-auth are tried automatically on SMB/WinRM/MSSQL."),
     ("yhwach_interpret", tool_interpret,
-     "Turn pasted tool output into typed rows (auto-sniffs nmap/netexec/secretsdump/potfile/bloodhound/"
+     "Turn pasted tool output into typed rows (auto-sniffs nmap/netexec/secretsdump/potfile/nessus/openvas/bloodhound/"
      "certipy/linpeas/winpeas/web; kind='x:<action_id>' runs an extractor; else loot+INFO). "
      "Names which recall rules the new facts unlocked. dry_run classifies without writing."),
     ("yhwach_query", tool_query,
@@ -1979,7 +2016,7 @@ TOOL_SPECS = [
      "add_cred autospray). ~5 candidates per known pattern, not a wordlist. "
      "targets? = comma-separated usernames to generate FOR (default: common svc accounts)."),
     ("yhwach_ingest", tool_ingest,
-     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|linpeas|winpeas|"
+     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|linpeas|winpeas|"
      "bloodhound|certipy|netexec|web). nmap adds software+CPE; bloodhound builds the "
      "principal/privilege/edge graph; netexec adds SMB shares/users/admin/policy; web "
      "adds web_app+paths (needs url). Host-scoped kinds need a host and set chaining tags."),

@@ -36,22 +36,7 @@ dev = [
 mcp = [
     "mcp>=1.0",
 ]
-# The agent brain (wire 1): calls Claude via the Anthropic SDK. Optional so the
-# engine, tests, and CI run without it or a key. See AGENT.md § Runtime.
-agent = [
-    "anthropic>=0.40",
-]
-# The agent brain, OpenAI provider. Same wire-1 seam, chosen at runtime
-# (--provider openai / a gpt* --model / YHWACH_PROVIDER).
-agent-openai = [
-    "openai>=1.40",
-]
-# Both providers at once.
-agent-all = [
-    "yhwach[agent]",
-    "yhwach[agent-openai]",
-]
-# The live board (read view over memory + kill/approve controls). Optional.
+# The live board (read view over memory). Optional.
 ui = [
     "fastapi>=0.110",
     "uvicorn>=0.29",

@@ -14,7 +14,6 @@ pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from yhwach import control  # noqa: E402
 from yhwach import db as yhdb  # noqa: E402
 
 
@@ -134,28 +133,6 @@ def test_attack_path_empty_state(tmp_db: Path) -> None:
     assert r.status_code == 200
     assert "Attack path" in r.text
     assert "no path yet" in r.text
-
-
-def test_panel_shows_workers_gaze(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    with yhdb.transaction(tmp_db) as conn:
-        eid = yhdb.engagement_id_for(conn, "L")
-        control.mark_run_started(conn, eid, phase="enumeration")
-        hid = conn.execute(
-            "SELECT id FROM host WHERE engagement_id=? AND ip='10.0.0.5'", (eid,)
-        ).fetchone()["id"]
-        conn.execute(
-            "INSERT INTO attempt (engagement_id, host_id, playbook_rule_id, technique_id, "
-            "result, attempted_at) VALUES (?, ?, 'probe_ollama_models', 'ollama_unauth_api', "
-            "'success', 't')",
-            (eid, hid),
-        )
-    r = _client(tmp_db).get("/panel")
-    assert r.status_code == 200
-    assert "The gaze" in r.text and "THE ALMIGHTY" in r.text  # renamed from orchestrator
-    assert "ORCHESTRATOR" not in r.text
-    assert "10.0.0.5" in r.text  # worker eye labelled with its host
-    assert "ollama_unauth_api" in r.text  # the technique it worked on
 
 
 def test_workers_gaze_empty_state(tmp_db: Path) -> None:
@@ -1394,16 +1371,6 @@ def test_payload_ledger_empty_state(tmp_db: Path) -> None:
     _seed(tmp_db)
     body = _client(tmp_db).get("/surfaces").text
     assert "no payload delivered yet" in body
-
-
-def test_run_result_carries_the_payload_it_delivered() -> None:
-    """The payload used to be persisted ONLY by the dry-run stub — recorded when
-    it was not sent."""
-    from yhwach.actions import RunResult
-
-    r = RunResult(payload="p", response="r", verdict="signal")
-    assert (r.payload, r.response, r.verdict) == ("p", "r", "signal")
-    assert RunResult().payload is None
 
 
 # ─── probe runs ────────────────────────────────────────────────────────────

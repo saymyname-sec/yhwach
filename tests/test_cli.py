@@ -209,38 +209,6 @@ def test_advance_to_enumerated_warns_but_still_advances(tmp_db: Path) -> None:
 
 
 
-# --- agent run (dry-run) ----------------------------------------------------
-
-def test_run_dry_run_executes_and_reports(tmp_db: Path) -> None:
-    _seed(tmp_db)  # lab L, one scanned host with an ollama surface
-    r = _run(["run", "--lab", "L", "--dry-run", "--db", str(tmp_db)])
-    assert r.exit_code == 0
-    assert "Running agent on 'L'" in r.output
-    assert "ENGAGEMENT STATE" in r.output
-    with yhdb.transaction(tmp_db) as conn:
-        eng = yhdb.engagement_id_for(conn, "L")
-        attempts = yhdb.list_attempts(conn, eng)
-    assert any(a["playbook_rule_id"] == "ollama_unauth_api" for a in attempts)
-
-
-def test_run_unknown_lab_errors(tmp_db: Path) -> None:
-    r = _run(["run", "--lab", "nope", "--dry-run", "--db", str(tmp_db)])
-    assert r.exit_code == 2
-
-
-def test_run_fan_out_dry(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    with yhdb.transaction(tmp_db) as conn:
-        eng = yhdb.engagement_id_for(conn, "L")
-        hid = conn.execute(
-            "INSERT INTO host (engagement_id, ip, os, stage, first_seen) "
-            "VALUES (?, '10.0.0.6', 'linux', 'scanned', 't')", (eng,)).lastrowid
-        yhdb.upsert_surface(conn, int(hid), None, "ollama", "none", "{}")
-    r = _run(["run", "--lab", "L", "--dry-run", "--fan-out", "--db", str(tmp_db)])
-    assert r.exit_code == 0
-    assert "fan-out" in r.output
-
-
 # --- doctor preflight -------------------------------------------------------
 
 def test_doctor_reports_ready(tmp_db: Path) -> None:
@@ -257,21 +225,6 @@ def test_doctor_flags_missing_engagement(tmp_db: Path) -> None:
     r = _run(["doctor", "--lab", "does-not-exist", "--db", str(tmp_db)])
     assert r.exit_code == 1  # hard check failed
     assert "engagement 'does-not-exist' exists" in r.output
-
-
-def test_run_allow_unknown_class_warns(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    r = _run(["run", "--lab", "L", "--dry-run", "--allow", "bogus", "--db", str(tmp_db)])
-    assert r.exit_code == 0
-    assert "named no known action class" in r.output
-
-
-def test_run_allow_grant_is_echoed(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    r = _run(["run", "--lab", "L", "--dry-run", "--allow", "listener,push", "--db", str(tmp_db)])
-    assert r.exit_code == 0
-    assert "high-consequence grants enabled" in r.output
-    assert "listener" in r.output and "push" in r.output
 
 
 # ── revshell + pivot arsenal wiring ────────────────────────────────────────

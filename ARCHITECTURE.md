@@ -10,7 +10,8 @@ Yhwach itself needs **no API key**.
 > There is also a legacy, **experimental** runtime where yhwach calls a model itself
 > (`yhwach run`, the `[agent]` extra). It is unsupported and slated for removal — see
 > [`docs/experimental/`](docs/experimental/). Everything below describes the supported
-> advisor picture. `AGENT.md` has the long-form detail.
+> advisor picture. (`AGENT.md` has long-form design history, but describes the
+> removed self-driving runtime — this file is the current source of truth.)
 
 ## The one big idea
 

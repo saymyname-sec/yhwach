@@ -66,8 +66,7 @@ def render_pivot(
     obvious in the rendered command (``<workspace>/arsenal/svcmon.exe``
     vs. a bare ``svcmon.exe`` that a future reader would have to guess).
 
-    Proposal-tier: the operator runs the returned lines by hand (or a runner
-    ships them; see :class:`~yhwach.runners.ArsenalDeployRunner`).
+    Proposal-tier: the operator runs the returned lines by hand.
     """
     kind = _resolve_kind(pivot_kind, os_name)
     lines = [f"== Pivot via {via_ip} ({os_name or 'os?'}, kind={kind}) -> {subnet} =="]

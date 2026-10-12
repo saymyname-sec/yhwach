@@ -139,6 +139,11 @@ VIEWS: dict[str, View] = {
          "objective": "l.objective", "caption": "e.caption", "sha256": "e.sha256",
          "path": "e.path", "contains_secret": "e.contains_secret", "at": "e.captured_at"},
         "e.engagement_id = ?", "e.id DESC", ["e.kind", "e.caption"]),
+    "domains": View(
+        "domain d LEFT JOIN host h ON h.id = d.host_id",
+        {"id": "d.id", "name": "d.name", "type": "d.type", "ip": "d.ip",
+         "host_ip": "h.ip", "source": "d.source"},
+        "d.engagement_id = ?", "d.name", ["d.name", "d.ip"]),
     "domain_facts": View(
         "domain_fact df",
         {"id": "df.id", "domain": "df.domain", "key": "df.key", "value": "df.value",

@@ -144,6 +144,11 @@ VIEWS: dict[str, View] = {
         {"id": "d.id", "name": "d.name", "type": "d.type", "ip": "d.ip",
          "host_ip": "h.ip", "source": "d.source"},
         "d.engagement_id = ?", "d.name", ["d.name", "d.ip"]),
+    "host_facts": View(
+        "host_fact f JOIN host h ON h.id = f.host_id",
+        {"id": "f.id", "host_ip": "h.ip", "key": "f.key", "value": "f.value",
+         "source": "f.source"},
+        "h.engagement_id = ?", "h.ip, f.key", ["f.key", "f.value"]),
     "plants": View(
         "plant p",
         {"id": "p.id", "location": "p.location", "payload": "p.payload", "canary": "p.canary",

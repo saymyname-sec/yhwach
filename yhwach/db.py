@@ -30,7 +30,7 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Bumped when the additive self-heal below gains a column/table. Stamped into
 # PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
 # NULL) has a version anchor to branch on. The additive path stays idempotent.
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
@@ -567,6 +567,16 @@ _ADDED_TABLES = {
         "  context TEXT,"
         "  at TEXT NOT NULL)"
     ),
+    "host_fact": (
+        "CREATE TABLE IF NOT EXISTS host_fact ("
+        "  id INTEGER PRIMARY KEY,"
+        "  host_id INTEGER NOT NULL REFERENCES host(id),"
+        "  key TEXT NOT NULL,"
+        "  value TEXT,"
+        "  source TEXT,"
+        "  at TEXT NOT NULL,"
+        "  UNIQUE(host_id, key))"
+    ),
 }
 
 
@@ -599,6 +609,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_ai_data_source_eng ON ai_data_source(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_plant_eng ON plant(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_plant_sighting_plant ON plant_sighting(plant_id)",
+        "CREATE INDEX IF NOT EXISTS idx_host_fact_host ON host_fact(host_id)",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -2727,6 +2738,25 @@ def add_domain_fact(
         (engagement_id, domain, key, value, source, _now_utc()),
     )
     return int(cur.lastrowid)
+
+
+def add_host_fact(
+    conn: sqlite3.Connection, host_id: int, key: str, value: str | None,
+    *, source: str | None = None,
+) -> int:
+    """Upsert a per-host negative-evidence fact (what enumeration CHECKED), so a
+    methodology item can move off UNKNOWN. Last observation wins."""
+    cur = conn.execute(
+        "INSERT INTO host_fact (host_id, key, value, source, at) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT(host_id, key) DO UPDATE SET value = excluded.value, "
+        "source = COALESCE(excluded.source, host_fact.source), at = excluded.at",
+        (host_id, key, value, source, _now_utc()))
+    return int(cur.lastrowid)
+
+
+def list_host_facts(conn: sqlite3.Connection, host_id: int) -> dict[str, str]:
+    return {r["key"]: r["value"] for r in conn.execute(
+        "SELECT key, value FROM host_fact WHERE host_id = ?", (host_id,))}
 
 
 def list_domain_facts(

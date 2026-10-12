@@ -280,4 +280,8 @@ def report_check(conn: sqlite3.Connection, engagement_id: int) -> list[tuple[str
     if outstanding:
         out.append(("warn", f"{len(outstanding)} artefact(s) not confirmed removed — "
                             "not clean to close"))
+    plants = yhdb.outstanding_plants(conn, engagement_id)
+    if plants:
+        out.append(("warn", f"{len(plants)} injection plant(s) not confirmed removed — "
+                            "pull them from the client's data before close"))
     return out

@@ -250,3 +250,33 @@ def test_stage_transition_note_is_optional(tmp_db) -> None:
         hid = conn.execute("SELECT id FROM host WHERE ip='10.0.0.5'").fetchone()["id"]
         _db.set_host_stage(conn, eid, "10.0.0.5", "enumerated")
         assert _db.stage_history(conn, int(hid))[0]["note"] == ""
+
+
+# --- DB file permissions (Theme G minimal: 0600/0700, POSIX only) -----------
+
+
+def test_init_hardens_db_perms_on_posix(tmp_path: Path) -> None:
+    import os
+    import stat
+
+    db = tmp_path / "perm.db"
+    yhdb.init(db)
+    assert yhdb.perms_insecure(db) == []
+    if os.name == "posix":
+        assert stat.S_IMODE(os.stat(db).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(db.parent).st_mode) & 0o077 == 0
+
+
+def test_perms_insecure_flags_group_world_access(tmp_path: Path) -> None:
+    import os
+
+    db = tmp_path / "perm.db"
+    yhdb.init(db)
+    if os.name != "posix":
+        # The bits do not apply on Windows; the check is a documented no-op.
+        assert yhdb.perms_insecure(db) == []
+        return
+    os.chmod(db, 0o644)
+    assert str(db) in yhdb.perms_insecure(db)
+    yhdb.harden_perms(db)
+    assert yhdb.perms_insecure(db) == []

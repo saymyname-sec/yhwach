@@ -185,11 +185,18 @@ git clone --depth 1 https://github.com/swisskyrepo/InternalAllTheThings.git
 ## 8. Claude Code CLI — the files to copy
 
 Claude Code is the operator. The one thing that matters is **registering the MCP
-server** (next sub-section) — that is what makes the `yhwach_*` tools appear. Any
-per-engagement instruction fragment should be **kind-appropriate** and live next to
-that engagement (a bounty run is not a CTF; stealth and scope differ per kind), not a
-one-size global router. (The persona is NOT copied — it ships with the engine; see
-step 2.)
+server** (next sub-section) — that is what makes the `yhwach_*` tools appear.
+**`yhwach init --kind <kind>`** prints both at once: the MCP registration with
+absolute paths, and a **kind-appropriate** instruction fragment to drop next to the
+engagement (a bounty run is not a CTF; stealth and scope differ per kind) — not a
+one-size global router. Add `--write` to save it as `CLAUDE.md`/`AGENTS.md`:
+
+```bash
+yhwach init --kind internal --db $YHWACH_DATA_DIR/state/yhwach.db          # print both
+yhwach init --kind bounty --db $YHWACH_DATA_DIR/state/yhwach.db --write    # + write CLAUDE.md
+```
+
+(The persona is NOT copied — it ships with the engine; see step 2.)
 
 > **Do not install a one-size global `~/.claude/CLAUDE.md`.** Earlier versions told you
 > to copy the CTF methodology router over your global Claude config. That file is **CTF/exam

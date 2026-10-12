@@ -980,26 +980,12 @@ def _render_board(conn, eid: int, *, reveal: bool = True) -> str:
     )
     parts: list[str] = [f"<span data-crit='{n_crit}' hidden></span>"]
     parts += [_run_row(conn, eid), _tiles(conn, eid)]
-    # The recall menu made visible — "what do I do next, and what am I about to
-    # miss" — sits at the very top of the content: it is the first question every
-    # turn asks. Deterministic candidate menu the brain reasons from, fused with
-    # coverage gaps / untried creds / uncaptured objectives.
-    # Load the technique catalog ONCE per render and hand it to both panels that
-    # need it. Without this they each load it — and, loading at two different
-    # instants, could disagree about the candidate set within one page.
-    try:
-        from yhwach import knowledge as _kn
-
-        techniques = _kn.load_techniques()
-    except Exception:  # noqa: BLE001 — a catalog error must not break the board
-        techniques = None
-    parts.append(_next_panel(conn, eid, techniques=techniques))
-    parts.append(_coverage_panel(conn, eid))
-    # PR-4 board additions: the by-stage host grid sits high (proof that
-    # the world model is honest about the estate size), the cred×service
-    # matrix + spray feed sit near the vault (spray provenance in one place).
+    # The board shows what has been FOUND. "What's possible / what you still owe /
+    # what to work next" is advisory — it lives at the wire (yhwach_next/gaps/
+    # coverage/brief) for the model, not on the human board.
+    # The by-stage host grid sits high (proof that the world model is honest about
+    # the estate size); the cred×service matrix + spray feed sit near the vault.
     parts.append(_host_stage_board(conn, eid))
-    parts.append(_workers_panel(conn, eid, techniques=techniques))
     # The full network map is the whole body of /map, and the three vault panels
     # are the whole body of /vault — each was being rendered twice per page view.
     # The board keeps the headline numbers and links out for the detail.
@@ -1008,8 +994,6 @@ def _render_board(conn, eid: int, *, reveal: bool = True) -> str:
     parts.append(_hosts(conn, eid))
     parts.append(_vault_strip(conn, eid, reveal=reveal))
     parts.append(_findings(conn, eid))
-    parts.append(_llm_coverage_panel(conn, eid))
-    parts.append(_attempt_feed(conn, eid))
     parts.append(_activity(conn, eid))
     return "\n".join(parts)
 
@@ -1176,116 +1160,6 @@ def _tiles(conn, eid: int) -> str:
 _RISK_COL = {"read_only": "#6bb36b", "exploit": "#d9a441", "destructive": "#e06767"}
 
 
-def _next_panel(conn, eid: int, *, techniques=None) -> str:
-    """Which techniques are even POSSIBLE against each surface, and at what risk
-    tier — plus what you're about to miss (under-enumeration, untried creds,
-    uncaptured objectives).
-
-    This is an inventory of applicability, not a recommendation: the rows are
-    sorted by host then technique id, never scored or ranked, and the panel never
-    says which to run. The heading used to read "Next moves — the recall menu",
-    which announced a recommender the content deliberately is not.
-
-    Best-effort: a knowledge-load error never breaks the board (the panel just
-    disappears)."""
-    from yhwach import nextmoves as nm_
-
-    try:
-        nm = nm_.next_moves(conn, eid, techniques=techniques)
-    except Exception:  # noqa: BLE001 — decoration only; never break the board
-        return ""
-
-    head = ("<h2 class='sec'>Applicability inventory — what is possible per surface</h2>")
-    if nm.empty:
-        return (
-            head + "<div class='card'>"
-            + _empty("no technique applies to the current world model — ingest a scan "
-                     "or advance a host")
-            + "</div>"
-        )
-
-    def _cand_row(c) -> str:
-        star = " ★" if c.technique_class == "ai" else ""
-        surf = _esc(c.surface_kind or "host")
-        rcol = _RISK_COL.get(c.risk, "#7f8792")
-        rchip = f"<span class='chip' style='color:{rcol};background:{rcol}22'>{_esc(c.risk)}</span>"
-        maps = _esc(", ".join(c.maps)) if c.maps else ""
-        chain = f"<code class='mono'>{_esc(c.chained_from)}</code>" if c.chained_from else ""
-        return (
-            f"<tr><td class='mono'>{_hlink(c.host_ip)}</td>"
-            f"<td class='mono'>{_esc(c.technique_id)}{star}</td>"
-            f"<td>{surf}</td><td>{rchip}</td>"
-            f"<td class='mono' style='font-size:.66rem;color:var(--muted)'>{maps}</td>"
-            f"<td>{chain}</td></tr>"
-        )
-
-    def _cand_table(title: str, cands: list, tint: str) -> str:
-        if not cands:
-            return ""
-        ordered = sorted(cands, key=lambda c: (c.host_ip, c.technique_id))
-        # 181 rules against a 60-host estate is several hundred rows, and this
-        # panel alone was half the fragment the board re-serialises every 3s. The
-        # complete menu is `yhwach next`; the board shows the shape and says how
-        # much it is not showing. Sorted by host, so the cap cuts at a host
-        # boundary rather than mid-estate.
-        shown = ordered[:_BOARD_ROW_CAP]
-        body = "".join(_cand_row(c) for c in shown)
-        cap = (
-            f"<div style='padding:.45rem .7rem;font-size:.72rem;font-weight:600;"
-            f"color:{tint};border-bottom:1px solid var(--line)'>{title} · {len(cands)}</div>"
-        )
-        return (
-            "<div class='card' style='margin-bottom:.7rem'>" + cap
-            + "<table><thead><tr><th>host</th><th>technique</th><th>surface</th>"
-            "<th>risk</th><th>maps</th><th>chains</th></tr></thead>"
-            f"<tbody>{body}</tbody></table>"
-            + _more_note(len(ordered), len(shown),
-                         "the complete menu is `yhwach next`")
-            + "</div>"
-        )
-
-    out = [head]
-    out.append(_cand_table("Read-only — applicable now, nothing gating them", nm.auto, "#6bb36b"))
-    out.append(_cand_table("Gated — applicable, but carry exploit or destructive risk", nm.gated, "#d9a441"))
-
-    # "About to miss" strip — the completeness half. Amber left-accent so it reads
-    # as a watch-out, not a result.
-    miss: list[str] = []
-    if nm.coverage:
-        top = nm.coverage[0]
-        miss.append(
-            f"<div style='margin:.2rem 0'><b>Under-enumeration</b> — "
-            f"{len(nm.coverage)} started host(s) not fully enumerated "
-            f"(worst: <span class='mono'>{_esc(top.ip)}</span>) — "
-            "exact fixes in the coverage panel below</div>"
-        )
-    if nm.untried_creds:
-        preview = ", ".join(
-            f"{_esc(c['identifier'])}(<span style='color:var(--muted)'>{_esc(c['kind'])}</span>)"
-            for c in nm.untried_creds[:12]
-        )
-        more = f" +{len(nm.untried_creds) - 12} more" if len(nm.untried_creds) > 12 else ""
-        miss.append(
-            f"<div style='margin:.2rem 0'><b>Untried creds</b> — spray these: {preview}{more}</div>"
-        )
-    if nm.objectives:
-        objs = ", ".join(
-            f"{_esc(o['label'])} <span style='color:var(--muted)'>@{_esc(o['ip'])}</span>"
-            + (f" ({o['points']}pts)" if o["points"] else "")
-            for o in nm.objectives
-        )
-        miss.append(
-            f"<div style='margin:.2rem 0'><b>Uncaptured objectives</b> — {objs}</div>"
-        )
-    if miss:
-        out.append(
-            "<div class='card' style='border-left:3px solid #d9a441;padding:.7rem .9rem;"
-            "font-size:.78rem'>" + "".join(miss) + "</div>"
-        )
-
-    return "\n".join(p for p in out if p)
-
-
 def _copy_cmd(cmd: str) -> str:
     """A monospace command + a one-click copy button (same idiom as the vault)."""
     s = _esc(cmd)
@@ -1315,196 +1189,6 @@ def _cov_bar(c) -> str:
         for label, ok in dims
     )
     return f"<span style='display:inline-flex;gap:3px;vertical-align:middle'>{cells}</span>"
-
-
-def _coverage_panel(conn, eid: int) -> str:
-    """The world-model honesty worktable: for every host you've reached but not
-    fully enumerated (worst first), a completeness bar and each remaining gap with
-    the *exact copy-paste command* that closes it.
-
-    Under-enumeration is the #1 point loss in engagements; before this it was only a raw
-    scan_needed count. Best-effort — never breaks the board."""
-    from yhwach.coverage import coverage_score, started_gaps
-
-    try:
-        covs = started_gaps(conn, eid)
-        reached = coverage_score(conn, eid).considered
-    except Exception:  # noqa: BLE001 — decoration only
-        return ""
-
-    head = "<h2 class='sec'>Enumeration coverage — what you still owe</h2>"
-    if not covs:
-        # "every reached host is covered" is vacuously true with zero reached
-        # hosts, and reads as an all-clear at hour zero. Split the two cases.
-        msg = ("nothing reached yet — no host has been scanned" if not reached else
-               "every reached host is full-ported, versioned and UDP-swept, and every "
-               "service is triaged ✓")
-        return head + "<div class='card'>" + _empty(msg) + "</div>"
-
-    shown = covs[:_BOARD_ROW_CAP]
-    rows = ""
-    for c in shown:
-        gap_html = "".join(
-            f"<div style='margin:.25rem 0'>"
-            f"<span style='color:var(--muted)'>{_esc(g.detail)}</span><br>{_copy_cmd(g.fix)}</div>"
-            for g in c.gaps
-        )
-        rows += (
-            f"<tr><td class='mono' style='white-space:nowrap;vertical-align:top'>"
-            f"{_hlink(c.ip)} <span style='color:var(--muted)'>[{_esc(c.stage)}]</span></td>"
-            f"<td style='vertical-align:top'>{_cov_bar(c)}</td>"
-            f"<td>{gap_html}</td></tr>"
-        )
-    return (
-        head + "<div class='card'><table><thead><tr><th>host</th><th>coverage</th>"
-        f"<th>gaps &amp; the exact fix</th></tr></thead><tbody>{rows}</tbody></table>"
-        + _more_note(len(covs), len(shown), "worst first; see `yhwach gaps` or the Recon tab")
-        + "</div>"
-    )
-
-
-def _workers_panel(conn, eid: int, *, techniques=None) -> str:
-    """The gaze: the orchestrator eye watching its per-host worker eyes, each
-    showing which host it holds and the technique it is working. Derived from the
-    attempt ledger (what each worker has run) + the candidate queue (what's left)."""
-    from yhwach import knowledge as kn
-
-    running = _run_status(conn, eid) == "RUNNING"
-    agg = conn.execute(
-        "SELECT h.id hid, h.ip, h.stage, COALESCE(h.role,'') role, COUNT(a.id) n, "
-        "SUM(CASE WHEN a.result='success' THEN 1 ELSE 0 END) ok "
-        "FROM host h LEFT JOIN attempt a ON a.host_id=h.id AND a.engagement_id=? "
-        "WHERE h.engagement_id=? GROUP BY h.id",
-        (eid, eid),
-    ).fetchall()
-    agg_by_ip = {r["ip"]: r for r in agg}
-    last = {
-        r["host_id"]: r
-        for r in conn.execute(
-            "SELECT host_id, playbook_rule_id, technique_id, result, COALESCE(reason,'') reason "
-            "FROM attempt WHERE engagement_id=? AND id IN "
-            "(SELECT MAX(id) FROM attempt WHERE engagement_id=? GROUP BY host_id)",
-            (eid, eid),
-        ).fetchall()
-    }
-
-    # Live heartbeats (authoritative when fresh) — the fix for the gaze: every
-    # worker running now shows active, with staleness, instead of inferring one
-    # active host from the last attempt row.
-    hb_by_ip: dict[str, dict] = {}
-    for r in yhdb.list_worker_state(conn, eid):
-        age = _age_secs(r["updated_at"])
-        fresh = age is not None and age <= _WORKER_STALE_SECS
-        hb_by_ip[r["host_ip"]] = {
-            "status": r["status"], "focus": r["focus"], "cmd": r["cmd"] or "",
-            "fresh": fresh, "age": age,
-        }
-    any_fresh = any(h["fresh"] and h["status"] in ("watching", "running")
-                    for h in hb_by_ip.values())
-
-    pend: dict[str, int] = {}
-    try:
-        for c in kn.candidates_for(conn, eid, techniques=techniques):
-            pend[c.host_ip] = pend.get(c.host_ip, 0) + 1
-    except Exception:  # candidate lookup is best-effort decoration
-        pend = {}
-
-    # A host is a worker if it has a heartbeat, work done, or work queued.
-    ips = set(hb_by_ip) | {r["ip"] for r in agg if (r["n"] or 0) or pend.get(r["ip"], 0)}
-
-    # Fallback "active" only when NO heartbeats are fresh: the most recent attempt.
-    fallback_active_ip = None
-    if not any_fresh and running:
-        arow = conn.execute(
-            "SELECT h.ip FROM attempt a JOIN host h ON h.id=a.host_id "
-            "WHERE a.engagement_id=? ORDER BY a.id DESC LIMIT 1", (eid,)
-        ).fetchone()
-        fallback_active_ip = arow["ip"] if arow else None
-
-    workers: list[dict] = []
-    for ip in ips:
-        r = agg_by_ip.get(ip)
-        hid = r["hid"] if r else None
-        n = (r["n"] or 0) if r else 0
-        ok = (r["ok"] or 0) if r else 0
-        stage = r["stage"] if r else "scanned"
-        role = r["role"] if r else ""
-        peq = pend.get(ip, 0)
-        lr = last.get(hid) if hid is not None else None
-        hb = hb_by_ip.get(ip)
-
-        focus = (lr["technique_id"] or lr["playbook_rule_id"]) if lr else None
-        cmd = (lr["reason"] if lr else "") or ""
-        if hb and hb["focus"]:
-            focus = hb["focus"]
-        if hb and hb["cmd"]:
-            cmd = hb["cmd"]
-        result = lr["result"] if lr else None
-
-        active = False
-        if hb and hb["fresh"] and hb["status"] in ("watching", "running"):
-            active, status, sc = True, hb["status"], _HB_COL[hb["status"]]
-        elif hb and hb["fresh"]:
-            status, sc = hb["status"], _HB_COL.get(hb["status"], "#7f8792")
-        elif hb and not hb["fresh"]:
-            status, sc = "stale", "#5b626d"  # heartbeat went quiet
-        elif ip == fallback_active_ip:
-            active, status, sc = True, "watching", "#e83bb0"
-        elif peq:
-            status, sc = "queued", "#3987e5"
-        elif result == "success":
-            status, sc = "done", "#0ca30c"
-        elif result in ("fail", "blocked"):
-            status, sc = result, "#d03b3b"
-        elif result == "partial":
-            status, sc = "partial", "#fab219"
-        else:
-            status, sc = "idle", "#7f8792"
-        workers.append({
-            "ip": ip, "stage": stage, "role": role, "n": n, "ok": ok,
-            "focus": focus, "cmd": cmd, "status": status, "sc": sc,
-            "active": active, "pend": peq,
-        })
-    workers.sort(key=lambda w: (not w["active"], -w["n"], w["ip"]))
-    active_ip = next((w["ip"] for w in workers if w["active"]), None)
-
-    head = "<h2 class='sec'>The gaze — the Almighty &amp; workers</h2>"
-    if not workers:
-        return (
-            head + "<div class='gazewrap'><p class='empty' style='margin:0'>"
-            "no workers dispatched yet — the eye waits</p></div>"
-        )
-
-    meta = f"watching {len(workers)} worker(s)" + (
-        f" · {_esc(active_ip)} active" if active_ip else ""
-    )
-    cards = ""
-    for w in workers:
-        badge = _stage_badge(w["stage"])
-        if w["focus"]:
-            focus = f"<span class='rid'>{_esc(w['focus'])}</span>"
-        elif w["pend"]:
-            focus = "<span class='mono'>scanning…</span>"
-        else:
-            focus = "<span class='mono'>idle</span>"
-        chip = f"<span class='chip' style='color:{w['sc']};background:{w['sc']}22'>{_esc(w['status'])}</span>"
-        # live command ticker: what the worker last actually ran (runner reason)
-        verb = "running" if w["active"] else "last"
-        ticker = f"<div class='wk-cmd'><b>{verb}:</b> {_esc(w['cmd'])}</div>" if w["cmd"] else ""
-        cards += (
-            f"<div class='wk{' on' if w['active'] else ''}'>{_eye_icon(w['active'])}"
-            f"<div class='wk-b'><div class='wk-ip'>{_esc(w['ip'])} {badge}</div>"
-            f"<div class='wk-focus'>▶ {focus}</div>{ticker}"
-            f"<div class='wk-meta'>{_esc(w['role']) or 'host'} · {w['ok']}/{w['n']} actions</div></div>"
-            f"<div class='wk-st'>{chip}</div></div>"
-        )
-    dot = "live" if running else ""
-    return (
-        head + "<div class='gazewrap'>"
-        f"<div class='gazehead'><span class='runbadge'><span class='dot {dot}'></span>"
-        f"<span class='lbl'>the almighty</span></span><span class='meta'>{meta}</span></div>"
-        f"{_gaze_svg(workers, active_ip)}<div class='wkgrid'>{cards}</div></div>"
-    )
 
 
 def _pivot_tree_svg(bands: list[tuple[str, list[dict]]], tunnels: list[dict],
@@ -2335,38 +2019,6 @@ def _findings(conn, eid: int) -> str:
 _LLM_STATUS_COL = {"PRESENT": "#6bb36b", "ABSENT": "#e06767", "UNKNOWN": "#5b626d"}
 
 
-def _llm_coverage_panel(conn, eid: int) -> str:
-    """OWASP-LLM Top-10 methodology matrix: which classes were exercised, which
-    are ABSENT (an AI surface exists but was never tested — a scored-point gap),
-    which UNKNOWN. Hidden on non-AI engagements. Best-effort."""
-    from yhwach.audit import llm_coverage
-
-    try:
-        rows = llm_coverage(conn, eid)
-    except Exception:  # noqa: BLE001 — decoration only
-        return ""
-    if not any(r["status"] != "UNKNOWN" for r in rows):
-        return ""  # no AI surface and no LLM finding — not relevant here
-    tested = sum(1 for r in rows if r["status"] == "PRESENT")
-    head = f"<h2 class='sec'>OWASP-LLM coverage — {tested}/{len(rows)} exercised</h2>"
-    cells = ""
-    for r in rows:
-        col = _LLM_STATUS_COL.get(r["status"], "#5b626d")
-        cells += (
-            "<div style='display:flex;align-items:center;gap:.5rem;padding:.28rem .6rem;"
-            "border-bottom:1px solid var(--line)'>"
-            f"<span class='chip' style='color:{col};background:{col}22;min-width:5.4rem;"
-            f"text-align:center'>{_esc(r['status'])}</span>"
-            f"<span class='mono' style='color:var(--muted)'>{_esc(r['id'])}</span>"
-            f"<span>{_esc(r['title'])}</span></div>"
-        )
-    legend = (
-        "<div class='matrix-note'>[PRESENT] proven · [ABSENT] AI surface exists but "
-        "never tested · [UNKNOWN] no AI surface in scope</div>"
-    )
-    return head + f"<div class='card'>{cells}</div>{legend}"
-
-
 def _creds_vault(conn, eid: int, *, reveal: bool = True,
                  cap: int | None = _BOARD_ROW_CAP) -> str:
     """The credential vault: every cred, its secret (masked, click-to-reveal +
@@ -2632,35 +2284,6 @@ _ATTEMPT_COL = {
     "success": "#6bb36b", "admin": "#7be07b", "fail": "#e06767",
     "blocked": "#d9a441", "partial": "#9aa0a6",
 }
-
-
-def _attempt_feed(conn, eid: int) -> str:
-    """Estate-wide attempt feed (newest first). Attempts were only visible
-    per-host (host detail, last 20); this surfaces dead-ends across the whole
-    engagement on the board, not just in the report .md."""
-    rows = yhdb.list_attempts(conn, eid, limit=25)
-    head = "<h2 class='sec'>Attempts — estate-wide (newest first)</h2>"
-    if not rows:
-        return (
-            head + "<div class='card'><p class='empty' style='padding:.9rem'>"
-            "nothing attempted yet</p></div>"
-        )
-    body = ""
-    for r in rows:
-        res = r["result"]
-        col = _ATTEMPT_COL.get(res, "#7f8792")
-        chip = f"<span class='chip' style='color:{col};background:{col}22'>{_esc(res)}</span>"
-        tid = r["technique_id"] or r["playbook_rule_id"] or "?"
-        reason = _esc((r["reason"] or "")[:90])
-        body += (
-            f"<tr><td>{chip}</td><td class='mono'>{_hlink(r['host_ip'])}</td>"
-            f"<td class='mono'>{_esc(tid)}</td>"
-            f"<td style='color:var(--muted)'>{reason}</td></tr>"
-        )
-    return (
-        head + "<div class='card'><table><thead><tr><th>result</th><th>host</th>"
-        f"<th>technique</th><th>reason</th></tr></thead><tbody>{body}</tbody></table></div>"
-    )
 
 
 # ─── PR-4 UI panels — the three surfaces the world-model repair exposes ─────
@@ -3105,104 +2728,6 @@ def _mkn(n) -> str:
     return f"<span class='mk {'y' if n else 'n'}'>{n}</span>"
 
 
-def _recon_enum_matrix(conn, eid: int) -> str:
-    rows = conn.execute(
-        "SELECT h.id, h.ip, COALESCE(h.hostname,'') hostname, h.stage, "
-        "MAX(CASE WHEN c.proto='tcp' THEN c.full_range   ELSE 0 END) tcp_full, "
-        "MAX(CASE WHEN c.proto='tcp' THEN c.version_scan ELSE 0 END) tcp_sv, "
-        "COUNT(CASE WHEN c.proto='udp' THEN 1 END) udp_rows, "
-        "MAX(c.scanned_at) last_scan, "
-        "(SELECT COUNT(*) FROM service  s  WHERE s.host_id=h.id) n_svc, "
-        "(SELECT COUNT(*) FROM surface  u  WHERE u.host_id=h.id) n_surf, "
-        "(SELECT COUNT(*) FROM web_app  w  WHERE w.host_id=h.id) n_app, "
-        "(SELECT COUNT(*) FROM web_path p JOIN web_app w2 ON w2.id=p.web_app_id "
-        "   WHERE w2.host_id=h.id) n_path, "
-        "(SELECT COUNT(*) FROM share sh WHERE sh.host_id=h.id) n_share, "
-        "(SELECT COUNT(*) FROM principal pr WHERE pr.engagement_id=h.engagement_id "
-        "   AND (pr.home_host_id=h.id OR pr.domain IN "
-        "        (SELECT d.name FROM domain d WHERE d.host_id=h.id AND d.type='domain'))) n_princ, "
-        "(SELECT COUNT(*) FROM credential_access ca WHERE ca.host_id=h.id) n_cred, "
-        "(SELECT COUNT(*) FROM credential_access ca2 WHERE ca2.host_id=h.id "
-        "   AND ca2.result IN ('success','admin')) n_cred_ok "
-        "FROM host h LEFT JOIN scan_coverage c ON c.host_id=h.id "
-        "WHERE h.engagement_id=? AND h.stage <> 'undiscovered' "
-        "GROUP BY h.id "
-        "ORDER BY (tcp_full + tcp_sv + (udp_rows > 0)) ASC, h.ip ASC",
-        (eid,),
-    ).fetchall()
-    n_undisc = _scalar(
-        conn, "SELECT COUNT(*) FROM host WHERE engagement_id=? AND stage='undiscovered'", (eid,))
-
-    body = []
-    for r in rows:
-        if r["n_cred_ok"]:
-            tries = f"<span class='mk y'>{r['n_cred_ok']}/{r['n_cred']}</span>"
-        else:
-            cls = "p" if r["n_cred"] else "n"
-            tries = f"<span class='mk {cls}'>0/{r['n_cred']}</span>"
-        body.append([
-            f"{_hlink(r['ip'])}<div class='sub2'>{_esc(r['hostname'])}</div>",
-            _stage_badge(r["stage"]),
-            _mk(int(r["tcp_full"] or 0) == 1), _mk(int(r["tcp_sv"] or 0) == 1),
-            _mk(int(r["udp_rows"] or 0) > 0),
-            _mkn(r["n_svc"]), _mkn(r["n_surf"]), _mkn(r["n_app"]), _mkn(r["n_path"]),
-            _mkn(r["n_share"]), _mkn(r["n_princ"]), tries,
-            f"<span class='muted mono'>{_esc((r['last_scan'] or '-')[:16])}</span>",
-        ])
-    headers = ["host", "stage"] + [c for c, _ in _MATRIX_COLS] + ["last scan"]
-    legend = " · ".join(f"<b>{_esc(c)}</b> {_esc(d)}" for c, d in _MATRIX_COLS)
-    note = (
-        "✔ recorded · ✘ not recorded · a number is a row count. "
-        "Sorted by how few of the three scans exist, so the thinnest hosts come first "
-        "— a count, not a priority. " + legend
-    )
-    if n_undisc:
-        note += (f" · {n_undisc} host(s) at stage <code class='mono'>undiscovered</code> "
-                 "are not listed: nothing has been recorded about them at all.")
-    return _panel(
-        "Enumeration matrix — what has actually been looked at, per host",
-        _rows_table(headers, body,
-                    empty="no hosts in this engagement yet — `yhwach engage` "
-                          "materialises the scope"),
-        note=note)
-
-
-def _recon_scan_ledger(conn, eid: int) -> str:
-    rows = conn.execute(
-        "SELECT h.ip, c.proto, c.ports, c.full_range, c.version_scan, "
-        "COALESCE(c.source,'') source, c.scanned_at "
-        "FROM scan_coverage c JOIN host h ON h.id=c.host_id "
-        "WHERE h.engagement_id=? ORDER BY c.scanned_at DESC, h.ip, c.proto LIMIT 80",
-        (eid,),
-    ).fetchall()
-    never = conn.execute(
-        "SELECT h.ip FROM host h WHERE h.engagement_id=? AND h.stage <> 'undiscovered' "
-        "AND NOT EXISTS (SELECT 1 FROM scan_coverage c WHERE c.host_id=h.id) ORDER BY h.ip",
-        (eid,),
-    ).fetchall()
-    body = []
-    for r in rows:
-        src = (f"<code class='mono'>{_esc(r['source'])}</code>" if r["source"]
-               else "<span class='muted'>(argv not recorded)</span>")
-        body.append([
-            _hlink(r["ip"]), _esc(r["proto"]),
-            f"<code class='mono'>{_esc(r['ports'])}</code>",
-            _mk(int(r["full_range"] or 0) == 1), _mk(int(r["version_scan"] or 0) == 1), src,
-            f"<span class='muted mono'>{_esc((r['scanned_at'] or '')[:19])}</span>",
-        ])
-    note = ("The port range exactly as the scan reported it, never a derived verdict. "
-            "<code class='mono'>source</code> carries the real nmap argv after an ingest.")
-    if never:
-        listed = ", ".join(f"<code class='mono'>{_esc(r['ip'])}</code>" for r in never[:20])
-        note += f" · <b>No scan recorded at all</b> for: {listed}"
-    return _panel(
-        "Scan ledger — every scan the model has seen",
-        _rows_table(["host", "proto", "ports scanned", "full", "-sV", "source / argv", "when"],
-                    body,
-                    empty="no scan_coverage rows — the model has not seen a single scan"),
-        note=note)
-
-
 def _recon_segments(conn, eid: int) -> str:
     rows = conn.execute(
         "SELECT 'tunnel' origin, t.subnet cidr, COALESCE(t.kind,'') detail, "
@@ -3286,9 +2811,6 @@ def _recon_provenance(conn, eid: int) -> str:
 
 def _recon_body(conn, eid: int) -> str:
     return "\n".join((
-        _recon_enum_matrix(conn, eid),
-        _recon_scan_ledger(conn, eid),
-        _recon_probe_coverage(conn, eid),
         _recon_segments(conn, eid),
         _recon_names(conn, eid),
         _recon_provenance(conn, eid),
@@ -3966,109 +3488,6 @@ def _payload_ledger(conn, eid: int, *, reveal: bool = True) -> str:
              "indirect \u2192 encoded.")
 
 
-def _recon_probe_coverage(conn, eid: int) -> str:
-    """Which probes have actually RUN against each service, and which have not.
-
-    Until probe_run existed this was unanswerable: `yhwach probe` wrote a row only
-    on a hit, so a service with no surface might have been swept and matched
-    nothing, or never touched at all. The two need different work and look
-    identical without this.
-    """
-
-    try:
-        from yhwach.probes.ai import probes_for_port
-    except ImportError:  # pragma: no cover
-        return ""
-
-    svc = conn.execute(
-        "SELECT h.id host_id, h.ip, s.port, COALESCE(s.product,'') product "
-        "FROM service s JOIN host h ON h.id=s.host_id WHERE h.engagement_id=? "
-        "ORDER BY h.ip, s.port", (eid,),
-    ).fetchall()
-    runs: dict[tuple[int, int], dict[str, str]] = {}
-    for r in conn.execute(
-        "SELECT host_id, port, probe, result FROM probe_run WHERE engagement_id=?", (eid,)
-    ):
-        runs.setdefault((r["host_id"], r["port"]), {})[r["probe"]] = r["result"]
-
-    body = []
-    for s in svc:
-        registered = [getattr(p, "__name__", str(p)) for p in probes_for_port(s["port"])]
-        # Every service also goes through the traditional detector.
-        registered = [*registered, "detect_traditional"]
-        ran = runs.get((s["host_id"], s["port"]), {})
-        hits = [n for n in registered if ran.get(n) == "hit"]
-        missed = [n for n in registered if ran.get(n) == "miss"]
-        errored = [n for n in registered if ran.get(n) == "error"]
-        never = [n for n in registered if n not in ran]
-        if hits:
-            state = f"<span class='mk y'>{len(hits)} hit</span>"
-        elif errored:
-            # A crashed probe is the third state the panel's own note is about:
-            # it looked identical to a clean miss, so a surface could stay
-            # undetected in silence.
-            state = f"<span class='mk n'>{len(errored)} probe(s) errored</span>"
-        elif missed and not never:
-            state = "<span class='mk p'>swept, nothing matched</span>"
-        elif not ran:
-            state = "<span class='mk n'>never probed</span>"
-        else:
-            state = f"<span class='mk p'>{len(missed)} miss, {len(never)} not run</span>"
-        body.append([
-            _hlink(s["ip"]), f"<code class='mono'>{_esc(s['port'])}</code>",
-            _esc(s["product"]) or "<span class='muted'>—</span>", state,
-            (", ".join(f"<code class='mono'>{_esc(n)}</code>" for n in (never + errored))
-             if (never or errored) else "<span class='muted'>—</span>"),
-        ])
-    return _panel(
-        "Probe coverage \u2014 what has actually been fingerprinted",
-        _rows_table(["host", "port", "product", "state", "registered but not run"], body,
-                    empty="no service recorded yet"),
-        note="<b>never probed</b> and <b>swept, nothing matched</b> need different work and "
-             "looked identical until probe runs were recorded. The sweep returns on the first "
-             "hit, so probes after a hit legitimately show as not run.")
-
-
-def _reach_table(conn, eid: int) -> str:
-    """Every tunnel and what it opened.
-
-    A tunnelled subnet with zero discovered hosts is the strongest "I can reach
-    this and have never looked" signal there is, and the tree cannot draw it —
-    it has no node to hang a band off. On the reference engagement the string
-    `10.30.0.0/24` appeared nowhere on this page.
-    """
-    rows = conn.execute(
-        "SELECT t.subnet, COALESCE(t.kind,'') kind, COALESCE(t.agent_path,'') agent, "
-        "t.created_at, COALESCE(h.ip,'') via_ip, COALESCE(h.hostname,'') via_name "
-        "FROM tunnel t LEFT JOIN host h ON h.id=t.via_host_id "
-        "WHERE t.engagement_id=? ORDER BY t.created_at DESC, t.subnet",
-        (eid,),
-    ).fetchall()
-    body = []
-    for r in rows:
-        inside, owned = yhdb.hosts_in_subnet(conn, eid, r["subnet"])
-        state = ("<span class='mk n'>nothing discovered inside</span>" if not inside
-                 else f"<span class='mk y'>{owned}/{inside} owned</span>")
-        body.append([
-            f"<code class='mono'>{_esc(r['subnet'])}</code>",
-            _hlink(r["via_ip"]) + (f"<div class='sub2'>{_esc(r['via_name'])}</div>"
-                                   if r["via_name"] else ""),
-            _esc(r["kind"]) or "<span class='muted'>—</span>",
-            (f"<code class='mono'>{_esc(r['agent'])}</code>" if r["agent"]
-             else "<span class='muted'>not recorded</span>"),
-            state,
-            f"<span class='muted mono' style='font-size:.68rem'>"
-            f"{_esc((r['created_at'] or '')[:19])}</span>",
-        ])
-    return _panel(
-        "Reach \u2014 every tunnel and what it opened",
-        _rows_table(["subnet", "via host", "kind", "agent shipped", "inside", "opened"], body,
-                    empty="no tunnel recorded \u2014 everything reachable is reachable directly"),
-        note="A subnet with nothing discovered inside is reachable and completely unenumerated. "
-             "The tree below cannot show it: with no host in the segment there is no node to "
-             "draw.")
-
-
 def _segment_inventory(conn, eid: int) -> str:
     """Per /24: how far into it the engagement has actually got."""
     rows = conn.execute(
@@ -4139,7 +3558,6 @@ def _interfaces_panel(conn, eid: int) -> str:
 
 def _map_body(conn, eid: int) -> str:
     return "\n".join((
-        _reach_table(conn, eid),
         _segment_inventory(conn, eid),
         _network_map(conn, eid),
         _interfaces_panel(conn, eid),

@@ -135,13 +135,6 @@ def test_attack_path_empty_state(tmp_db: Path) -> None:
     assert "no path yet" in r.text
 
 
-def test_workers_gaze_empty_state(tmp_db: Path) -> None:
-    _seed(tmp_db)  # host exists but no attempts and (likely) no candidates
-    r = _client(tmp_db).get("/panel")
-    assert r.status_code == 200
-    assert "The gaze" in r.text
-
-
 def test_index_has_favicon(tmp_db: Path) -> None:
     _seed(tmp_db)
     r = _client(tmp_db).get("/")
@@ -314,23 +307,6 @@ def test_host_focus_page(tmp_db: Path) -> None:
     assert "11434/tcp" in r.text  # its ports
     assert "unauth ollama" in r.text  # its findings
     assert "back to map" in r.text
-
-
-def test_worker_command_ticker(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    with yhdb.transaction(tmp_db) as conn:
-        eid = yhdb.engagement_id_for(conn, "L")
-        hid = conn.execute(
-            "SELECT id FROM host WHERE engagement_id=? AND ip='10.0.0.5'", (eid,)
-        ).fetchone()["id"]
-        conn.execute(
-            "INSERT INTO attempt (engagement_id, host_id, playbook_rule_id, technique_id, "
-            "result, reason, attempted_at) VALUES (?, ?, 'probe_ollama_models', "
-            "'ollama_unauth_api', 'success', 'hexstrike: probe_ollama_models', 't')",
-            (eid, hid),
-        )
-    r = _client(tmp_db).get("/panel")
-    assert "wk-cmd" in r.text and "hexstrike: probe_ollama_models" in r.text
 
 
 def test_network_map_groups_by_subnet(tmp_db: Path) -> None:
@@ -525,35 +501,6 @@ def test_event_summary_decodes_payload() -> None:
     assert _event_summary('["a","b"]') == ""  # non-dict payload
 
 
-def test_board_shows_attempt_feed_and_finding_class(tmp_db: Path) -> None:
-    eid = _seed(tmp_db)
-    with yhdb.transaction(tmp_db) as conn:
-        hid = conn.execute(
-            "SELECT id FROM host WHERE engagement_id=?", (eid,)).fetchone()["id"]
-        yhdb.add_finding(conn, hid, None, "LLM01", "Prompt injection", "high",
-                         "leaked system prompt", tag="prompt_injection", engagement_id=eid)
-        conn.execute(
-            "INSERT INTO attempt (engagement_id, host_id, technique_id, result, reason, "
-            "attempted_at) VALUES (?, ?, 'chatbot_probe', 'fail', 'guardrail held', 't')",
-            (eid, hid))
-    body = _client(tmp_db).get("/panel").text
-    assert "Attempts — estate-wide" in body
-    assert "chatbot_probe" in body        # estate-wide attempt feed
-    assert "LLM01" in body                # finding.class rendered on the board
-
-
-def test_board_llm_coverage_panel(tmp_db: Path) -> None:
-    eid = _seed(tmp_db)   # _seed adds an ollama (AI) surface
-    with yhdb.transaction(tmp_db) as conn:
-        hid = conn.execute(
-            "SELECT id FROM host WHERE engagement_id=?", (eid,)).fetchone()["id"]
-        yhdb.add_finding(conn, hid, None, "LLM07", "System prompt leaked", "high",
-                         "x", engagement_id=eid)
-    body = _client(tmp_db).get("/panel").text
-    assert "OWASP-LLM coverage" in body
-    assert "PRESENT" in body and "ABSENT" in body
-
-
 def test_board_points_scoreboard_tile(tmp_db: Path) -> None:
     eid = _seed(tmp_db)
     with yhdb.transaction(tmp_db) as conn:
@@ -674,24 +621,6 @@ def test_host_ip_is_clickable_in_the_tables_that_list_it(tmp_db: Path) -> None:
     assert body.count("class='hl'") >= 1
 
 
-def test_board_loads_the_technique_catalog_once_per_render(tmp_db: Path, monkeypatch) -> None:
-    """Two panels need the catalog. Loading it twice is wasted work, and loading
-    it at two different instants lets them disagree within one page."""
-    from yhwach import knowledge as kn
-    from yhwach import ui as _ui
-
-    _seed(tmp_db)
-    calls = []
-    real = kn.load_techniques
-    monkeypatch.setattr(kn, "load_techniques",
-                        lambda d=None: (calls.append(d), real(d))[1])
-
-    with yhdb.transaction(tmp_db) as conn:
-        eid = yhdb.engagement_id_for(conn, "L")
-        _ui._render_board(conn, eid)
-    assert len(calls) == 1, f"catalog loaded {len(calls)}x in one render"
-
-
 def test_enum_honesty_tile_is_blank_not_green_on_a_fresh_engagement(tmp_db: Path) -> None:
     with yhdb.transaction(tmp_db) as conn:
         yhdb.upsert_engagement(conn, lab="L", scope="10.0.0.0/24")
@@ -740,40 +669,6 @@ def _seed_recon(tmp_db: Path) -> int:
     return eid
 
 
-def test_recon_page_renders_every_panel(tmp_db: Path) -> None:
-    _seed_recon(tmp_db)
-    r = _client(tmp_db).get("/recon")
-    assert r.status_code == 200
-    for heading in ("Enumeration matrix", "Scan ledger", "Segments learned in-engagement",
-                    "Discovery provenance"):
-        assert heading in r.text, heading
-    assert "/recon" in r.text  # the nav entry exists and is marked active
-
-
-def test_recon_matrix_surfaces_the_thinnest_host_first(tmp_db: Path) -> None:
-    """Sorted by how FEW of the three scans exist — a count, not a priority."""
-    _seed_recon(tmp_db)
-    body = _client(tmp_db).get("/recon").text
-    matrix = body[body.index("Enumeration matrix"):body.index("Scan ledger")]
-    assert matrix.index("10.0.0.9") < matrix.index("10.0.0.5"), "thin host did not sort first"
-    # an undiscovered host is excluded from the rows but named in the note
-    assert "10.0.0.77" not in matrix
-    assert "undiscovered" in matrix
-
-
-def test_recon_matrix_marks_are_not_colour_alone(tmp_db: Path) -> None:
-    _seed_recon(tmp_db)
-    matrix = _client(tmp_db).get("/recon").text
-    assert "✔" in matrix and "✘" in matrix
-
-
-def test_recon_names_a_host_with_no_scan_at_all(tmp_db: Path) -> None:
-    _seed_recon(tmp_db)
-    body = _client(tmp_db).get("/recon").text
-    ledger = body[body.index("Scan ledger"):body.index("Segments learned")]
-    assert "No scan recorded at all" in ledger and "10.0.0.9" in ledger
-
-
 def test_recon_shows_a_tunnelled_subnet_with_nothing_inside(tmp_db: Path) -> None:
     """The whole point of the segment panel: a subnet you can reach and have
     never enumerated. /map draws no band for it because it holds no hosts."""
@@ -782,29 +677,6 @@ def test_recon_shows_a_tunnelled_subnet_with_nothing_inside(tmp_db: Path) -> Non
     seg = body[body.index("Segments learned"):body.index("Discovery provenance")]
     assert "10.9.9.0/24" in seg
     assert "ligolo" in seg
-
-
-def test_recon_degrades_on_an_empty_engagement(tmp_db: Path) -> None:
-    with yhdb.transaction(tmp_db) as conn:
-        yhdb.upsert_engagement(conn, lab="L", scope="10.0.0.0/24")
-    body = _client(tmp_db).get("/recon").text
-    assert "no hosts in this engagement yet" in body
-    assert "not seen a single scan" in body
-
-
-def test_recon_escapes_hostile_values(tmp_db: Path) -> None:
-    """Hostnames and scan sources come from scanned hosts, which are hostile."""
-    with yhdb.transaction(tmp_db) as conn:
-        eid = yhdb.upsert_engagement(conn, lab="L", scope="10.0.0.0/24")
-        hid = conn.execute(
-            "INSERT INTO host (engagement_id, ip, hostname, stage, first_seen) "
-            "VALUES (?, '10.0.0.5', '<script>x</script>', 'scanned', 't')", (eid,)).lastrowid
-        yhdb.record_coverage(conn, int(hid), proto="tcp", ports="<img src=x>", port_count=1,
-                             source="<svg onload=1>")
-    body = _client(tmp_db).get("/recon").text
-    assert "<script>x</script>" not in body
-    assert "<img src=x>" not in body and "<svg onload=1>" not in body
-    assert "&lt;script&gt;" in body
 
 
 # ─── board rework: composition, caps, and the rename ───────────────────────
@@ -858,21 +730,6 @@ def test_board_caps_the_findings_table_and_says_so(tmp_db: Path) -> None:
     assert "more of 40 not shown" in findings, "an uncapped table truncated silently"
 
 
-def test_applicability_panel_does_not_announce_a_recommender(tmp_db: Path) -> None:
-    _seed(tmp_db)
-    body = _client(tmp_db).get("/panel").text
-    assert "Applicability inventory" in body
-    assert "Next moves" not in body and "recall menu" not in body
-
-
-def test_coverage_panel_does_not_claim_all_clear_on_an_empty_engagement(tmp_db: Path) -> None:
-    with yhdb.transaction(tmp_db) as conn:
-        yhdb.upsert_engagement(conn, lab="L", scope="10.0.0.0/24")
-    body = _client(tmp_db).get("/panel").text
-    assert "nothing reached yet" in body
-    assert "every reached host is full-ported" not in body
-
-
 def test_board_payload_shrinks_without_the_duplicated_panels(tmp_db: Path) -> None:
     """The board re-serialises its whole fragment every 3s; the two panels it
     duplicated were the largest things on it."""
@@ -885,22 +742,6 @@ def test_board_payload_shrinks_without_the_duplicated_panels(tmp_db: Path) -> No
     # the map fragment alone is a meaningful share of what the board used to carry
     assert mp > 2000, mp
     assert board < mp * 6, (board, mp)
-
-
-def test_applicability_tables_are_capped_and_say_so(tmp_db: Path) -> None:
-    """181 rules against a large estate is several hundred rows; this panel was
-    half the fragment the board re-serialises every three seconds."""
-    with yhdb.transaction(tmp_db) as conn:
-        eid = yhdb.upsert_engagement(conn, lab="L", scope="10.0.0.0/24")
-        for i in range(40):
-            hid = conn.execute(
-                "INSERT INTO host (engagement_id, ip, os, stage, first_seen) "
-                "VALUES (?, ?, 'linux', 'scanned', 't')", (eid, f"10.0.0.{i + 1}")).lastrowid
-            yhdb.upsert_surface(conn, int(hid), None, "web", "none", "{}")
-    body = _client(tmp_db).get("/panel").text
-    panel = body[body.index("Applicability inventory"):body.index(">Enumeration coverage")]
-    assert "not shown" in panel, "the applicability table truncated silently"
-    assert "yhwach next" in panel, "the cap must name where the complete menu is"
 
 
 # ─── /surfaces ─────────────────────────────────────────────────────────────
@@ -1189,7 +1030,6 @@ def test_poc_keeps_steps_whose_objective_row_is_missing(tmp_db: Path) -> None:
     assert "not in the objective table" in body
 
 
-
 # ─── /report rework + the markdown renderer ────────────────────────────────
 
 
@@ -1407,25 +1247,6 @@ def test_run_probes_reports_every_probe_it_actually_ran() -> None:
     assert len(seen) == 3, "a probe after the hit was recorded, but it never ran"
 
 
-def test_probe_run_distinguishes_never_probed_from_nothing_matched(tmp_db: Path) -> None:
-    with yhdb.transaction(tmp_db) as conn:
-        eid = yhdb.upsert_engagement(conn, lab="L", scope="10.0.0.0/24")
-        hid = conn.execute("INSERT INTO host (engagement_id, ip, stage, first_seen) "
-                           "VALUES (?, '10.0.0.5', 'scanned', 't')", (eid,)).lastrowid
-        conn.execute("INSERT INTO service (host_id, port, proto, discovered_at) "
-                     "VALUES (?, 11434, 'tcp', 't')", (int(hid),))
-        conn.execute("INSERT INTO service (host_id, port, proto, discovered_at) "
-                     "VALUES (?, 6333, 'tcp', 't')", (int(hid),))
-        # 11434 was swept and matched nothing; 6333 was never touched
-        for probe in ("probe_ollama",):
-            yhdb.record_probe_run(conn, eid, int(hid), 11434, probe, "miss")
-
-    body = _client(tmp_db).get("/recon").text
-    panel = body[body.index("Probe coverage"):]
-    assert "swept, nothing matched" in panel
-    assert "never probed" in panel
-
-
 def test_record_probe_run_is_idempotent(tmp_db: Path) -> None:
     """A miss that later becomes a hit must update, not double-count."""
     with yhdb.transaction(tmp_db) as conn:
@@ -1440,22 +1261,6 @@ def test_record_probe_run_is_idempotent(tmp_db: Path) -> None:
 
 
 # ─── /map rework ───────────────────────────────────────────────────────────
-
-
-def test_map_shows_a_tunnelled_subnet_with_nothing_inside(tmp_db: Path) -> None:
-    """The strongest 'I can reach this and have never looked' signal there is,
-    and the tree cannot draw it: with no host in the segment there is no node."""
-    with yhdb.transaction(tmp_db) as conn:
-        eid = yhdb.upsert_engagement(conn, lab="L", scope="10.0.0.0/24")
-        hid = conn.execute("INSERT INTO host (engagement_id, ip, hostname, stage, first_seen) "
-                           "VALUES (?, '10.0.0.5', 'jump', 'pivoted', 't')", (eid,)).lastrowid
-        yhdb.add_tunnel(conn, eid, int(hid), "10.9.9.0/24", "ligolo",
-                        agent_path="LIGOLO_AGENT_WIN")
-    body = _client(tmp_db).get("/mappanel").text
-    reach = body[body.index("Reach"):body.index("Segments")]
-    assert "10.9.9.0/24" in reach
-    assert "nothing discovered inside" in reach
-    assert "LIGOLO_AGENT_WIN" in reach, "the agent that shipped is not recorded on screen"
 
 
 def test_map_segment_inventory_counts_each_subnet(tmp_db: Path) -> None:
@@ -1622,3 +1427,34 @@ def test_without_redact_everything_is_visible(tmp_db: Path) -> None:
     assert "SUPERSECRET-DESC" in client.get("/identity").text
     assert "SUPERSECRET-PAYLOAD" in client.get("/surfaces").text
     assert "SUPERSECRET-ANNOTATION" in client.get("/host?ip=10.0.0.5").text
+
+
+def test_board_shows_finding_class(tmp_db: Path) -> None:
+    """The board shows what has been FOUND: a finding's class appears on /panel."""
+    eid = _seed(tmp_db)
+    with yhdb.transaction(tmp_db) as conn:
+        hid = conn.execute(
+            "SELECT id FROM host WHERE engagement_id=?", (eid,)).fetchone()["id"]
+        yhdb.add_finding(conn, hid, None, "LLM01", "Prompt injection", "high",
+                         "leaked system prompt", tag="prompt_injection", engagement_id=eid)
+    body = _client(tmp_db).get("/panel").text
+    assert "LLM01" in body
+
+
+def test_board_has_no_advisory_panels(tmp_db: Path) -> None:
+    """The advisory layer (what's possible / what you still owe / what was tried /
+    what to work next) lives at the wire for the model, not on the human board."""
+    _seed(tmp_db)
+    body = _client(tmp_db).get("/panel").text
+    for gone in ("Applicability inventory", "Enumeration coverage",
+                 "Attempts — estate-wide", "The gaze", "OWASP-LLM coverage"):
+        assert gone not in body, gone
+
+
+def test_recon_is_found_inventory_only(tmp_db: Path) -> None:
+    """/recon is a found-inventory now: the coverage/honesty panels moved to the wire."""
+    _seed_recon(tmp_db)
+    body = _client(tmp_db).get("/recon").text
+    assert "Discovery provenance" in body            # kept: how each host entered
+    assert "Enumeration matrix" not in body          # gone: coverage owed
+    assert "Scan ledger" not in body                 # gone: coverage owed

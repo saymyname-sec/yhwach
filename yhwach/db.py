@@ -30,7 +30,7 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Bumped when the additive self-heal below gains a column/table. Stamped into
 # PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
 # NULL) has a version anchor to branch on. The additive path stays idempotent.
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
@@ -525,6 +525,30 @@ _ADDED_TABLES = {
         "  note TEXT,"
         "  at TEXT NOT NULL)"
     ),
+    "ai_tool": (
+        "CREATE TABLE IF NOT EXISTS ai_tool ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  surface_id INTEGER REFERENCES surface(id),"
+        "  name TEXT NOT NULL,"
+        "  description TEXT,"
+        "  sink TEXT,"
+        "  desc_sha TEXT,"
+        "  first_seen TEXT NOT NULL,"
+        "  last_seen TEXT,"
+        "  UNIQUE(engagement_id, surface_id, name))"
+    ),
+    "ai_data_source": (
+        "CREATE TABLE IF NOT EXISTS ai_data_source ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  surface_id INTEGER REFERENCES surface(id),"
+        "  name TEXT NOT NULL,"
+        "  kind TEXT,"
+        "  writable INTEGER DEFAULT 0,"
+        "  first_seen TEXT NOT NULL,"
+        "  UNIQUE(engagement_id, surface_id, name))"
+    ),
 }
 
 
@@ -553,6 +577,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_submission_eng ON submission(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_domain_fact_eng ON domain_fact(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_payload_eng ON payload(engagement_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ai_tool_eng ON ai_tool(engagement_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ai_data_source_eng ON ai_data_source(engagement_id)",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -1748,6 +1774,101 @@ def list_submissions(
 
 
 PAYLOAD_VERDICTS = ("success", "refused", "blocked", "unclear")
+
+
+def add_ai_tool(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    name: str,
+    *,
+    surface_id: int | None = None,
+    description: str | None = None,
+    sink: str | None = None,
+) -> tuple[int, bool, bool]:
+    """Record an agent tool. Returns (id, created, rugpulled). `rugpulled` is True
+    when a known tool's description hash CHANGED since last seen (supply-chain /
+    rug-pull signal). `sink` defaults to the lexicon classification."""
+    from yhwach.aisurface import classify_sink
+
+    sink = sink or classify_sink(name, description)
+    desc_sha = hashlib.sha256((description or "").encode("utf-8", "replace")).hexdigest()
+    now = _now_utc()
+    existing = conn.execute(
+        "SELECT id, desc_sha FROM ai_tool WHERE engagement_id = ? AND surface_id IS ? AND name = ?",
+        (engagement_id, surface_id, name)).fetchone()
+    if existing is not None:
+        rugpulled = bool(existing["desc_sha"] and existing["desc_sha"] != desc_sha)
+        conn.execute(
+            "UPDATE ai_tool SET description = COALESCE(?, description), sink = ?, "
+            "desc_sha = ?, last_seen = ? WHERE id = ?",
+            (description, sink, desc_sha, now, existing["id"]))
+        return int(existing["id"]), False, rugpulled
+    cur = conn.execute(
+        "INSERT INTO ai_tool (engagement_id, surface_id, name, description, sink, desc_sha, "
+        "first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (engagement_id, surface_id, name, description, sink, desc_sha, now, now))
+    return int(cur.lastrowid), True, False
+
+
+def add_ai_data_source(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    name: str,
+    *,
+    surface_id: int | None = None,
+    kind: str | None = None,
+    writable: bool = False,
+) -> tuple[int, bool]:
+    """Record a data source an agent reads (RAG/vector-db/file/db/web). `writable`
+    marks an attacker-controllable source — the indirect-injection vector."""
+    existing = conn.execute(
+        "SELECT id FROM ai_data_source WHERE engagement_id = ? AND surface_id IS ? AND name = ?",
+        (engagement_id, surface_id, name)).fetchone()
+    if existing is not None:
+        conn.execute("UPDATE ai_data_source SET kind = COALESCE(?, kind), "
+                     "writable = ? WHERE id = ?",
+                     (kind, 1 if writable else 0, existing["id"]))
+        return int(existing["id"]), False
+    cur = conn.execute(
+        "INSERT INTO ai_data_source (engagement_id, surface_id, name, kind, writable, first_seen) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (engagement_id, surface_id, name, kind, 1 if writable else 0, _now_utc()))
+    return int(cur.lastrowid), True
+
+
+def list_ai_tools(conn: sqlite3.Connection, engagement_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, name, description, sink, first_seen, last_seen FROM ai_tool "
+        "WHERE engagement_id = ? ORDER BY name", (engagement_id,)).fetchall()
+
+
+def list_ai_data_sources(conn: sqlite3.Connection, engagement_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, name, kind, writable FROM ai_data_source WHERE engagement_id = ? "
+        "ORDER BY name", (engagement_id,)).fetchall()
+
+
+def has_tool_sink(conn: sqlite3.Connection, engagement_id: int, sink: str) -> bool:
+    """True when an agent tool reaching `sink` (or any dangerous sink for
+    sink='any') is known — the tool_sink when-key."""
+    if sink in ("any", "true", "1"):
+        from yhwach.aisurface import DANGEROUS_SINKS
+        marks = ", ".join("?" * len(DANGEROUS_SINKS))
+        row = conn.execute(
+            f"SELECT 1 FROM ai_tool WHERE engagement_id = ? AND sink IN ({marks}) LIMIT 1",
+            (engagement_id, *sorted(DANGEROUS_SINKS))).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT 1 FROM ai_tool WHERE engagement_id = ? AND sink = ? LIMIT 1",
+            (engagement_id, sink)).fetchone()
+    return row is not None
+
+
+def has_writable_source(conn: sqlite3.Connection, engagement_id: int) -> bool:
+    """True when a writable agent data source is known — the source_writable key."""
+    return conn.execute(
+        "SELECT 1 FROM ai_data_source WHERE engagement_id = ? AND writable = 1 LIMIT 1",
+        (engagement_id,)).fetchone() is not None
 
 
 def engagement_canary(conn: sqlite3.Connection, engagement_id: int) -> str:

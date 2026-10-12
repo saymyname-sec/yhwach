@@ -54,7 +54,7 @@ _RISK_NORMALIZE = {
 # hosts by their `host.stage` value (foothold|looted|pivoted|…) without
 # requiring the operator to invent a `findings_include` tag for it.
 SUPPORTED_WHEN_KEYS = {"surface", "auth", "product", "os", "stage", "findings_include", "vault",
-                       "cloud_tenant_in_scope"}
+                       "cloud_tenant_in_scope", "tool_sink", "source_writable"}
 
 
 class KnowledgeError(ValueError):
@@ -316,6 +316,16 @@ def candidates_for(
             if tenant_ok is None:
                 tenant_ok = _cloud_tenant_in_scope(conn, engagement_id)
             if not tenant_ok:
+                continue
+        # AI-surface gates (I52): fire only when an agent tool reaches the named
+        # sink, or a writable data source exists.
+        if "tool_sink" in tech.when:
+            from yhwach import db as _yhdb
+            if not _yhdb.has_tool_sink(conn, engagement_id, str(tech.when["tool_sink"])):
+                continue
+        if tech.when.get("source_writable"):
+            from yhwach import db as _yhdb
+            if not _yhdb.has_writable_source(conn, engagement_id):
                 continue
         if tech.technique in consumed or tech.id in consumed:
             continue

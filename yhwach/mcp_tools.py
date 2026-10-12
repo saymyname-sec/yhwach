@@ -2143,6 +2143,67 @@ def tool_own(db_path: Path | str, lab: str, host: str | None = None,
         return "; ".join(out)
 
 
+def tool_ai_tool(db_path: Path | str, lab: str, name: str | None = None,
+                 description: str | None = None, host: str | None = None,
+                 sink: str | None = None) -> str:
+    """Record an agent tool exposed by an AI surface (I52). The sink it can reach
+    is classified from name/description (override with sink=); a dangerous sink
+    (shell/code/sql/email) raises an excessive-agency finding, and a changed
+    description since last seen raises a rug-pull finding. No name = list.
+    """
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        if not name:
+            rows = yhdb.list_ai_tools(conn, eid)
+            return "\n".join(f"#{r['id']} [{r['sink']}] {r['name']}" for r in rows) \
+                or "(no agent tools recorded)"
+        from yhwach.aisurface import DANGEROUS_SINKS
+
+        hid = _host_id_for(conn, eid, host)
+        tid, created, rugpulled = yhdb.add_ai_tool(
+            conn, eid, name, description=description, sink=sink)
+        row = conn.execute("SELECT sink FROM ai_tool WHERE id=?", (tid,)).fetchone()
+        eff_sink = row["sink"]
+        out = [f"tool '{name}' recorded (sink={eff_sink})"]
+        if eff_sink in DANGEROUS_SINKS:
+            yhdb.add_finding(conn, hid, None, "LLM06", f"Agent tool reaches {eff_sink}",
+                             "high", f"tool '{name}' -> {eff_sink} sink (excessive agency)",
+                             tag="excessive_agency", location=name, engagement_id=eid)
+            out.append(f"⚠ excessive-agency finding ({eff_sink})")
+        if rugpulled:
+            yhdb.add_finding(conn, hid, None, "LLM05", f"Agent tool changed: {name}",
+                             "high", f"'{name}' description changed since last seen — "
+                             "possible rug-pull / supply-chain swap",
+                             tag="tool_rugpull", location=name, engagement_id=eid)
+            out.append("⚠ RUG-PULL: description changed since last seen")
+        return "; ".join(out)
+
+
+def tool_ai_source(db_path: Path | str, lab: str, name: str | None = None,
+                   kind: str | None = None, host: str | None = None,
+                   writable: bool = False) -> str:
+    """Record a data source an AI agent reads (RAG/vector-db/file/db/web) (I52).
+    writable=True marks an attacker-controllable source — the indirect-injection
+    vector — and raises a finding. No name = list.
+    """
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        if not name:
+            rows = yhdb.list_ai_data_sources(conn, eid)
+            return "\n".join(f"#{r['id']} {r['name']} ({r['kind'] or '?'})"
+                             + (" [writable]" if r["writable"] else "") for r in rows) \
+                or "(no data sources recorded)"
+        hid = _host_id_for(conn, eid, host)
+        yhdb.add_ai_data_source(conn, eid, name, kind=kind, writable=writable)
+        out = [f"data source '{name}' recorded"]
+        if writable:
+            yhdb.add_finding(conn, hid, None, "LLM01", f"Writable agent data source: {name}",
+                             "high", f"'{name}' is attacker-writable -> indirect prompt injection",
+                             tag="rag_poisoning", location=name, engagement_id=eid)
+            out.append("⚠ writable: indirect-injection vector")
+        return "; ".join(out)
+
+
 def tool_payload(db_path: Path | str, lab: str, payload: str | None = None,
                  response: str | None = None, surface: str | None = None,
                  host: str | None = None, verdict: str | None = None,
@@ -2458,6 +2519,15 @@ TOOL_SPECS = [
      "Bounty submission memory. endpoint/finding/program records a submission and returns a "
      "duplicate-risk advisory (same endpoint+param, or same class program-wide); otherwise "
      "lists. Advisory only — never changes a finding's status or recall order."),
+    ("yhwach_ai_tool", tool_ai_tool,
+     "Record an agent tool exposed by an AI surface. Its sink (shell/code/sql/"
+     "email/http/file) is classified from name/description; a dangerous sink "
+     "raises an excessive-agency finding and a changed description a rug-pull "
+     "finding. No name lists them."),
+    ("yhwach_ai_source", tool_ai_source,
+     "Record a data source an AI agent reads (rag/vector_db/file/db/web). "
+     "writable=true marks an attacker-controllable source (indirect-injection "
+     "vector) and raises a finding. No name lists them."),
     ("yhwach_payload", tool_payload,
      "Injection payload/response/verdict ledger. payload= records a test (a "
      "heuristic suggests success|refused|unclear, advisory only — verdict stays "

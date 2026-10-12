@@ -1193,8 +1193,8 @@ def _cov_bar(c) -> str:
 
 def _pivot_tree_svg(bands: list[tuple[str, list[dict]]], tunnels: list[dict],
                     *, standalone: bool = False, linkify: bool = True) -> str:
-    """The tree of eyes: the operator eye at the crown, subnets in depth-ordered
-    bands beneath it, and a bright gaze-line down each pivot (tunnel via_host ->
+    """The pivot tree: the operator at the crown, subnets in depth-ordered
+    bands beneath it, and a bright line down each pivot (tunnel via_host ->
     the subnet it opens, labelled with the tunnel tech). Dual-homed hosts are the
     bridges. Built from tunnel + host_interface, so it literally shows *how* each
     subnet was reached."""
@@ -1543,7 +1543,7 @@ def _network_map(conn, eid: int) -> str:
 
     return (
         "<h2 class='sec'>Network map — pivot tree</h2><div class='netwrap'>"
-        f"<div class='nethead'><span class='lbl'>the tree of eyes</span>"
+        f"<div class='nethead'><span class='lbl'>how each subnet was reached</span>"
         f"<span class='meta'>{meta}</span>"
         "<a class='dl' href='/map.svg' download style='margin-left:auto'>⤓ map.svg</a></div>"
         f"{_pivot_tree_svg(bands, tunnels)}{_map_legend()}"

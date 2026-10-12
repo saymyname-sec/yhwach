@@ -220,3 +220,32 @@
   source: 'technique: a scheduled git-pull-and-import runs clf/__init__.py every run -> poison the imported module for RCE (CWE-94)'
   technique: git_import_poison
   authorized_only: true
+
+# --- I34 CI/CD (GitHub Actions) findings from zizmor/poutine/gato-x ---------
+- id: gha_expression_injection
+  when: { findings_include: gha_injection }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: gha_injection_poc
+  maps: [CWE-94, T1195.002]
+  points: 15
+  risk: propose
+  routes: 'github-actions security'
+  source: 'technique: ${{ }} expression injection in a run step -> runner RCE / token theft'
+  authorized_only: true
+
+- id: gha_pwn_request
+  when: { findings_include: gha_pwn_request }
+  class: traditional
+  likelihood: M
+  time_cost: med
+  emits:
+    - action: gha_pwn_request_poc
+  maps: [CWE-269, T1195.002]
+  points: 15
+  risk: propose
+  routes: 'github-actions security'
+  source: 'technique: pull_request_target + untrusted checkout -> secrets exfil from a fork PR'
+  authorized_only: true

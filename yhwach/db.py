@@ -30,7 +30,7 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Bumped when the additive self-heal below gains a column/table. Stamped into
 # PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
 # NULL) has a version anchor to branch on. The additive path stays idempotent.
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
@@ -76,6 +76,9 @@ _ADDED_COLUMNS = [
     ("vulnerability", "port", "INTEGER"),
     ("vulnerability", "solution", "TEXT"),
     ("vulnerability", "plugin_output", "TEXT"),
+    # schema v9 (I46) — operator-asserted principal ownership (out-of-band access
+    # yhwach cannot observe). Ownership otherwise comes ONLY from validated access.
+    ("principal", "owned", "INTEGER DEFAULT 0"),
 ]
 
 # A finding is LIVE (feeds recall, the brief, the register) in these states;
@@ -2090,6 +2093,17 @@ def add_privilege(
         (engagement_id, principal_id, host_id, right, target, source, _now_utc()),
     )
     return int(cur.lastrowid), True
+
+
+def set_principal_owned(
+    conn: sqlite3.Connection, engagement_id: int, name: str, *, domain: str | None = None,
+) -> int:
+    """Mark a principal operator-owned (yhwach_own) — access won out-of-band that
+    yhwach cannot observe. Creates the principal if it is not yet known."""
+    pid, _ = add_principal(conn, engagement_id, name, domain=domain, source="operator")
+    conn.execute("UPDATE principal SET owned = 1, updated_at = ? WHERE id = ?",
+                 (_now_utc(), pid))
+    return pid
 
 
 def add_edge(

@@ -32,8 +32,11 @@ def _seed(tmp_db: Path) -> int:
         far = int(conn.execute(
             "INSERT INTO host (engagement_id, ip, hostname, stage, first_seen) "
             "VALUES (?, '10.0.0.20', 'SAFE01', 'scanned', 't')", (eng,)).lastrowid)
-        # we own svc (hold its credential)
-        yhdb.add_credential(conn, eng, "svc", "P@ss", "password", "dump")
+        # we own svc — its credential is VALIDATED (not merely held): ownership
+        # now requires proven access, so the seed proves it on the DC.
+        cid, _ = yhdb.add_credential(conn, eng, "svc", "P@ss", "password", "dump")
+        yhdb.mark_credential_validated(conn, eng, cid, dc, port=445, proto="smb",
+                                       service_kind="smb", result="success", source="seed")
         # the graph
         yhdb.add_edge(conn, eng, f"principal:{svc}", f"principal:{helpdesk}", "GenericAll")
         yhdb.add_edge(conn, eng, f"principal:{helpdesk}", f"principal:{da}", "MemberOf")

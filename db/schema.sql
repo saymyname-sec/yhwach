@@ -18,11 +18,16 @@ CREATE TABLE IF NOT EXISTS engagement (
     lab            TEXT    NOT NULL UNIQUE,
     domain         TEXT,
     dc_ip          TEXT,
-    scope          TEXT,                  -- comma-separated CIDRs, mirrored from scope.txt
+    scope          TEXT,                  -- derived mirror of the scope_entry include IP/CIDR rows
     started_at     TEXT    NOT NULL,
     time_budget_h  REAL,                  -- optional: engagement time budget in hours
     points_target  INTEGER,               -- optional: target/pass points (NULL = unscored)
-    points_max     INTEGER                -- optional: max achievable points (NULL = unscored)
+    points_max     INTEGER,               -- optional: max achievable points (NULL = unscored)
+    kind           TEXT,                  -- lab|ctf|internal|external|web|cloud|redteam|bounty|retest (NULL=lab)
+    client         TEXT,                  -- client / program name (real engagements)
+    active_mode    TEXT,                  -- armed|record_only (NULL => armed for lab/ctf, record_only otherwise)
+    status         TEXT,                  -- active|paused|closed (NULL=active)
+    ended_at       TEXT
 );
 
 -- ---------------------------------------------------------------------------
@@ -92,9 +97,13 @@ CREATE TABLE IF NOT EXISTS finding (
     tag               TEXT,                -- chaining key matched by a rule's `findings_include`
                                            -- (e.g. rag_upload | chrome_login_data | gitlab_token)
     playbook_rule_id  TEXT,
-    status            TEXT    NOT NULL DEFAULT 'open',   -- open | exploited | dead | duplicate
+    status            TEXT    NOT NULL DEFAULT 'open',   -- open|confirmed|exploited (live) | false_positive|duplicate|remediated|dead (closed)
     discovered_at     TEXT    NOT NULL,
-    updated_at        TEXT
+    updated_at        TEXT,
+    location          TEXT,                -- affected instance (url/param/resource); part of the per-instance dedupe key
+    group_key         TEXT,                -- rolls per-instance rows up to one register entry (tag, else class:title)
+    curated           INTEGER NOT NULL DEFAULT 0,  -- 1 = operator edited; parser re-ingest must not clobber evidence/severity
+    author            TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_finding_tag ON finding(tag);
 CREATE INDEX IF NOT EXISTS idx_finding_engagement ON finding(engagement_id, status);
@@ -111,7 +120,9 @@ CREATE TABLE IF NOT EXISTS credential (
     source              TEXT    NOT NULL, -- prompt_injection | rag | imds | dump | spray | user_provided | chrome | dpapi | keepass | unattend
     source_host_id      INTEGER REFERENCES host(id),
     validated_on_host_id INTEGER REFERENCES host(id),
+    principal_id        INTEGER REFERENCES principal(id),  -- realm-aware link to the identity graph
     discovered_at       TEXT    NOT NULL,
+    provenance          TEXT,              -- provided | discovered | derived | guess (NULL=discovered)
     UNIQUE(engagement_id, identifier, kind)
 );
 
@@ -621,3 +632,55 @@ CREATE TABLE IF NOT EXISTS host_annotation (
     created_at  TEXT    NOT NULL,
     UNIQUE(host_id, stage, section)
 );
+
+-- ---------------------------------------------------------------------------
+-- Scope entries — the typed, authoritative in/out-of-scope list. A cidr/ip/
+-- hostname/domain/wildcard token, include or exclude (exclude wins). The
+-- engagement.scope string is a derived mirror of the include IP/CIDR rows for
+-- the legacy readers; the traffic gate uses these rows via scope.assert_target.
+-- Empty table => no target is in scope => traffic refused (memory writes still
+-- allowed). A soft-deleted row keeps removed_at set for the history.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS scope_entry (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    kind          TEXT    NOT NULL,       -- cidr | ip | hostname | domain | wildcard
+    value         TEXT    NOT NULL,
+    include       INTEGER NOT NULL DEFAULT 1,  -- 1 = in scope, 0 = excluded
+    note          TEXT,
+    source        TEXT,                   -- engage | operator | roe | import
+    added_at      TEXT    NOT NULL,
+    removed_at    TEXT,
+    UNIQUE(engagement_id, kind, value, include)
+);
+CREATE INDEX IF NOT EXISTS idx_scope_entry_eng ON scope_entry(engagement_id);
+
+-- ---------------------------------------------------------------------------
+-- Evidence — proof artefacts (screenshot, request/response, raw output, file)
+-- bound to a finding and/or an objective. The row carries a sha256 and
+-- provenance; the bytes live on disk (evidence is never a raw dump in the DB).
+-- evidence_link lets one artefact back several findings/objectives.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS evidence (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    kind          TEXT    NOT NULL,       -- screenshot | request | response | output | file | log
+    path          TEXT,                   -- on-disk location of the full artefact
+    sha256        TEXT    NOT NULL,
+    size          INTEGER,
+    mime          TEXT,
+    caption       TEXT,
+    contains_secret INTEGER NOT NULL DEFAULT 0,
+    captured_at   TEXT    NOT NULL,
+    captured_by   TEXT,
+    UNIQUE(engagement_id, sha256)
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_eng ON evidence(engagement_id);
+CREATE TABLE IF NOT EXISTS evidence_link (
+    id          INTEGER PRIMARY KEY,
+    evidence_id INTEGER NOT NULL REFERENCES evidence(id),
+    finding_id  INTEGER REFERENCES finding(id),
+    objective   TEXT,                      -- poc objective slug, when bound to a chain
+    UNIQUE(evidence_id, finding_id, objective)
+);
+CREATE INDEX IF NOT EXISTS idx_evidence_link_finding ON evidence_link(finding_id);

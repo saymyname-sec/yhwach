@@ -26,6 +26,11 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Schema additions made after the original v0 (columns + whole tables). Applied
 # idempotently on every open so a DB created by an older Yhwach self-heals — no
 # more "no such column: f.tag / engagement_id" on an upgraded engagement.
+# Bumped when the additive self-heal below gains a column/table. Stamped into
+# PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
+# NULL) has a version anchor to branch on. The additive path stays idempotent.
+SCHEMA_VERSION = 3
+
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
     ("finding", "engagement_id", "INTEGER"),
@@ -44,8 +49,68 @@ _ADDED_COLUMNS = [
     # hosts still owe a full-port + -sV pass.
     ("host", "discovery_source", "TEXT"),
     ("host", "scan_needed", "INTEGER DEFAULT 1"),
+    # schema v3 — engagement profile (real engagements, not just scored labs)
+    # and credential provenance. All nullable/defaulted so an older DB
+    # self-heals and the lab behaviour is unchanged (NULL kind == lab).
+    ("engagement", "kind", "TEXT"),
+    ("engagement", "client", "TEXT"),
+    ("engagement", "active_mode", "TEXT"),
+    ("engagement", "status", "TEXT"),
+    ("engagement", "ended_at", "TEXT"),
+    ("credential", "provenance", "TEXT"),
+    # schema v3 — finding lifecycle (memory only; report fields are out of scope)
+    ("finding", "location", "TEXT"),
+    ("finding", "group_key", "TEXT"),
+    ("finding", "curated", "INTEGER NOT NULL DEFAULT 0"),
+    ("finding", "author", "TEXT"),
 ]
+
+# A finding is LIVE (feeds recall, the brief, the register) in these states;
+# any other status (false_positive|duplicate|remediated|dead) is closed — it
+# stays queryable via yhwach_query but drops out of recall and the open register.
+LIVE_FINDING_STATUSES = ("open", "confirmed", "exploited")
+FINDING_STATUSES = (*LIVE_FINDING_STATUSES, "false_positive", "duplicate", "remediated", "dead")
+FINDING_SEVERITIES = ("critical", "high", "medium", "low", "info")
 _ADDED_TABLES = {
+    # schema v3 — evidence (proof artefacts bound to findings/objectives).
+    "evidence": (
+        "CREATE TABLE IF NOT EXISTS evidence ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  kind TEXT NOT NULL,"
+        "  path TEXT,"
+        "  sha256 TEXT NOT NULL,"
+        "  size INTEGER,"
+        "  mime TEXT,"
+        "  caption TEXT,"
+        "  contains_secret INTEGER NOT NULL DEFAULT 0,"
+        "  captured_at TEXT NOT NULL,"
+        "  captured_by TEXT,"
+        "  UNIQUE(engagement_id, sha256))"
+    ),
+    "evidence_link": (
+        "CREATE TABLE IF NOT EXISTS evidence_link ("
+        "  id INTEGER PRIMARY KEY,"
+        "  evidence_id INTEGER NOT NULL REFERENCES evidence(id),"
+        "  finding_id INTEGER REFERENCES finding(id),"
+        "  objective TEXT,"
+        "  UNIQUE(evidence_id, finding_id, objective))"
+    ),
+    # schema v3 — typed scope list (see db/schema.sql + yhwach.scope). Kept in
+    # lockstep with schema.sql so an older DB self-heals on open.
+    "scope_entry": (
+        "CREATE TABLE IF NOT EXISTS scope_entry ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  kind TEXT NOT NULL,"
+        "  value TEXT NOT NULL,"
+        "  include INTEGER NOT NULL DEFAULT 1,"
+        "  note TEXT,"
+        "  source TEXT,"
+        "  added_at TEXT NOT NULL,"
+        "  removed_at TEXT,"
+        "  UNIQUE(engagement_id, kind, value, include))"
+    ),
     # Probe RUNS were recorded nowhere: `yhwach probe` wrote a row only on a HIT,
     # so "never probed" and "probed, nothing matched" were indistinguishable —
     # and brief.py reports "Unprobed services" from a LEFT JOIN on `surface`,
@@ -388,6 +453,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for ddl in (
         "CREATE INDEX IF NOT EXISTS idx_surface_service ON surface(service_id)",
         "CREATE INDEX IF NOT EXISTS idx_surface_host ON surface(host_id)",
+        "CREATE INDEX IF NOT EXISTS idx_scope_entry_eng ON scope_entry(engagement_id)",
+        "CREATE INDEX IF NOT EXISTS idx_evidence_eng ON evidence(engagement_id)",
+        "CREATE INDEX IF NOT EXISTS idx_evidence_link_finding ON evidence_link(finding_id)",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -401,6 +469,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if col not in cols:
                 conn.execute(f"ALTER TABLE {tname} ADD COLUMN {col} {decl}")
                 changed = True
+    # Stamp the schema version so a later rebuild-style migration can branch on
+    # it. PRAGMA doesn't take bound params; SCHEMA_VERSION is our own int.
+    with contextlib.suppress(sqlite3.OperationalError):
+        if int(conn.execute("PRAGMA user_version").fetchone()[0]) != SCHEMA_VERSION:
+            conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            changed = True
     if changed:
         conn.commit()
 
@@ -467,6 +541,17 @@ def engagement_id_for(conn: sqlite3.Connection, lab: str) -> int | None:
     return row["id"] if row else None
 
 
+# Engagement kinds whose default posture is ARMED (active traffic allowed on a
+# memory write). Every other kind defaults to record_only — a client engagement
+# must be armed deliberately, in a terminal, not by taking a note.
+_ARMED_BY_DEFAULT_KINDS = frozenset({"lab", "ctf"})
+
+
+def default_active_mode(kind: str | None) -> str:
+    """The posture a new engagement of this kind starts in."""
+    return "armed" if (kind or "lab") in _ARMED_BY_DEFAULT_KINDS else "record_only"
+
+
 def upsert_engagement(
     conn: sqlite3.Connection,
     lab: str,
@@ -477,12 +562,21 @@ def upsert_engagement(
     points_target: int | None = None,
     points_max: int | None = None,
     time_budget_h: float | None = None,
+    kind: str | None = None,
+    client: str | None = None,
+    active_mode: str | None = None,
 ) -> int:
     """Create or update an engagement row and return its id.
 
     `points_target` / `points_max` / `time_budget_h` are optional, engagement-
     specific scoring knobs (NULL = unscored); set them to drive the scoreboard's
     pace/percentage view. They are never assumed by the engine.
+
+    `kind` picks the engagement profile (lab|ctf|internal|external|web|cloud|
+    redteam|bounty|retest; NULL == lab). `active_mode` is the traffic posture
+    (armed|record_only); when NULL on a new engagement it defaults from the kind
+    (lab/ctf armed, everything else record_only). Arming is otherwise a
+    deliberate CLI act, never set from the MCP wire.
     """
     if started_at is None:
         started_at = _now_utc()
@@ -492,18 +586,48 @@ def upsert_engagement(
         conn.execute(
             "UPDATE engagement SET scope = ?, domain = COALESCE(?, domain), "
             "dc_ip = COALESCE(?, dc_ip), points_target = COALESCE(?, points_target), "
-            "points_max = COALESCE(?, points_max), time_budget_h = COALESCE(?, time_budget_h) "
+            "points_max = COALESCE(?, points_max), time_budget_h = COALESCE(?, time_budget_h), "
+            "kind = COALESCE(?, kind), client = COALESCE(?, client), "
+            "active_mode = COALESCE(?, active_mode) "
             "WHERE id = ?",
-            (scope, domain, dc_ip, points_target, points_max, time_budget_h, existing),
+            (scope, domain, dc_ip, points_target, points_max, time_budget_h,
+             kind, client, active_mode, existing),
         )
         return existing
 
+    if active_mode is None:
+        active_mode = default_active_mode(kind)
     cur = conn.execute(
         "INSERT INTO engagement (lab, domain, dc_ip, scope, started_at, "
-        "points_target, points_max, time_budget_h) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (lab, domain, dc_ip, scope, started_at, points_target, points_max, time_budget_h),
+        "points_target, points_max, time_budget_h, kind, client, active_mode, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')",
+        (lab, domain, dc_ip, scope, started_at, points_target, points_max,
+         time_budget_h, kind, client, active_mode),
     )
     return int(cur.lastrowid)
+
+
+def engagement_armed(conn: sqlite3.Connection, engagement_id: int) -> bool:
+    """True when active traffic is allowed for this engagement.
+
+    Posture comes from engagement.active_mode (NULL => armed, matching the
+    pre-profile lab default). A terminal-set `record_only` disables every
+    traffic-sending path until `yhwach arm` flips it.
+    """
+    row = conn.execute(
+        "SELECT active_mode FROM engagement WHERE id = ?", (engagement_id,)
+    ).fetchone()
+    if row is None:
+        return False
+    return (row["active_mode"] or "armed") != "record_only"
+
+
+def set_active_mode(conn: sqlite3.Connection, engagement_id: int, mode: str) -> None:
+    if mode not in ("armed", "record_only"):
+        raise ValueError(f"invalid active_mode {mode!r} (armed|record_only)")
+    conn.execute(
+        "UPDATE engagement SET active_mode = ? WHERE id = ?", (mode, engagement_id)
+    )
 
 
 def upsert_surface(
@@ -815,8 +939,14 @@ def add_credential(
     kind: str,
     source: str,
     source_host_id: int | None = None,
+    provenance: str | None = None,
 ) -> tuple[int, bool]:
     """Add/update a credential (deduped by engagement+identifier+kind).
+
+    `provenance` is how the cred came to us: provided (client-issued — an
+    assumed-breach / test account), discovered (compromised; the default when
+    NULL), derived, or guess. A 'provided' cred must never be sprayed or counted
+    as compromised; provenance is never downgraded on re-record.
 
     Creds are never exhausted — the spray primitive keeps them in play against
     every host. On update, `source` is APPENDED (comma-joined) rather than
@@ -826,7 +956,7 @@ def add_credential(
     row didn't already carry one — the original discovery host wins.
     """
     existing = conn.execute(
-        "SELECT id, source, source_host_id FROM credential "
+        "SELECT id, secret, source, source_host_id, provenance FROM credential "
         "WHERE engagement_id = ? AND identifier = ? AND kind = ?",
         (engagement_id, identifier, kind),
     ).fetchone()
@@ -834,16 +964,29 @@ def add_credential(
         merged_source = existing["source"]
         if source and source not in [s.strip() for s in (existing["source"] or "").split(",")]:
             merged_source = f"{existing['source']},{source}" if existing["source"] else source
+        # Never downgrade provenance: a cred recorded as 'provided' stays
+        # provided even if later re-seen through a discovery channel.
+        prov = None if existing["provenance"] == "provided" else provenance
         conn.execute(
             "UPDATE credential SET secret = COALESCE(?, secret), source = ?, "
-            "source_host_id = COALESCE(source_host_id, ?) WHERE id = ?",
-            (secret, merged_source, source_host_id, existing["id"]),
+            "source_host_id = COALESCE(source_host_id, ?), "
+            "provenance = COALESCE(?, provenance) WHERE id = ?",
+            (secret, merged_source, source_host_id, prov, existing["id"]),
         )
+        # If the secret actually changed, the cached 'fail' rows were for the
+        # OLD secret — drop them so a password-spray with a new candidate
+        # actually gets tried instead of short-circuiting on a stale miss.
+        if secret is not None and secret != existing["secret"]:
+            conn.execute(
+                "DELETE FROM credential_access WHERE credential_id = ? AND result = 'fail'",
+                (existing["id"],),
+            )
         return int(existing["id"]), False
     cur = conn.execute(
         "INSERT INTO credential (engagement_id, identifier, secret, kind, source, "
-        "source_host_id, discovered_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (engagement_id, identifier, secret, kind, source, source_host_id, _now_utc()),
+        "source_host_id, discovered_at, provenance) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (engagement_id, identifier, secret, kind, source, source_host_id,
+         _now_utc(), provenance),
     )
     return int(cur.lastrowid), True
 
@@ -1061,28 +1204,44 @@ def add_finding(
     playbook_rule_id: str | None = None,
     tag: str | None = None,
     engagement_id: int | None = None,
+    location: str | None = None,
 ) -> tuple[int, bool]:
-    """Insert or update a finding, deduped by (engagement, host_id, class, title).
+    """Insert or update a finding, deduped by (engagement, host_id, class, title,
+    location).
 
     `engagement_id` scopes the finding so host-less findings never leak across
     labs; when omitted it is derived from `host_id`. `tag` is the chaining key a
     rule's `findings_include` matches on; on update it is only (re)set when a
     non-null tag is supplied, so a later untagged re-detection never clears it.
+    `location` (a URL/param/resource) makes the same class+title on N assets N
+    rows, rolled up by `group_key` for the register. A finding the operator has
+    curated (via :func:`set_finding`) is frozen: a parser re-ingest never
+    clobbers its evidence/severity.
     """
     now = _now_utc()
     if engagement_id is None and host_id is not None:
         hrow = conn.execute("SELECT engagement_id FROM host WHERE id = ?", (host_id,)).fetchone()
         engagement_id = hrow["engagement_id"] if hrow else None
     existing = conn.execute(
-        "SELECT id FROM finding WHERE engagement_id IS ? AND host_id IS ? "
-        "AND class = ? AND title = ?",
-        (engagement_id, host_id, cls, title),
+        "SELECT id, curated FROM finding WHERE engagement_id IS ? AND host_id IS ? "
+        "AND class = ? AND title = ? AND COALESCE(location,'') = COALESCE(?,'')",
+        (engagement_id, host_id, cls, title, location),
     ).fetchone()
     if existing is not None:
-        if tag is not None:
+        if existing["curated"]:
+            # Operator-curated: never clobber evidence/severity on re-ingest;
+            # only refresh the chaining tag (+ its derived group_key) and ts.
+            if tag is not None:
+                conn.execute(
+                    "UPDATE finding SET tag = ?, group_key = ?, updated_at = ? WHERE id = ?",
+                    (tag, tag, now, existing["id"]))
+            else:
+                conn.execute("UPDATE finding SET updated_at = ? WHERE id = ?",
+                             (now, existing["id"]))
+        elif tag is not None:
             conn.execute(
-                "UPDATE finding SET evidence = ?, tag = ?, updated_at = ? WHERE id = ?",
-                (evidence, tag, now, existing["id"]),
+                "UPDATE finding SET evidence = ?, tag = ?, group_key = ?, updated_at = ? WHERE id = ?",
+                (evidence, tag, tag, now, existing["id"]),
             )
         else:
             conn.execute(
@@ -1090,14 +1249,128 @@ def add_finding(
                 (evidence, now, existing["id"]),
             )
         return int(existing["id"]), False
+    group_key = tag or f"{cls}:{title}"
     cur = conn.execute(
         "INSERT INTO finding (engagement_id, host_id, surface_id, class, title, severity, "
-        "evidence, tag, playbook_rule_id, status, discovered_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)",
+        "evidence, tag, playbook_rule_id, status, discovered_at, location, group_key) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)",
         (engagement_id, host_id, surface_id, cls, title, severity, evidence, tag,
-         playbook_rule_id, now),
+         playbook_rule_id, now, location, group_key),
     )
     return int(cur.lastrowid), True
+
+
+def set_finding(
+    conn: sqlite3.Connection,
+    finding_id: int,
+    *,
+    status: str | None = None,
+    severity: str | None = None,
+    evidence: str | None = None,
+    author: str | None = None,
+) -> sqlite3.Row:
+    """Operator correction of a finding: change its status (open/confirmed/
+    exploited/false_positive/duplicate/remediated/dead), severity or evidence,
+    and mark it curated so a later parser re-ingest cannot overwrite it. Returns
+    the old row (for the event). Never deletes — a wrong finding is closed, not
+    erased (memory is sacred)."""
+    if status is not None and status not in FINDING_STATUSES:
+        raise ValueError(f"invalid status {status!r} (one of {', '.join(FINDING_STATUSES)})")
+    if severity is not None:
+        severity = severity.strip().lower()
+        if severity not in FINDING_SEVERITIES:
+            raise ValueError(
+                f"invalid severity {severity!r} (one of {', '.join(FINDING_SEVERITIES)})")
+    old = conn.execute("SELECT id, status, severity FROM finding WHERE id = ?",
+                       (finding_id,)).fetchone()
+    if old is None:
+        raise ValueError(f"no finding #{finding_id}")
+    sets, params = ["curated = 1", "updated_at = ?"], [_now_utc()]
+    for col, val in (("status", status), ("severity", severity),
+                     ("evidence", evidence), ("author", author)):
+        if val is not None:
+            sets.append(f"{col} = ?")
+            params.append(val)
+    params.append(finding_id)
+    conn.execute(f"UPDATE finding SET {', '.join(sets)} WHERE id = ?", params)
+    return old
+
+
+def add_evidence(
+    conn: sqlite3.Connection,
+    engagement_id: int,
+    *,
+    kind: str,
+    path: str | None = None,
+    text: str | None = None,
+    finding_id: int | None = None,
+    objective: str | None = None,
+    caption: str | None = None,
+    contains_secret: bool = False,
+    captured_by: str | None = None,
+    artifact_dir: Path | None = None,
+) -> tuple[int, bool]:
+    """Record a proof artefact and bind it to a finding/objective.
+
+    Exactly one of `path` (an existing, non-empty file — hashed at record time,
+    refused if missing/empty, mirroring the anti-fabrication rule of the
+    screenshot hook) or `text` (written under `artifact_dir`) must be given.
+    Deduped by (engagement, sha256); one artefact may back many findings via
+    evidence_link. Returns (evidence_id, created_new_evidence)."""
+    import hashlib
+
+    if (path is None) == (text is None):
+        raise ValueError("pass exactly one of path= or text=")
+    if path is not None:
+        p = Path(path)
+        if not p.is_file() or p.stat().st_size == 0:
+            raise ValueError(f"evidence file missing or empty: {path}")
+        data = p.read_bytes()
+        stored = str(p)
+        size = len(data)
+    else:
+        data = text.encode("utf-8", "replace")
+        if not data:
+            raise ValueError("empty evidence text")
+        d = artifact_dir or Path(".")
+        d.mkdir(parents=True, exist_ok=True)
+        sha_pre = hashlib.sha256(data).hexdigest()
+        p = d / f"evidence_{kind}_{sha_pre[:12]}.txt"
+        p.write_text(text, encoding="utf-8")
+        stored = str(p)
+        size = len(data)
+    sha = hashlib.sha256(data).hexdigest()
+    now = _now_utc()
+    existing = conn.execute(
+        "SELECT id FROM evidence WHERE engagement_id = ? AND sha256 = ?",
+        (engagement_id, sha)).fetchone()
+    created = existing is None
+    if existing is None:
+        cur = conn.execute(
+            "INSERT INTO evidence (engagement_id, kind, path, sha256, size, caption, "
+            "contains_secret, captured_at, captured_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (engagement_id, kind, stored, sha, size, caption, 1 if contains_secret else 0,
+             now, captured_by))
+        eid_ev = int(cur.lastrowid)
+    else:
+        eid_ev = int(existing["id"])
+    if finding_id is not None or objective is not None:
+        # NULL-safe idempotency: SQLite treats NULLs as distinct in a UNIQUE
+        # index, so OR IGNORE would NOT dedup a finding-only (objective NULL) or
+        # objective-only (finding_id NULL) re-bind. `IS` is NULL-safe equality.
+        conn.execute(
+            "INSERT INTO evidence_link (evidence_id, finding_id, objective) "
+            "SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM evidence_link "
+            "WHERE evidence_id = ? AND finding_id IS ? AND objective IS ?)",
+            (eid_ev, finding_id, objective, eid_ev, finding_id, objective))
+    return eid_ev, created
+
+
+def evidence_for(conn: sqlite3.Connection, finding_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT e.id, e.kind, e.path, e.sha256, e.caption, e.captured_at FROM evidence e "
+        "JOIN evidence_link l ON l.evidence_id = e.id WHERE l.finding_id = ? ORDER BY e.id",
+        (finding_id,)).fetchall()
 
 
 def all_services_for_scanned_hosts(

@@ -21,23 +21,74 @@ def _eng(conn, lab: str) -> int:
     return eid
 
 
+def _assert_in_scope(conn, eid: int, target: str) -> None:
+    """Refuse a traffic-sending action against an out-of-scope target.
+
+    Uses the typed scope matcher (scope_entry rows, falling back to the legacy
+    scope string). An engagement with no scope coverage refuses traffic.
+    """
+    from yhwach import scope as yhscope
+
+    ok, reason = yhscope.assert_target(conn, eid, target)
+    if not ok:
+        raise ValueError(f"refusing to send traffic to {target}: {reason}")
+
+
+def _env_autospray_off() -> bool:
+    """Env hard-off: ``YHWACH_AUTOSPRAY=0`` disables every active path."""
+    import os
+
+    return os.environ.get("YHWACH_AUTOSPRAY", "1").strip().lower() in (
+        "0", "off", "false", "no",
+    )
+
+
+def _armed(conn, eid: int) -> bool:
+    """True when active traffic is allowed: engagement armed AND env not off."""
+    if _env_autospray_off():
+        return False
+    return yhdb.engagement_armed(conn, eid)
+
+
+def _assert_armed(conn, eid: int, action: str = "active tools") -> None:
+    """Raise unless the engagement is armed (and the env kill switch is off).
+
+    Arming is a deliberate terminal act (`yhwach arm`), never an MCP argument —
+    so the model cannot turn traffic on; it can only ask the human to.
+    """
+    if _env_autospray_off():
+        raise ValueError(f"{action} disabled by YHWACH_AUTOSPRAY=0")
+    if not yhdb.engagement_armed(conn, eid):
+        raise ValueError(
+            f"engagement is record_only — {action} refused. Run `yhwach arm` "
+            "in a terminal to enable active traffic for this engagement."
+        )
+
+
 def tool_engage(db_path: Path | str, lab: str, scope: str,
-                domain: str | None = None, dc: str | None = None) -> str:
+                domain: str | None = None, dc: str | None = None,
+                kind: str | None = None, client: str | None = None) -> str:
     """Initialise an engagement: create the DB if needed and upsert the engagement row.
 
-    `scope` is a comma-separated list of IPs/CIDRs (validated). This is the entry
-    point — call it before the other tools; they all resolve the same DB from the
-    server's $YHWACH_DB."""
-    from yhwach.scope import validate_scope
+    `scope` is a comma-separated list of IPs, CIDRs, hostnames or wildcards
+    (`*.example.com`), stored as typed scope_entry rows. `kind` picks the
+    engagement profile (lab|ctf|internal|external|web|cloud|redteam|bounty|
+    retest; default lab). Non-lab/ctf engagements start in record_only mode:
+    recording facts never sends traffic until you run `yhwach arm` in a
+    terminal. This is the entry point — call it before the other tools."""
+    from yhwach import scope as yhscope
 
-    bad = validate_scope(scope)
+    bad = yhscope.validate_tokens(scope)
     if bad:
-        raise ValueError(f"invalid scope token(s): {', '.join(bad)} — use IPs/CIDRs")
+        raise ValueError(
+            f"invalid scope token(s): {', '.join(bad)} — use IPs/CIDRs/hostnames/*.wildcards")
     path = Path(db_path)
     if not path.exists():
         yhdb.init(path)
     with yhdb.transaction(path) as conn:
-        eid = yhdb.upsert_engagement(conn, lab=lab, scope=scope, domain=domain, dc_ip=dc)
+        eid = yhdb.upsert_engagement(
+            conn, lab=lab, scope=scope, domain=domain, dc_ip=dc, kind=kind, client=client)
+        yhscope.sync_from_string(conn, eid, scope, source="engage")
         # Materialise every scope IP as an ``undiscovered`` host so the UI /
         # brief / gaps see the FULL estate from turn one. Fixes the
         # "10 IPs, 2 in UI" bug that hid internal /24s until the operator
@@ -53,7 +104,12 @@ def tool_engage(db_path: Path | str, lab: str, scope: str,
         hosts_note = f"; +{new_hosts} host(s) queued for scan"
     if skipped:
         hosts_note += f" (skipped: {'; '.join(skipped)})"
-    return f"engagement '{lab}' ready (id={eid}); scope {scope}{dom}{hosts_note}"
+    mode = yhdb.default_active_mode(kind)
+    mode_note = ""
+    if mode == "record_only":
+        mode_note = " · record_only (active tools disarmed — run `yhwach arm` in a terminal)"
+    return (f"engagement '{lab}' ready (id={eid}); kind {kind or 'lab'}; "
+            f"scope {scope}{dom}{hosts_note}{mode_note}")
 
 
 def tool_status(db_path: Path | str, lab: str) -> str:
@@ -200,13 +256,18 @@ def tool_audit(db_path: Path | str, lab: str) -> str:
         return methodology_audit(conn, eid)
 
 
-def tool_brief(db_path: Path | str, lab: str, section: str | None = None) -> str:
+def tool_brief(db_path: Path | str, lab: str, section: str | None = None,
+               limit: int = 60, stage: str | None = None) -> str:
     """The AI-legible engagement map (REACH/HOLD/SURFACES/UNLOCKS/UNEXPLORED/OBJECTIVES).
-    Read this to reason over the memory; yhwach decides nothing."""
+    Read this to reason over the memory; yhwach decides nothing.
+
+    `limit` caps each host/cred/surface list (default 60) so a large scope does
+    not bury the map — a capped section prints a '+N more' footer naming the
+    slice to ask for. `stage` filters REACH to one FSM stage (e.g. 'scanned')."""
     from yhwach.brief import build_brief
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
-        return build_brief(conn, eid, section=section)
+        return build_brief(conn, eid, section=section, limit=limit, stage=stage)
 
 
 def tool_findings(db_path: Path | str, lab: str) -> str:
@@ -217,7 +278,7 @@ def tool_findings(db_path: Path | str, lab: str) -> str:
         rows = conn.execute(
             "SELECT f.class, f.title, f.severity, h.ip ip FROM finding f "
             "LEFT JOIN host h ON h.id=f.host_id "
-            "WHERE f.engagement_id=? AND f.status='open' "
+            "WHERE f.engagement_id=? AND f.status IN ('open','confirmed','exploited') "
             f"ORDER BY {order}, f.id", (eid,)).fetchall()
     if not rows:
         return "no findings"
@@ -256,7 +317,8 @@ def _parse_validated_on(spec: str) -> tuple[str, int | None, str | None]:
 def tool_add_cred(db_path: Path | str, lab: str, user: str, secret: str,
                   kind: str = "password", source: str = "operator",
                   source_host: str | None = None,
-                  validated_on: str | None = None, admin: bool = False) -> str:
+                  validated_on: str | None = None, admin: bool = False,
+                  provided: bool = False) -> str:
     """Store a credential in the vault.
 
     `user` is the login/identifier (username, key label, token id).
@@ -266,6 +328,11 @@ def tool_add_cred(db_path: Path | str, lab: str, user: str, secret: str,
     | `dpapi`). `source_host`, if given, is the host IP where the cred was
     dumped and gets joined back on read. On update the `source` string is
     appended (not clobbered), so provenance survives re-discovery.
+
+    `provided=True` marks a client-issued credential (an assumed-breach or test
+    account). A provided cred is NEVER sprayed and is not counted as a
+    compromise — it is the access you were given, kept distinct from what you
+    captured.
 
     `validated_on` proves the cred against a host you already authenticated to,
     as `IP`, `IP:PORT`, `IP/PROTO`, or `IP:PORT/PROTO`
@@ -292,7 +359,8 @@ def tool_add_cred(db_path: Path | str, lab: str, user: str, secret: str,
                     (eid, source_host)).fetchone()
                 source_host_id = int(row["id"]) if row else None
         cred_id, created = yhdb.add_credential(
-            conn, eid, user, secret, kind, source, source_host_id=source_host_id
+            conn, eid, user, secret, kind, source, source_host_id=source_host_id,
+            provenance="provided" if provided else None,
         )
         proven = ""
         if validated_on:
@@ -325,26 +393,32 @@ def tool_add_cred(db_path: Path | str, lab: str, user: str, secret: str,
         # against the DB host:1433 for hours. Errors from missing tooling
         # (no nxc / no curl) are swallowed so the cred still records cleanly.
         spray_note = ""
-        try:
-            from yhwach import sprayer as yhspray
+        if not _armed(conn, eid):
+            spray_note = (
+                " (autospray off: record_only)" if not _env_autospray_off()
+                else " (autospray off: YHWACH_AUTOSPRAY=0)"
+            )
+        else:
+            try:
+                from yhwach import sprayer as yhspray
 
-            batch = yhspray.spray_cred(conn, eid, cred_id)
-            if batch.hits or batch.admins:
-                bits = []
-                if batch.admins:
-                    bits.append(f"{len(batch.admins)} admin")
-                new_hits = [h for h in batch.hits if "cached" not in h.detail]
-                if new_hits:
-                    bits.append(f"{len(new_hits)} new hit(s)")
-                if bits:
-                    spray_note = " · autospray: " + ", ".join(bits)
-                    # Name the top hit so the operator sees the win inline.
-                    top = batch.admins[0] if batch.admins else new_hits[0] if new_hits else None
-                    if top is not None:
-                        spray_note += f" [{top.ip}:{top.port}/{top.protocol}]"
-        except Exception as exc:  # noqa: BLE001
-            # Never let a broken adapter block a cred insert.
-            spray_note = f" (autospray error: {type(exc).__name__})"
+                batch = yhspray.spray_cred(conn, eid, cred_id)
+                if batch.hits or batch.admins:
+                    bits = []
+                    if batch.admins:
+                        bits.append(f"{len(batch.admins)} admin")
+                    new_hits = [h for h in batch.hits if "cached" not in h.detail]
+                    if new_hits:
+                        bits.append(f"{len(new_hits)} new hit(s)")
+                    if bits:
+                        spray_note = " · autospray: " + ", ".join(bits)
+                        # Name the top hit so the operator sees the win inline.
+                        top = batch.admins[0] if batch.admins else new_hits[0] if new_hits else None
+                        if top is not None:
+                            spray_note += f" [{top.ip}:{top.port}/{top.protocol}]"
+            except Exception as exc:  # noqa: BLE001
+                # Never let a broken adapter block a cred insert.
+                spray_note = f" (autospray error: {type(exc).__name__})"
     return f"credential '{user}' ({kind}) {'added' if created else 'updated'}{proven}{spray_note}"
 
 
@@ -442,22 +516,28 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             # explicitly asked for. Restricted to the ingest's IPs to keep
             # each ingest bounded.
             spray_note = ""
-            try:
-                from yhwach import sprayer as yhspray
+            if not _armed(conn, eid):
+                spray_note = (
+                    "; autospray off (record_only)" if not _env_autospray_off()
+                    else "; autospray off (YHWACH_AUTOSPRAY=0)"
+                )
+            else:
+                try:
+                    from yhwach import sprayer as yhspray
 
-                total_new = 0
-                total_admins = 0
-                for parsed_host in parsed:
-                    b = yhspray.spray_all(conn, eid, host_ip=parsed_host.ip)
-                    total_new += sum(1 for a in b.hits if "cached" not in a.detail)
-                    total_admins += len(b.admins)
-                if total_new or total_admins:
-                    spray_note = (
-                        f"; autospray: {total_new} new hit(s), "
-                        f"{total_admins} admin"
-                    )
-            except Exception as exc:  # noqa: BLE001
-                spray_note = f"; autospray error: {type(exc).__name__}"
+                    total_new = 0
+                    total_admins = 0
+                    for parsed_host in parsed:
+                        b = yhspray.spray_all(conn, eid, host_ip=parsed_host.ip)
+                        total_new += sum(1 for a in b.hits if "cached" not in a.detail)
+                        total_admins += len(b.admins)
+                    if total_new or total_admins:
+                        spray_note = (
+                            f"; autospray: {total_new} new hit(s), "
+                            f"{total_admins} admin"
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    spray_note = f"; autospray error: {type(exc).__name__}"
             return f"nmap ingested: {h} hosts, {s} services; coverage {cov}{tail}{spray_note}"
         valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
         if kind not in valid:
@@ -522,6 +602,12 @@ def tool_enum(db_path: Path | str, lab: str, target: str, ports: str | None = No
     from yhwach.parsers.nmap import insert_hosts, parse_nmap_xml_text, parse_scan_meta
 
     url = hexstrike_url or DEFAULT_URL
+    # Refuse if disarmed or out of scope before any HexStrike traffic — the MCP
+    # enum path had no check at all (only the CLI did a scope check).
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        _assert_armed(conn, eid, "yhwach_enum")
+        _assert_in_scope(conn, eid, target)
     client = HexStrikeClient(url)
     try:
         client.health()
@@ -568,9 +654,18 @@ def tool_probe(db_path: Path | str, lab: str, host: str | None = None,
     lines: list[str] = []
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
+        _assert_armed(conn, eid, "yhwach_probe")
         services = yhdb.all_services_for_scanned_hosts(conn, eid)
         if host:
+            _assert_in_scope(conn, eid, host)
             services = [s for s in services if s["ip"] == host]
+        else:
+            # Sweep mode: never probe a host that drifted out of scope (typed
+            # matcher — honors excludes and hostname/wildcard scopes).
+            from yhwach import scope as yhscope
+
+            services = [s for s in services
+                        if yhscope.assert_target(conn, eid, s["ip"])[0]]
         for s in services:
             hits = []
             if s["port"] in PROBES_BY_PORT:
@@ -786,7 +881,7 @@ def tool_export_notes(db_path: Path | str, lab: str, out_dir: str | None = None)
 # Registry of (name, fn, description) for the server to expose.
 def tool_add_finding(db_path: Path | str, lab: str, title: str, severity: str,
                      evidence: str, cls: str = "INFO", host: str | None = None,
-                     tag: str | None = None) -> str:
+                     tag: str | None = None, location: str | None = None) -> str:
     """Record an operator-confirmed finding/lead into the world model.
 
     For intel that has no deterministic extractor — a doc/wiki disclosure, a
@@ -824,12 +919,75 @@ def tool_add_finding(db_path: Path | str, lab: str, title: str, severity: str,
         yhdisc.observe_ips_in_text(conn, eid, evidence, source="finding_evidence")
         fid, created = yhdb.add_finding(
             conn, host_id, surface_id, cls, title, sev, evidence,
-            tag=tag, engagement_id=eid)
+            tag=tag, engagement_id=eid, location=location)
         yhdb.log_event(conn, eid, "finding",
                        {"id": fid, "title": title, "severity": sev, "host": host, "tag": tag})
     where = f" on {host}" if host else ""
     chain = f" [tag: {tag}]" if tag else ""
     return f"finding #{fid} {'recorded' if created else 'updated'}{where}: [{sev}] {title}{chain}"
+
+
+def tool_finding_set(db_path: Path | str, lab: str, finding_id: int,
+                     status: str | None = None, severity: str | None = None,
+                     evidence: str | None = None, reason: str = "") -> str:
+    """Correct a finding: change its status, severity, or evidence.
+
+    status is open | confirmed | exploited (live) | false_positive | duplicate |
+    remediated | dead (closed — drops out of recall and the open register but
+    stays queryable). A finding is never deleted; a wrong one is closed. Marking
+    it also freezes it: a later parser re-ingest will not overwrite your edits.
+    """
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        row = conn.execute("SELECT id FROM finding WHERE id=? AND engagement_id=?",
+                           (finding_id, eid)).fetchone()
+        if row is None:
+            raise ValueError(f"no finding #{finding_id} in lab '{lab}'")
+        old = yhdb.set_finding(conn, finding_id, status=status, severity=severity,
+                               evidence=evidence, author="operator")
+        yhdb.log_event(conn, eid, "finding_set",
+                       {"id": finding_id, "from": old["status"], "to": status or old["status"],
+                        "severity": severity, "reason": reason})
+    parts = []
+    if status:
+        parts.append(f"status -> {status}")
+    if severity:
+        parts.append(f"severity -> {severity}")
+    if evidence:
+        parts.append("evidence updated")
+    detail = ("; " + ", ".join(parts)) if parts else ""
+    return f"finding #{finding_id} updated (from {old['status']}){detail}"
+
+
+def tool_add_evidence(db_path: Path | str, lab: str, kind: str,
+                      path: str | None = None, text: str | None = None,
+                      finding: int | None = None, objective: str | None = None,
+                      caption: str | None = None, contains_secret: bool = False) -> str:
+    """Bind a proof artefact to a finding (or a PoC objective).
+
+    kind is screenshot | request | response | output | file | log. Pass `path`
+    to a saved file (hashed at record time; refused if missing/empty) OR `text`
+    to store pasted output under the engagement workspace. One artefact can back
+    several findings. The bytes stay on disk; the DB keeps a sha256 and the link,
+    so `yhwach_query evidence` can answer 'does finding #N have proof?'.
+    """
+    from yhwach.engine import artifact_dir
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        if finding is not None:
+            row = conn.execute("SELECT id FROM finding WHERE id=? AND engagement_id=?",
+                               (finding, eid)).fetchone()
+            if row is None:
+                raise ValueError(f"no finding #{finding} in lab '{lab}'")
+        ev_id, created = yhdb.add_evidence(
+            conn, eid, kind=kind, path=path, text=text, finding_id=finding,
+            objective=objective, caption=caption, contains_secret=contains_secret,
+            captured_by="operator", artifact_dir=artifact_dir(db_path, "evidence"))
+        yhdb.log_event(conn, eid, "evidence",
+                       {"id": ev_id, "kind": kind, "finding": finding, "objective": objective})
+    bind = (f" -> finding #{finding}" if finding else "") + (f" -> {objective}" if objective else "")
+    return f"evidence #{ev_id} ({kind}) {'recorded' if created else 'already stored'}{bind}"
 
 
 def tool_add_loot(db_path: Path | str, lab: str, summary: str, host: str | None = None,
@@ -1014,6 +1172,10 @@ def tool_spray(db_path: Path | str, lab: str,
 
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
+        if not dry_run:
+            _assert_armed(conn, eid, "yhwach_spray")
+            if host:
+                _assert_in_scope(conn, eid, host)
         cred_id: int | None = None
         if cred is not None:
             row = conn.execute(
@@ -1123,10 +1285,12 @@ def tool_scan(db_path: Path | str, lab: str,
 
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
+        _assert_armed(conn, eid, "yhwach_scan")
         if host:
             # Explicit target: run even if scan_needed=0 (the operator asked).
-            # Auto-materialise the host if we've never heard of it — same
-            # policy as add_finding.
+            # Refuse an out-of-scope target before sending a packet, then
+            # auto-materialise the host — same policy as add_finding.
+            _assert_in_scope(conn, eid, host)
             yhdisc.observe_ip(conn, eid, host, source="scan")
             results = [yhscan.scan_host(conn, eid, host, mode=mode)]
         else:
@@ -1196,6 +1360,240 @@ def tool_annotate(db_path: Path | str, lab: str, host: str, section: str, text: 
                        {"host": host, "section": section, "chars": len(body)})
     return f"annotated {host} [{section}] ({len(body)} chars, state {fp[:8]})"
 
+
+def tool_scope(db_path: Path | str, lab: str, action: str = "list",
+               target: str | None = None, note: str | None = None) -> str:
+    """Manage the typed engagement scope (no traffic — this is memory).
+
+    action:
+      * ``list``    — show include and exclude entries.
+      * ``add``     — add an in-scope token (ip | cidr | hostname | *.wildcard).
+      * ``exclude`` — add an out-of-scope token (exclude always wins).
+      * ``remove``  — soft-delete the matching include token.
+      * ``check``   — report whether `target` is in scope (and why).
+
+    Empty scope means no target is in scope, so the traffic tools refuse until
+    something is added.
+    """
+    from yhwach import scope as yhscope
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        if action in ("add", "exclude"):
+            if not target:
+                raise ValueError(f"target required for scope {action}")
+            _, kind = yhscope.add_scope_entry(
+                conn, eid, target, include=(action == "add"), source="operator", note=note)
+            return f"scope {action}: {kind} {target}"
+        if action == "remove":
+            if not target:
+                raise ValueError("target required for scope remove")
+            n = yhscope.remove_scope_entry(conn, eid, target, include=True)
+            return f"scope remove: {target} ({n} row(s))"
+        if action == "check":
+            if not target:
+                raise ValueError("target required for scope check")
+            ok, reason = yhscope.assert_target(conn, eid, target)
+            return f"{target}: {'IN SCOPE' if ok else 'OUT OF SCOPE'}" + (f" — {reason}" if reason else "")
+        # list
+        rows = yhscope.list_scope_entries(conn, eid)
+        if not rows:
+            return "scope: (empty — traffic tools are refused until a target is added)"
+        inc = [f"{r['kind']}:{r['value']}" for r in rows if r["include"]]
+        exc = [f"{r['kind']}:{r['value']}" for r in rows if not r["include"]]
+        out = [f"in-scope ({len(inc)}): " + (", ".join(inc) or "none")]
+        if exc:
+            out.append(f"excluded ({len(exc)}): " + ", ".join(exc))
+        return "\n".join(out)
+
+
+def _candidate_ids(db_path: Path | str, lab: str, host: str | None) -> set[str]:
+    """(technique_id) set currently applicable to `host` — for the unlocked diff."""
+    if not host:
+        return set()
+    from yhwach import knowledge as kn
+
+    try:
+        with yhdb.transaction(db_path) as conn:
+            eid = _eng(conn, lab)
+            return {c.technique_id for c in kn.candidates_for(conn, eid, host_ip=host)}
+    except Exception:  # noqa: BLE001 — the diff is advisory, never fatal
+        return set()
+
+
+_INTERPRET_PARSERS = ("nmap", "netexec", "bloodhound", "certipy", "linpeas", "winpeas", "web")
+
+
+def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
+                   host: str | None = None, url: str | None = None,
+                   title: str | None = None, dry_run: bool = False) -> str:
+    """Turn pasted tool output into typed rows — the single text entry point.
+
+    `kind='auto'` sniffs the output (nmap, netexec, bloodhound, certipy, linpeas,
+    winpeas, web) and ingests it the same way `yhwach_ingest` would, but from
+    text you paste rather than a file on the server. Name `kind='x:<action_id>'`
+    to run one of the deterministic interpret extractors on the text. Anything
+    unrecognised is stored as loot plus an INFO finding so nothing is lost.
+    When `host` is given, the result names which recall rules the new facts
+    UNLOCKED. `dry_run=True` classifies without writing.
+    """
+    from yhwach import sniff
+    from yhwach.engine import artifact_dir
+
+    if kind == "auto":
+        kind = sniff.detect(text)
+
+    # Deterministic extractor by action id (exposes interpret.* over the wire).
+    if kind.startswith("x:"):
+        from yhwach.interpret import _EXTRACTORS, interpret_all
+
+        action_id = kind[2:]
+        if action_id not in _EXTRACTORS:
+            import difflib
+
+            near = difflib.get_close_matches(action_id, list(_EXTRACTORS), n=3)
+            hint = f" (did you mean: {', '.join(near)}?)" if near else ""
+            raise ValueError(
+                f"unknown extractor id '{action_id}'{hint} — use kind='auto' to sniff, "
+                "or a parser kind. The pasted text was NOT recorded.")
+        findings = interpret_all(action_id, text, {"IP": host, "URL": url})
+        tags = sorted({f.tag for f in findings if f.tag})
+        if dry_run:
+            return (f"dry_run: extractor {action_id} would write {len(findings)} "
+                    f"finding(s)" + (f" [tags: {', '.join(tags)}]" if tags else ""))
+        before = _candidate_ids(db_path, lab, host)
+        with yhdb.transaction(db_path) as conn:
+            eid = _eng(conn, lab)
+            host_id = yhdisc.observe_ip(conn, eid, host, source="interpret") if host else None
+            if host_id is None and host:
+                hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                                    (eid, host)).fetchone()
+                host_id = int(hrow["id"]) if hrow else None
+            for f in findings:
+                yhdb.add_finding(conn, host_id, None, f.cls, f.title, f.severity,
+                                 f.evidence, tag=f.tag, engagement_id=eid)
+            yhdb.log_event(conn, eid, "ingest",
+                           {"kind": f"interpret:{action_id}", "host": host,
+                            "findings": len(findings)})
+        unlocked = sorted(_candidate_ids(db_path, lab, host) - before)
+        ext = f" [tags: {', '.join(tags)}]" if tags else ""
+        unl = f"; unlocked: {', '.join(unlocked)}" if unlocked else ""
+        return f"interpret {action_id}: {len(findings)} finding(s){ext}{unl}"
+
+    # Known file-parser kinds — reuse the tested ingest path via a temp file.
+    if kind in _INTERPRET_PARSERS:
+        if dry_run:
+            return f"dry_run: classified as {kind} ({text.count(chr(10)) + 1} lines) — would ingest"
+        before = _candidate_ids(db_path, lab, host)
+        loot = artifact_dir(db_path, "loot")
+        loot.mkdir(parents=True, exist_ok=True)
+        ext = {"nmap": "xml", "bloodhound": "json", "certipy": "json", "web": "txt"}.get(kind, "txt")
+        tmp = loot / f"interpret_{kind}.{ext}"
+        tmp.write_text(text, encoding="utf-8")
+        msg = tool_ingest(db_path, lab, file=str(tmp), kind=kind, host=host, url=url,
+                          page_title=title)
+        unlocked = sorted(_candidate_ids(db_path, lab, host) - before)
+        return msg + (f"; unlocked: {', '.join(unlocked)}" if unlocked else "")
+
+    # Raw fallback: loot + one INFO finding (evidence is never a raw dump).
+    from yhwach import config as yhconfig
+
+    ttl = title or next((ln.strip() for ln in text.splitlines() if ln.strip()), "raw output")[:60]
+    if dry_run:
+        return f"dry_run: unrecognised — would store as loot + INFO finding ('{ttl}')"
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        host_id = None
+        if host:
+            hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                                (eid, host)).fetchone()
+            host_id = int(hrow["id"]) if hrow else None
+        loot_dir = yhconfig.loot_dir()
+        loot_dir.mkdir(parents=True, exist_ok=True)
+        slug = "".join(c if c.isalnum() else "_" for c in ttl)[:48]
+        lp = loot_dir / f"raw_{slug}.txt"
+        lp.write_text(text, encoding="utf-8")
+        excerpt = " ".join(text.split())[:180]
+        fid, _ = yhdb.add_finding(conn, host_id, None, "INFO", ttl, "info",
+                                  f"{excerpt}  [full: {lp}]", engagement_id=eid)
+        yhdb.log_event(conn, eid, "ingest",
+                       {"kind": "raw", "host": host, "finding": fid, "loot": str(lp)})
+    return (f"unparsed — stored as loot + INFO finding #{fid} ('{ttl}'). "
+            f"Name kind='x:<action_id>' to run an extractor, or a parser kind.")
+
+
+def tool_query(db_path: Path | str, lab: str, view: str,
+               where: dict | None = None, q: str | None = None,
+               fields: list | None = None, order: str | None = None,
+               limit: int = 25, offset: int = 0, reveal: bool = False) -> str:
+    """Query a named read view of the world model (read-only, no traffic).
+
+    views: hosts, services, surfaces, findings, creds, principals, shares, loot,
+    objectives, attempts, events, software, vulns, web_paths, scan_coverage,
+    probe_runs. `where` filters by column with an operator in the key, e.g.
+    {"port": 445}, {"severity in": ["high","critical"]}, {"at>=": "2026-10-11T14:00Z"},
+    {"validated_on is_null": true}. `q` is a substring search across the view's
+    text columns. Secrets are masked unless reveal=true.
+    """
+    from yhwach import views as yhviews
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        cols, rows, total = yhviews.query(
+            conn, eid, view, where=where, q=q, fields=fields, order=order,
+            limit=limit, offset=offset, reveal=reveal)
+        return yhviews.render(cols, rows, total, view, limit, offset)
+
+
+def tool_attempt(db_path: Path | str, lab: str, rule: str, result: str,
+                 reason: str = "", host: str | None = None,
+                 evidence: str | None = None, technique: str | None = None) -> str:
+    """Record that a move was tried, so recall stops re-proposing it.
+
+    `rule` is a playbook technique id (validated against the catalog). `result`
+    is success | fail | blocked | partial. A fail/blocked retires that (rule,
+    host) pair from `yhwach_next` until you explicitly retry; a success marks it
+    done. For an off-catalog move (a custom web auth bypass, a client-specific
+    app), pass a free-text `technique` instead of `rule`.
+    """
+    from yhwach import knowledge as kn
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        rule_id: str | None = rule
+        tech = technique
+        if rule:
+            ids = {t.id: t.technique for t in kn.load_techniques()}
+            if rule in ids:
+                tech = tech or ids[rule]
+            elif technique is None:
+                import difflib
+
+                near = difflib.get_close_matches(rule, list(ids), n=3)
+                hint = f" (did you mean: {', '.join(near)}?)" if near else ""
+                raise ValueError(
+                    f"unknown technique id '{rule}'{hint}. Pass technique=<free text> "
+                    "to record an off-catalog move.")
+        else:
+            rule_id = None
+        host_id: int | None = None
+        if host:
+            host_id = yhdisc.observe_ip(conn, eid, host, source="attempt")
+            if host_id is None:
+                hrow = conn.execute(
+                    "SELECT id FROM host WHERE engagement_id=? AND ip=?", (eid, host)
+                ).fetchone()
+                host_id = int(hrow["id"]) if hrow else None
+        yhdb.add_attempt(conn, eid, result=result, host_id=host_id,
+                         playbook_rule_id=rule_id, technique_id=tech,
+                         reason=reason or None, evidence=evidence)
+        yhdb.log_event(conn, eid, "attempt",
+                       {"rule": rule_id or tech, "host": host, "result": result,
+                        "reason": reason})
+    where = f" @ {host}" if host else ""
+    return f"attempt recorded: {rule_id or tech}{where} -> {result}"
+
+
 TOOL_SPECS = [
     ("yhwach_engage", tool_engage,
      "Initialise/resume a lab: create the DB and upsert the engagement (lab + scope "
@@ -1216,6 +1614,14 @@ TOOL_SPECS = [
      "vault creds and uncaptured objectives. The deterministic menu the brain reasons "
      "FROM — call it to answer 'what do I do next?'. Optional host scopes to one IP."),
     ("yhwach_findings", tool_findings, "Recorded findings, most severe first."),
+    ("yhwach_finding_set", tool_finding_set,
+     "Correct a finding: status (open|confirmed|exploited|false_positive|duplicate|"
+     "remediated|dead), severity, or evidence. Closed findings leave recall but stay "
+     "queryable; the finding is frozen against parser re-ingest. Never deletes."),
+    ("yhwach_add_evidence", tool_add_evidence,
+     "Bind a proof artefact (screenshot|request|response|output|file|log) to a finding "
+     "or PoC objective — by file path (hashed, refused if missing) or pasted text. "
+     "The DB keeps a sha256 + link so 'does finding #N have proof?' is answerable."),
     ("yhwach_add_finding", tool_add_finding,
      "Record an operator-confirmed finding/lead (doc disclosure, config leak, auth-bypass "
      "lead, enumerated users) into the world model so it shows on the board/report. "
@@ -1250,6 +1656,9 @@ TOOL_SPECS = [
      "Tag a host with a free-form label (dc | ai-target | domain-admin | dual-homed | "
      "tier0 | dead-end | loot-here | ...), orthogonal to its FSM stage."),
     ("yhwach_untag", tool_untag, "Remove a free-form tag from a host."),
+    ("yhwach_scope", tool_scope,
+     "Manage the typed engagement scope: list|add|exclude|remove|check (no traffic). "
+     "Tokens are ip/cidr/hostname/*.wildcard; exclude wins; empty scope refuses traffic."),
     ("yhwach_spray", tool_spray,
      "Spray the credential vault against reachable services (ssh|smb|winrm|ldap|mssql|"
      "rdp|ftp|http-basic). Also auto-runs on every add_cred and every new service "
@@ -1257,6 +1666,18 @@ TOOL_SPECS = [
      "Filters: host?, protocol?, cred?, force?, dry_run?. Results (success & fail) "
      "are cached in credential_access; force=True re-attempts. Uses nxc / curl; "
      "domain and local-auth are tried automatically on SMB/WinRM/MSSQL."),
+    ("yhwach_interpret", tool_interpret,
+     "Turn pasted tool output into typed rows (auto-sniffs nmap/netexec/bloodhound/"
+     "certipy/linpeas/winpeas/web; kind='x:<action_id>' runs an extractor; else loot+INFO). "
+     "Names which recall rules the new facts unlocked. dry_run classifies without writing."),
+    ("yhwach_query", tool_query,
+     "Query a named read view (hosts|services|surfaces|findings|creds|principals|"
+     "shares|loot|objectives|attempts|events|software|vulns|web_paths|scan_coverage|"
+     "probe_runs) with where/q/fields/order/limit. Read-only; secrets masked unless reveal."),
+    ("yhwach_attempt", tool_attempt,
+     "Record a tried move (result: success|fail|blocked|partial). fail/blocked "
+     "retire that (rule,host) from yhwach_next; success marks it done. Pass a "
+     "free-text technique= for off-catalog moves."),
     ("yhwach_scan", tool_scan,
      "Run nmap against hosts and ingest results — the 'always full-scan early' fix. "
      "mode=quick|full|udp (full = -p- -sV -sC; the 'no missed ports' guarantee). "

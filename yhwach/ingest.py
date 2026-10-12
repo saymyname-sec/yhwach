@@ -76,10 +76,13 @@ def ingest_netexec(conn: sqlite3.Connection, eng_id: int, host_id: int, text: st
         kerb += 1
     for f in res.findings:
         yhdb.add_finding(conn, host_id, None, f.cls, f.title, f.severity, f.evidence, tag=f.tag)
+    # I33 — flag hybrid-identity producers among the principals just recorded.
+    from yhwach.entra import derive_entra_findings
+    entra = sum(derive_entra_findings(conn, eng_id).values())
     return {
         "shares": len(res.shares), "principals": len(res.principals),
         "admin": len(set(res.admin_users)), "policy": bool(res.password_policy),
-        "domain_facts": len(res.domain_facts), "kerberos": kerb,
+        "domain_facts": len(res.domain_facts), "kerberos": kerb, "entra": entra,
         "findings": len(res.findings), "creds_proven": proven,
     }
 

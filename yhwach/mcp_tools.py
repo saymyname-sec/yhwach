@@ -912,8 +912,11 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             from yhwach.parsers.bloodhound import parse_bloodhound
             found = parse_bloodhound(text)
             g = ingest_bloodhound_graph(conn, eid, text)
+            from yhwach.entra import derive_entra_findings
+            entra = sum(derive_entra_findings(conn, eid).values())
             note = (f"; graph: {g['principals']} principals, {g['privileges']} privs, "
-                    f"{g['edges']} edges")
+                    f"{g['edges']} edges"
+                    + (f"; {entra} hybrid-identity producer(s)" if entra else ""))
         elif kind == "certipy":
             from yhwach.parsers.adcs import parse_certipy
             found = parse_certipy(text)

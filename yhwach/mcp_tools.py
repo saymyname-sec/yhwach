@@ -795,6 +795,10 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
                     params=",".join(rq.params) or None, auth_required=rq.auth_required,
                     source=kind)
                 paths += 1
+                # I24 — feed the role-by-endpoint authorization matrix.
+                yhdb.record_authz(conn, eid, session=rq.session or "unassigned",
+                                  endpoint=rq.endpoint or rq.path, method=rq.method,
+                                  status=rq.status)
             yhdb.log_event(conn, eid, "ingest",
                            {"kind": kind, "paths": paths, "unresolved_host": unresolved})
             return (f"{kind}: {paths} web_path(s) recorded (metadata only — no bodies), "
@@ -2189,6 +2193,32 @@ def tool_own(db_path: Path | str, lab: str, host: str | None = None,
         return "; ".join(out)
 
 
+def tool_authz(db_path: Path | str, lab: str) -> str:
+    """The role-by-endpoint authorization matrix (I24) from captured traffic
+    (yhwach_ingest kind=burp|har). Rows are METHOD endpoint (with {id} templated),
+    columns are role sessions (cookie/JWT-sub fingerprints, 'unassigned' last).
+    A cell shows the status a role got; '·' is UNOBSERVED — a candidate to replay,
+    NOT a denial. The access-control test every bounty/web engagement owes.
+    """
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        m = yhdb.authz_matrix(conn, eid)
+    if not m["rows"]:
+        return "no captured traffic yet — ingest a Burp/HAR capture (kind=burp|har)."
+    sessions = m["sessions"]
+    out = ["authz matrix (· = unobserved, not denied):",
+           "  endpoint".ljust(42) + "  " + "  ".join(s[:14] for s in sessions)]
+    for ep in m["rows"][:60]:
+        cells = []
+        for s in sessions:
+            v = m["cells"].get((ep, s))
+            cells.append("·".center(14) if v is None else str(v).center(14))
+        out.append("  " + ep[:40].ljust(40) + "  " + "  ".join(cells))
+    if len(m["rows"]) > 60:
+        out.append(f"  … +{len(m['rows']) - 60} more endpoints (yhwach_query view=... )")
+    return "\n".join(out)
+
+
 def tool_methodology(db_path: Path | str, lab: str, host: str) -> str:
     """Per-asset methodology matrix (I35) for one host: each AD checklist item is
     PRESENT (weakness found), CHECKED (enumerated, not vulnerable) or UNKNOWN (no
@@ -2620,6 +2650,11 @@ TOOL_SPECS = [
      "Bounty submission memory. endpoint/finding/program records a submission and returns a "
      "duplicate-risk advisory (same endpoint+param, or same class program-wide); otherwise "
      "lists. Advisory only — never changes a finding's status or recall order."),
+    ("yhwach_authz", tool_authz,
+     "Role-by-endpoint authorization matrix from captured traffic (burp/har). "
+     "Rows are METHOD endpoint ({id} templated), columns are role sessions. A "
+     "cell is the status a role saw; '·' is UNOBSERVED (replay candidate), not a "
+     "denial. The broken-access-control test surface."),
     ("yhwach_methodology", tool_methodology,
      "Per-host methodology matrix (I35): each AD checklist item is PRESENT / "
      "CHECKED / UNKNOWN, derived from host_fact + domain_fact (never typed). "

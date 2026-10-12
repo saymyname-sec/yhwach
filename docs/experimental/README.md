@@ -18,3 +18,7 @@ register yhwach as an MCP server and let Claude Code / Codex CLI be the brain.
 Docs for this path:
 - [`self-driving-openai-vm.md`](self-driving-openai-vm.md) — running the self-driving loop (OpenAI brain, unbudgeted)
 - [`openai-azure-responses.md`](openai-azure-responses.md) — OpenAI / Azure API-Management gateway config
+- [`agent-mode.md`](agent-mode.md) — the **CTF/exam methodology router** (optional `/lab` glue). It
+  encodes lab doctrine ("proof = points", "speed beats stealth") and is **not** for real client
+  engagements; never install it as your global `~/.claude/CLAUDE.md`. For real work, let
+  `yhwach init --kind` write a per-engagement instruction fragment instead.

@@ -157,7 +157,7 @@ $YHWACH_VAULT_DIR/<lab>/        # the Obsidian vault (narrative + _RESUME.md)
 
 Before each challenge, drop your custom binaries in `$YHWACH_DATA_DIR/tools/` with an instructions
 file that states the listener **port**. Yhwach hardcodes their canonical paths in
-`yhwach/arsenal.py` (run `yhwach arsenal` to print them — don't hand-maintain a copy):
+`yhwach/arsenal.py` (run `yhwach ref arsenal` to print them — don't hand-maintain a copy):
 
 ```
 $YHWACH_DATA_DIR/tools/
@@ -184,21 +184,31 @@ git clone --depth 1 https://github.com/swisskyrepo/InternalAllTheThings.git
 
 ## 8. Claude Code CLI — the files to copy
 
-Claude Code is the operator. Copy the **glue** files into `~/.claude/`. (The persona is NOT here — it
-ships with the engine; see step 2.)
+Claude Code is the operator. The one thing that matters is **registering the MCP
+server** (next sub-section) — that is what makes the `yhwach_*` tools appear. Any
+per-engagement instruction fragment should be **kind-appropriate** and live next to
+that engagement (a bounty run is not a CTF; stealth and scope differ per kind), not a
+one-size global router. (The persona is NOT copied — it ships with the engine; see
+step 2.)
+
+> **Do not install a one-size global `~/.claude/CLAUDE.md`.** Earlier versions told you
+> to copy the CTF methodology router over your global Claude config. That file is **CTF/exam
+> doctrine** ("15 free points", "proof = points", "speed beats stealth", "if refused,
+> re-frame") — wrong for real client work, and it would override your own global config
+> for *every* project. It now lives in [`docs/experimental/agent-mode.md`](experimental/agent-mode.md)
+> as an **optional** router you may load yourself for a lab/CTF, never a mandated install.
+
+Optionally, the `/lab` and `/yhwach-learn` slash commands and the capture hook are
+convenience glue for lab/CTF work (they are not required for real engagements):
 
 | Source (in `~/yhwach`) | Copy to | What it is |
 |---|---|---|
-| `docs/agent-mode.md` | `~/.claude/CLAUDE.md` | always-loaded router (methodology, scoring, capture rules) |
 | `docs/commands/lab.md` | `~/.claude/commands/lab.md` | `/lab` — start/resume a lab and drive the loop |
 | `docs/commands/yhwach-learn.md` | `~/.claude/commands/yhwach-learn.md` | `/yhwach-learn` — mine a finished vault into yhwach improvements |
 | `docs/hooks/yhwach-sync-reminder.sh` | `~/.claude/hooks/yhwach-sync-reminder.sh` | PostToolUse hook: forces state+note capture after every offensive command |
 
-Copy them:
-
 ```bash
 mkdir -p ~/.claude/commands ~/.claude/hooks
-cp ~/yhwach/docs/agent-mode.md            ~/.claude/CLAUDE.md
 cp ~/yhwach/docs/commands/lab.md      ~/.claude/commands/lab.md
 cp ~/yhwach/docs/commands/yhwach-learn.md  ~/.claude/commands/yhwach-learn.md
 cp ~/yhwach/docs/hooks/yhwach-sync-reminder.sh ~/.claude/hooks/
@@ -287,13 +297,16 @@ sudo apt install -y obsidian    # or the AppImage
 yhwach engage  --lab lab01 --scope 10.10.10.0/24
 yhwach enum    --lab lab01 --target 10.10.10.0/24     # nmap via HexStrike -> ingested
 yhwach probe   --lab lab01                            # AI + traditional surfaces
-yhwach brief   --lab lab01                            # the operator brief (Claude reasons over this)
-yhwach run     --lab lab01 --dry-run                  # walk the loop: candidates -> execute -> judge -> report
-yhwach report  --lab lab01 --out report.md
+yhwach brief   --lab lab01                            # the operator brief (the client reasons over this)
+yhwach next    --lab lab01                            # the recall menu for the next move
+yhwach status  --lab lab01                            # resume-safe engagement state
+yhwach report  --lab lab01 --check                    # QA gate: evidence/PoC/secret-leak checks
 ```
 
-From Claude Code, the same loop runs via the `yhwach_*` MCP tools, and the operator writes the
-write-up into the vault at `$YHWACH_VAULT_DIR/lab01/` at every objective.
+From your MCP client the same loop runs via the `yhwach_*` tools — the client reasons over
+`yhwach_brief`, acts, and folds results back with `yhwach_interpret` / `yhwach_attempt`. (The
+deterministic `yhwach run --dry-run` harness still exists for the experimental self-driving path —
+see [docs/experimental/](experimental/).)
 
 ## 11. Troubleshooting
 

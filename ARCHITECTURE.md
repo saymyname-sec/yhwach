@@ -7,8 +7,8 @@ MCP client — [Claude Code](https://docs.claude.com/en/docs/claude-code) or
 yhwach is the world model, the recall menu, and the safety gate it reasons over.**
 Yhwach itself needs **no API key**.
 
-> There is also a legacy, **experimental** runtime where yhwach calls a model itself
-> (`yhwach run`, the `[agent]` extra). It is unsupported and slated for removal — see
+> A legacy, self-driving runtime (where yhwach called a model itself via `yhwach run`
+> and the `[agent]` extra) **has been removed** — it lives only in git history; see
 > [`docs/experimental/`](docs/experimental/). Everything below describes the supported
 > advisor picture. (`AGENT.md` has long-form design history, but describes the
 > removed self-driving runtime — this file is the current source of truth.)

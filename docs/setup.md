@@ -311,9 +311,7 @@ yhwach report  --lab lab01 --check                    # QA gate: evidence/PoC/se
 ```
 
 From your MCP client the same loop runs via the `yhwach_*` tools — the client reasons over
-`yhwach_brief`, acts, and folds results back with `yhwach_interpret` / `yhwach_attempt`. (The
-deterministic `yhwach run --dry-run` harness still exists for the experimental self-driving path —
-see [docs/experimental/](experimental/).)
+`yhwach_brief`, acts, and folds results back with `yhwach_interpret` / `yhwach_attempt`.
 
 ## 11. Troubleshooting
 

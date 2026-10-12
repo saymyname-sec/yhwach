@@ -789,3 +789,33 @@ CREATE TABLE IF NOT EXISTS payload (
     at            TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_payload_eng ON payload(engagement_id);
+
+-- schema v11 (I52) — the AI-surface asset model: the tools an agent exposes and
+-- the data sources it reads. Keyed on the existing surface (no hostname stopgap).
+-- desc_sha + first/last seen detects a rug-pull (a tool whose description/behaviour
+-- changed under us). The sink classification is what makes excessive-agency recall
+-- fire; source writability is the indirect-injection vector.
+CREATE TABLE IF NOT EXISTS ai_tool (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    surface_id    INTEGER REFERENCES surface(id),
+    name          TEXT NOT NULL,
+    description   TEXT,
+    sink          TEXT,       -- shell|code|sql|email|http|file|none
+    desc_sha      TEXT,
+    first_seen    TEXT NOT NULL,
+    last_seen     TEXT,
+    UNIQUE(engagement_id, surface_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_tool_eng ON ai_tool(engagement_id);
+CREATE TABLE IF NOT EXISTS ai_data_source (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    surface_id    INTEGER REFERENCES surface(id),
+    name          TEXT NOT NULL,
+    kind          TEXT,       -- rag|vector_db|file|db|web
+    writable      INTEGER DEFAULT 0,
+    first_seen    TEXT NOT NULL,
+    UNIQUE(engagement_id, surface_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_data_source_eng ON ai_data_source(engagement_id);

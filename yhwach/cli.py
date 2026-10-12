@@ -331,6 +331,38 @@ def reuse(lab: str, db_path: str | None) -> None:
     click.echo(tool_reuse(_db_path(db_path), lab))
 
 
+@main.command(name="ai-tool")
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--name", default=None, help="Agent tool name; omit to list.")
+@click.option("--description", default=None, help="Tool description (classified to a sink).")
+@click.option("--host", default=None, help="Host of the AI surface.")
+@click.option("--sink", default=None, help="Override the classified sink.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def ai_tool(lab: str, name: str | None, description: str | None, host: str | None,
+            sink: str | None, db_path: str | None) -> None:
+    """Record / list agent tools exposed by an AI surface (I52)."""
+    from yhwach.mcp_tools import tool_ai_tool
+
+    click.echo(tool_ai_tool(_db_path(db_path), lab, name=name, description=description,
+                            host=host, sink=sink))
+
+
+@main.command(name="ai-source")
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--name", default=None, help="Data source name; omit to list.")
+@click.option("--kind", default=None, help="rag|vector_db|file|db|web.")
+@click.option("--host", default=None, help="Host of the AI surface.")
+@click.option("--writable", is_flag=True, default=False, help="Attacker-writable source.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def ai_source(lab: str, name: str | None, kind: str | None, host: str | None,
+              writable: bool, db_path: str | None) -> None:
+    """Record / list AI agent data sources (I52)."""
+    from yhwach.mcp_tools import tool_ai_source
+
+    click.echo(tool_ai_source(_db_path(db_path), lab, name=name, kind=kind, host=host,
+                              writable=writable))
+
+
 @main.command()
 @click.option("--lab", required=True, help="Lab name.")
 @click.option("--payload", "payload", default=None, help="Payload sent; omit to list.")

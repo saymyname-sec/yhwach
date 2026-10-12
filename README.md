@@ -96,7 +96,7 @@ So that the terminal reads the **same database** as the MCP server, put the same
 echo 'export YHWACH_HOME="$HOME/.local/share/yhwach"' >> ~/.zshrc     # or ~/.bashrc
 ```
 
-That exposes 36 `yhwach_*` tools to your agent:
+That exposes the full `yhwach_*` toolset to your agent (run `yhwach schema` to list every one):
 
 | Purpose | Tools |
 |---|---|
@@ -108,6 +108,27 @@ That exposes 36 `yhwach_*` tools to your agent:
 *(each prefixed `yhwach_`, e.g. `yhwach_brief`)*
 
 † **also tries credentials against live services** — `add_cred` sprays the new credential; an nmap `ingest` and `scan` spray stored credentials at newly found services. `vulns` (offline CVE match) and `derive` (candidate passwords) never touch a target.
+
+### What sends traffic, and when
+
+Most of yhwach is a local memory you read and write — it sends nothing. Only a few actions reach a target, and even those are gated:
+
+| Action | Traffic to a target? | When |
+|---|---|---|
+| `status` · `brief` · `next` · `gaps` · `paths` · `dossier` · `recon` · `findings` · `creds` · `audit` · `ref` · `vulns` · `query` | **No** | pure reads over the local DB |
+| `ingest` / `interpret` (paste tool output), `add_finding`, `tag`, notes | **No** | parse/record text you already have |
+| `enum` · `probe` · `spray` · `scan` | **Yes** | active scanning and real authentication attempts |
+| `add_cred` | **Yes** | immediately sprays the new credential at every matching service already in memory |
+| nmap `ingest` / `scan` | **Yes** | re-tests stored credentials against newly discovered services |
+
+And the gates that sit in front of every traffic-sending action:
+
+- **Record-only by default.** Outside `lab`/`ctf` engagements, scan/enum/probe/spray are refused until a human runs **`yhwach arm`** in a terminal — arming is never an MCP argument, so the model can ask for it but cannot do it.
+- **Dumped hashes and cracked passwords never auto-spray.** They are `manual`; only a credential you name explicitly is ever sprayed.
+- **Scope is a chokepoint.** An empty scope refuses everything; exclusions win over inclusions.
+- **`YHWACH_AUTOSPRAY=0`** is a hard kill switch that disables every active path.
+
+`yhwach doctor --lab <name>` prints the current traffic state (armed? in scope?) in one line.
 
 Most read commands also work in a plain terminal, with no model involved — every one needs `--lab`:
 

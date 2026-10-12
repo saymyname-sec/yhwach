@@ -45,13 +45,14 @@ def test_proven_finding_without_evidence_fails(tmp_db: Path) -> None:
     assert any("no evidence" in f for f in fails)
 
 
-def test_evidence_clears_the_no_evidence_fail(tmp_db: Path) -> None:
+def test_evidence_clears_the_no_evidence_fail(tmp_db: Path, tmp_path: Path) -> None:
     eid = _eng(tmp_db)
     with yhdb.transaction(tmp_db) as conn:
         fid, _ = yhdb.add_finding(conn, None, None, "idor", "IDOR", "high", "x",
                                   engagement_id=eid)
         yhdb.set_finding(conn, fid, status="confirmed")
-        yhdb.add_evidence(conn, eid, kind="output", text="proof output", finding_id=fid)
+        yhdb.add_evidence(conn, eid, kind="output", text="proof output", finding_id=fid,
+                          artifact_dir=tmp_path)
     assert not any("no evidence" in f for f in _levels(tmp_db))
 
 
@@ -78,14 +79,14 @@ def test_uncommunicated_critical_fails(tmp_db: Path) -> None:
     assert any("not communicated" in f for f in _levels(tmp_db))
 
 
-def test_inline_secret_in_evidence_fails(tmp_db: Path) -> None:
+def test_inline_secret_in_evidence_fails(tmp_db: Path, tmp_path: Path) -> None:
     eid = _eng(tmp_db)
     with yhdb.transaction(tmp_db) as conn:
         fid, _ = yhdb.add_finding(conn, None, None, "cred", "leak", "high", "x",
                                   engagement_id=eid)
         yhdb.set_finding(conn, fid, status="confirmed")
         yhdb.add_evidence(conn, eid, kind="output", text="password=hunter2",
-                          finding_id=fid, contains_secret=True)
+                          finding_id=fid, contains_secret=True, artifact_dir=tmp_path)
     assert any("holds a secret" in f for f in _levels(tmp_db))
 
 

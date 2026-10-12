@@ -65,8 +65,7 @@ def main() -> None:
 @click.option("--lab", required=True, help="Lab name (unique per engagement).")
 @click.option("--scope", required=True, help="Comma-separated IPs / CIDRs / hostnames / *.wildcards.")
 @click.option("--kind", default=None,
-              type=click.Choice(["lab", "ctf", "internal", "external", "web",
-                                 "cloud", "redteam", "bounty", "retest"]),
+              type=click.Choice(list(yhdb.ENGAGEMENT_KINDS)),
               help="Engagement profile (default lab). Non-lab/ctf start record_only "
                    "(active tools disarmed until `yhwach arm`).")
 @click.option("--client", default=None, help="Client / program name (optional).")
@@ -2126,6 +2125,52 @@ def doctor(lab: str | None, hexstrike_url: str | None, db_path: str | None) -> N
     else:
         click.echo("[!] one or more hard checks failed (see ✗ above).", err=True)
         sys.exit(1)
+
+
+@main.command()
+@click.option("--kind", required=True, type=click.Choice(list(yhdb.ENGAGEMENT_KINDS)),
+              help="Engagement profile the instruction fragment is tailored to.")
+@click.option("--db", "db_path", default=None, type=click.Path(),
+              help="DB path to wire into the MCP registration (absolute path is resolved).")
+@click.option("--write", is_flag=True, default=False,
+              help="Also write the instruction fragment to a file (default: print only).")
+@click.option("--agents", is_flag=True, default=False,
+              help="Name the written fragment AGENTS.md instead of CLAUDE.md.")
+@click.option("--dir", "out_dir", default=".", type=click.Path(),
+              help="Directory to write the fragment into (with --write).")
+@click.option("--force", is_flag=True, default=False,
+              help="Overwrite an existing fragment file.")
+def init(kind: str, db_path: str | None, write: bool, agents: bool,
+         out_dir: str, force: bool) -> None:
+    """Wire a new engagement to an MCP client: print the MCP server registration
+    (with absolute paths) and a per-kind CLAUDE.md/AGENTS.md instruction fragment.
+
+    A bounty is not a CTF — posture, stealth, scope discipline and the objective
+    differ by kind, so the fragment is tailored. This is the supported alternative
+    to installing a one-size global `~/.claude/CLAUDE.md`.
+    """
+    from yhwach import initkit
+
+    path = _db_path(db_path)
+    out = initkit.render(kind, path, agents=agents)
+
+    click.echo("# 1. Register the yhwach MCP server (no API key needed)\n")
+    click.echo("#    one-liner:")
+    click.echo(f"{out['add_command']}\n")
+    click.echo("#    or merge into your MCP client settings.json:")
+    click.echo(out["config_json"])
+    click.echo("")
+    click.echo(f"# 2. Per-kind instruction fragment ({out['filename']}, kind={kind})\n")
+    click.echo(out["fragment"])
+
+    if write:
+        target = Path(out_dir) / out["filename"]
+        if target.exists() and not force:
+            click.echo(f"[!] {target} exists — pass --force to overwrite.", err=True)
+            sys.exit(2)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(out["fragment"], encoding="utf-8")
+        click.echo(f"[+] wrote {target}")
 
 
 @main.command()

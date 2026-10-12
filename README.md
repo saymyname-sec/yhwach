@@ -4,28 +4,11 @@
 
 **A memory and playbook for AI-assisted penetration testing: it remembers everything you've found, so you and your agent don't have to.**
 
-A real engagement is long and messy: hundreds of IP addresses, dozens of credentials, several subnets behind pivots, findings that only matter three hosts later. Chat context runs out, notes drift, and the thing that loses you the engagement is rarely a missing exploit — it's forgetting what you already found and what you never checked.
-
 Yhwach is the **memory** for that work. It keeps the whole engagement as **structured data in SQLite** — every host, service, surface, credential, finding, pivot and objective is a typed row — and hands it back to you and your AI agent on demand: what you can reach, what you hold, what is still unexplored, which techniques apply right now, and where the shortest path to your objective runs.
 
 > Named after Yhwach, who sees every possible future. This shows you every option — you pick one.
 
----
 
-## ⚠️ Read this first — yhwach is not an autonomous pentester
-
-> [!IMPORTANT]
-> **Yhwach remembers. It does not plan your attack, and it does not update itself.**
->
-> - It **never calls an AI model** and never runs on a schedule. Your MCP client (Claude Code / Codex CLI) is the brain, and **you are in charge of the attack path**.
-> - It **knows only what it was told**: tool output you ingested and facts you (or your agent, at your request) recorded. It does not watch your network, your terminal, your files or your notes.
-> - **Agent instructions are not enough to keep it current.** Nothing forces an agent to record every new host, credential or finding. If you don't feed yhwach, its picture of the engagement goes stale — and a stale map is worse than none.
-> - **Maintaining the memory is part of the job.** You update it regularly, through the whole engagement, the same way you'd keep a lab notebook.
-> - **One exception — recording can generate traffic.** Recording a credential (`yhwach_add_cred`) immediately tries it against every matching service already in memory, and an nmap ingest or `yhwach_scan` tries every stored credential against newly found services (via NetExec / curl). Know the lockout policy before you record passwords — see [Before you rely on it](#before-you-rely-on-it).
->
-> This is a different way of working with a pentest tool: **the human drives, the agent executes and records, yhwach remembers.** Used that way, it keeps a long, complicated engagement coherent. Used as a fire-and-forget robot, it won't work.
-
----
 
 ## How it works
 

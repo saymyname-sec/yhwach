@@ -534,3 +534,46 @@
   source: 'technique: rogue-agent register + task redirect captures a peer task''s credentials (LLM01/LLM06)'
   technique: a2a_task_capture
   authorized_only: true
+
+# --- I52 AI-surface asset model: excessive agency + indirect injection ------
+- id: agent_tool_shell_sink
+  when: { surface: mcp, tool_sink: shell }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: craft_tool_agency_abuse
+  maps: [LLM06]
+  points: 15
+  risk: propose
+  routes: 'yhwach ref ai-attacks -q tool_arg_injection'
+  source: 'technique: an exposed shell/exec agent tool -> argument injection -> RCE on the agent host'
+  authorized_only: true
+
+- id: agent_tool_shell_sink_chatbot
+  when: { surface: chatbot, tool_sink: shell }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: craft_tool_agency_abuse
+  maps: [LLM06]
+  points: 15
+  risk: propose
+  routes: 'yhwach ref ai-attacks -q tool_arg_injection'
+  source: 'technique: chatbot agent with a shell/exec tool -> coax a tool call that injects a command'
+  authorized_only: true
+
+- id: writable_source_indirect_injection
+  when: { surface: chatbot, source_writable: true }
+  class: ai
+  likelihood: H
+  time_cost: med
+  emits:
+    - action: plant_indirect_injection
+  maps: [LLM01]
+  points: 15
+  risk: propose
+  routes: 'yhwach ref ai-attacks -q rag_poisoning'
+  source: 'technique: plant an injection in a writable RAG/source the agent ingests (indirect prompt injection)'
+  authorized_only: true

@@ -144,6 +144,17 @@ VIEWS: dict[str, View] = {
         {"id": "d.id", "name": "d.name", "type": "d.type", "ip": "d.ip",
          "host_ip": "h.ip", "source": "d.source"},
         "d.engagement_id = ?", "d.name", ["d.name", "d.ip"]),
+    "ai_tools": View(
+        "ai_tool t LEFT JOIN surface su ON su.id = t.surface_id LEFT JOIN host h ON h.id = su.host_id",
+        {"id": "t.id", "name": "t.name", "sink": "t.sink", "host_ip": "h.ip",
+         "description": "t.description", "first_seen": "t.first_seen", "last_seen": "t.last_seen"},
+        "t.engagement_id = ?", "t.name", ["t.name", "t.description", "t.sink"]),
+    "ai_sources": View(
+        "ai_data_source s LEFT JOIN surface su ON su.id = s.surface_id "
+        "LEFT JOIN host h ON h.id = su.host_id",
+        {"id": "s.id", "name": "s.name", "kind": "s.kind", "writable": "s.writable",
+         "host_ip": "h.ip"},
+        "s.engagement_id = ?", "s.name", ["s.name", "s.kind"]),
     "payloads": View(
         "payload p LEFT JOIN host h ON h.id = p.host_id",
         {"id": "p.id", "surface": "p.surface", "host_ip": "h.ip", "payload": "p.payload",

@@ -42,7 +42,7 @@ def findings_by_standard(conn: sqlite3.Connection, engagement_id: int) -> dict[s
     """{family: {"count": n, "ids": sorted[str]}} over open findings' `class`."""
     rows = conn.execute(
         "SELECT class, COUNT(*) n FROM finding "
-        "WHERE engagement_id = ? AND COALESCE(class, '') <> '' AND status = 'open' "
+        "WHERE engagement_id = ? AND COALESCE(class, '') <> '' AND status IN ('open','confirmed','exploited') "
         "GROUP BY class",
         (engagement_id,),
     ).fetchall()
@@ -108,7 +108,7 @@ def _has_ai_surface(conn: sqlite3.Connection, engagement_id: int) -> bool:
 def _tested_llm_classes(conn: sqlite3.Connection, engagement_id: int) -> set[str]:
     """Normalised LLM numbers (LLM01..LLM10) with >=1 open finding classed to them."""
     rows = conn.execute(
-        "SELECT DISTINCT class FROM finding WHERE engagement_id=? AND status='open' "
+        "SELECT DISTINCT class FROM finding WHERE engagement_id=? AND status IN ('open','confirmed','exploited') "
         "AND UPPER(COALESCE(class,'')) LIKE 'LLM%'",
         (engagement_id,),
     ).fetchall()

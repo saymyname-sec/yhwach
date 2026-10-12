@@ -12,11 +12,31 @@ never point Yhwach at a HexStrike exposed on an untrusted network.
 """
 from __future__ import annotations
 
+import ipaddress
 import os
+import re
+import shlex
+from urllib.parse import urlparse
 
 import requests
 
 DEFAULT_URL = "http://127.0.0.1:8888"
+
+# A scan target is an IP, a CIDR, or a hostname label set — never a shell
+# expression. We validate before interpolating into the command HexStrike runs.
+_TARGET_RE = re.compile(r"^[A-Za-z0-9._:/-]{1,255}$")
+
+
+def _validate_target(target: str) -> str:
+    """Return the target if it is a plausible IP/CIDR/hostname, else raise.
+
+    HexStrike's /api/command runs the string in a shell, so a target carrying
+    shell metacharacters is remote command execution on the operator's box.
+    """
+    t = (target or "").strip()
+    if not _TARGET_RE.match(t):
+        raise HexStrikeError(f"refusing unsafe scan target: {target!r}")
+    return t
 # Command timeout for delegated tool runs (full-port nmap is slow); env-overridable.
 DEFAULT_TIMEOUT = float(os.environ.get("YHWACH_HEXSTRIKE_TIMEOUT", "180"))
 
@@ -65,8 +85,15 @@ class HexStrikeClient:
         role. Full-port is the default for every new endpoint; pass an explicit
         `ports` spec only to deliberately narrow a re-scan.
         """
-        portarg = f"-p {ports} " if ports else "-p- "
-        cmd = f"nmap {flags} {portarg}--open -oX - {target}"
+        safe_target = _validate_target(target)
+        safe_ports = ""
+        if ports:
+            if not re.match(r"^[0-9,\-]{1,64}$", ports):
+                raise HexStrikeError(f"refusing unsafe port spec: {ports!r}")
+            safe_ports = f"-p {ports} "
+        else:
+            safe_ports = "-p- "
+        cmd = f"nmap {flags} {safe_ports}--open -oX - {shlex.quote(safe_target)}"
         data = self.run_command(cmd)
         stdout = data.get("stdout", "")
         if not stdout.strip() and not data.get("success", False):
@@ -75,4 +102,18 @@ class HexStrikeClient:
 
 
 def is_loopback(url: str) -> bool:
-    return "127.0.0.1" in url or "localhost" in url
+    """True only when the URL's HOST is loopback.
+
+    A substring test matched `http://attacker/?localhost`; parse the host and
+    check it is exactly localhost or an address in 127.0.0.0/8 / ::1.
+    """
+    try:
+        host = (urlparse(url).hostname or "").strip()
+    except ValueError:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False

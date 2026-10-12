@@ -79,6 +79,14 @@ def test_upsert_host_rejects_invalid_ipv4(tmp_db: Path) -> None:
         yhdisc.upsert_host(conn, eid, "not.an.ip", source="finding")
 
 
+def test_valid_ipv4_rejects_link_local_and_loopback() -> None:
+    # 169.254.0.0/16 (incl. cloud metadata 169.254.169.254) must never become a
+    # host row that gets queued for a full-port scan.
+    assert yhdisc._valid_ipv4("169.254.169.254") is False
+    assert yhdisc._valid_ipv4("127.0.0.1") is False
+    assert yhdisc._valid_ipv4("10.0.0.5") is True
+
+
 def test_scope_expansion_materialises_small_cidr(tmp_db: Path) -> None:
     """A /29 (6 hosts) is materialised in full — no operator surprise."""
     eid = _engage(tmp_db, "10.10.10.0/29")

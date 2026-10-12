@@ -91,7 +91,7 @@ def phase_report(
     # -- confirmed leads (P0) -----------------------------------------------
     leads = conn.execute(
         "SELECT COALESCE(h.ip,'-') ip, f.tag, f.severity, f.title FROM finding f "
-        "LEFT JOIN host h ON h.id=f.host_id WHERE f.engagement_id=? AND f.status='open' "
+        "LEFT JOIN host h ON h.id=f.host_id WHERE f.engagement_id=? AND f.status IN ('open','confirmed','exploited') "
         "AND COALESCE(f.tag,'')<>'' ORDER BY CASE f.severity WHEN 'critical' THEN 0 "
         "WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, f.id",
         (engagement_id,),

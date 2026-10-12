@@ -1,15 +1,6 @@
 # AI Pentest Operator
 # Methodology of AI Pentesting 
 
-## Operating modes
-- **Manual (default).** This methodology + `~/.claude/Enum_playbook.md` + the MCP servers below.
-  The Obsidian vault is the source of truth; yhwach is NOT required — Claude CLI works normally.
-- **Autonomous (opt-in).** When you run `/osai-lab` (or ask to "drive with yhwach"), the engagement
-  is handed to **yhwach**: a SQLite world model owns the atoms (hosts/creds/findings/proofs/coverage),
-  the vault owns the prose. Full yhwach-mode guide: `~/yhwach/docs/CLAUDE.osai.md`.
-- **Offline reference works in BOTH modes:** `yhwach ref <pack>` — esp. `arsenal` (the vendored
-  offensive-tooling index) and `ai-attacks` (RAG/MCP/A2A/vector-db/cloud chains, OWASP-LLM mapped),
-  plus `gtfobins` / `lolbas` / `wadcoms` / `esc` / `default-creds` / `services`. No engagement needed.
 
 ## Hard gates
 1. **One source of truth = the Obsidian vault.** Every scan/cred/file/share/service/port/finding lands there the same turn you learn it. If it isn't in the vault, it doesn't exist.
@@ -143,11 +134,6 @@ command>`) and paste exactly what it prints.
   host/flag is **NOT done**, regardless of what the note text claims. The screenshot is the one
   step you never skip for speed — undocumented = zero points, unrecoverable after submission.
 
-
-## Playbooks
-Two on-demand references — read them, don't inline them (keeps per-turn tokens low):
-- **`~/.claude/Enum_playbook.md`** — enumeration map: per-surface techniques + a decision
-  tree. Read it to CHOOSE the approach on any host/service.
   
 ## Arsenal  (vendored at `~/yhwach/arsenal/`; index: `yhwach ref arsenal [-q <term>]`)
 - **Reverse shells** (AV/Defender-bypass; read each script's header): `~/yhwach/arsenal/gen_cs_shell.sh`

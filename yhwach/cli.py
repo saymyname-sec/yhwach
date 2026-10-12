@@ -25,6 +25,7 @@ from yhwach import __version__
 from yhwach import config as yhconfig
 from yhwach import db as yhdb
 from yhwach.coverage import enum_gaps, render_gaps
+from yhwach.demo import SEED_KINDS as _DEMO_KINDS
 from yhwach.engine import artifact_dir as _artifact_dir
 from yhwach.parsers.nmap import insert_hosts, parse_nmap
 from yhwach.probes import PROBES_BY_PORT, new_session, run_probes, software_from_result
@@ -2171,6 +2172,36 @@ def init(kind: str, db_path: str | None, write: bool, agents: bool,
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(out["fragment"], encoding="utf-8")
         click.echo(f"[+] wrote {target}")
+
+
+@main.command()
+@click.option("--kind", required=True, type=click.Choice(list(_DEMO_KINDS)),
+              help="Which synthetic engagement to seed.")
+@click.option("--lab", default=None, help="Lab name (default: demo-<kind>).")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def demo(kind: str, lab: str | None, db_path: str | None) -> None:
+    """Seed a synthetic, offline engagement so you can explore yhwach — brief,
+    next, path, query — without a target, a network, or a scanner. The seeds
+    build a representative world model using only local data; nothing is sent.
+    """
+    from yhwach import demo as demomod
+
+    path = _db_path(db_path)
+    yhdb.init(path)
+    name = lab or f"demo-{kind}"
+    with yhdb.transaction(path) as conn:
+        if yhdb.engagement_id_for(conn, name) is not None:
+            click.echo(f"[!] engagement '{name}' already exists — pass --lab NAME or a "
+                       "fresh --db to avoid duplicating rows.", err=True)
+            sys.exit(2)
+        s = demomod.build_demo(conn, kind, lab=name)
+    posture = "ARMED" if s["armed"] else "record-only (run `yhwach arm` to enable active tools)"
+    click.echo(f"[+] seeded '{s['lab']}' — kind={kind}, {s['hosts']} host(s), "
+               f"{s['findings']} finding(s), {s['creds']} cred(s); {posture}")
+    click.echo(f"    yhwach brief  --lab {s['lab']} --db {path}")
+    click.echo(f"    yhwach next   --lab {s['lab']} --db {path}")
+    if kind == "internal":
+        click.echo(f"    yhwach path   --lab {s['lab']} --db {path}   # provided account -> DC")
 
 
 @main.command()

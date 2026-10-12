@@ -770,3 +770,22 @@ CREATE TABLE IF NOT EXISTS domain_fact (
     UNIQUE(engagement_id, domain, key)
 );
 CREATE INDEX IF NOT EXISTS idx_domain_fact_eng ON domain_fact(engagement_id);
+
+-- schema v10 (I53) — the injection payload ledger. Records what was SENT, the
+-- response, a heuristic auto_verdict (ADVISORY — a regex refusal check is never
+-- the fact of record), and the operator's verdict. Per-engagement canaries let
+-- indirect-injection echoes be confirmed deterministically.
+CREATE TABLE IF NOT EXISTS payload (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    host_id       INTEGER REFERENCES host(id),
+    surface       TEXT,
+    payload       TEXT NOT NULL,
+    response      TEXT,
+    canary        TEXT,
+    auto_verdict  TEXT,     -- heuristic: success | refused | unclear (advisory)
+    verdict       TEXT NOT NULL DEFAULT 'unclear',  -- operator: success|refused|blocked|unclear
+    note          TEXT,
+    at            TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_payload_eng ON payload(engagement_id);

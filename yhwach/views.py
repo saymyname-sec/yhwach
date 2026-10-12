@@ -70,7 +70,8 @@ VIEWS: dict[str, View] = {
     "creds": View(
         "credential c LEFT JOIN host vh ON vh.id = c.validated_on_host_id",
         {"id": "c.id", "identifier": "c.identifier", "kind": "c.kind",
-         "source": "c.source", "provenance": "c.provenance", "secret": "c.secret",
+         "source": "c.source", "provenance": "c.provenance",
+         "spray_policy": "c.spray_policy", "secret": "c.secret",
          "validated_on": "vh.ip"},
         "c.engagement_id = ?", "c.id", ["c.identifier"], mask=["secret"]),
     "principals": View(

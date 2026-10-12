@@ -19,6 +19,9 @@ _SIGNS: list[tuple[str, re.Pattern]] = [
     ("openvas", re.compile(r"<nvt\s+oid=|Greenbone|<get_results_response")),
     # nuclei JSONL: one object per line carrying a template-id + matched-at.
     ("nuclei", re.compile(r'"template-?id"\s*:|"matched-at"\s*:')),
+    # bbot NDJSON events, then httpx JSONL (subfinder is too generic to sniff).
+    ("bbot", re.compile(r'"type"\s*:\s*"(DNS_NAME|URL|OPEN_TCP_PORT|IP_ADDRESS)"')),
+    ("httpx", re.compile(r'"webserver"\s*:|"cdn[_-]name"\s*:|"status[_-]code"\s*:.*"url"')),
     ("certipy", re.compile(r"Certipy|Certificate Templates|\bESC\d{1,2}\b")),
     ("bloodhound", re.compile(r'"ObjectIdentifier"|SharpHound|"PrincipalSID"|"meta"\s*:')),
     ("winpeas", re.compile(r"winpeas|Windows Local Privilege Escalation|AllowAutomaticUpdates|"

@@ -624,8 +624,10 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             from yhwach.ingest import ingest_netexec
             summ = ingest_netexec(conn, eid, hrow["id"], text)
             yhdb.log_event(conn, eid, "ingest", {"kind": kind, "host": host, **summ})
+            facts = f", {summ['domain_facts']} domain-fact(s)" if summ.get("domain_facts") else ""
+            kerb = f", {summ['kerberos']} roastable hash(es)" if summ.get("kerberos") else ""
             return (f"netexec on {host}: {summ['shares']} share(s), {summ['principals']} user(s), "
-                    f"{summ['admin']} admin, {summ['findings']} finding(s)")
+                    f"{summ['admin']} admin{facts}{kerb}, {summ['findings']} finding(s)")
         if kind == "web":
             if not url:
                 raise ValueError("url is required for kind=web")

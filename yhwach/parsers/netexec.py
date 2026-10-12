@@ -205,10 +205,17 @@ def _finalize(res: NxcResult) -> None:
 
 
 def _lockout_int(v: str) -> int | None:
-    if re.search(r"none|no lockout|0", v, re.I):
+    # "none"/"no lockout"/"never" mean lockout is disabled -> 0. A bare "0"
+    # means the same. But a threshold like 10/20/30/100 must NOT be read as 0
+    # just because it contains the digit 0 — that silently disabled the
+    # sprayer's only safety guard on the most common hardened-AD settings.
+    s = v.strip()
+    if re.search(r"\bnone\b|no\s*lockout|never|not?\s+set", s, re.I):
         return 0
-    m = re.search(r"\d+", v)
-    return int(m.group()) if m else None
+    m = re.search(r"\d+", s)
+    if m is None:
+        return None
+    return int(m.group())
 
 
 def _minutes_int(v: str) -> int | None:

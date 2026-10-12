@@ -21,20 +21,48 @@ def _rows(conn: sqlite3.Connection, sql: str, params=()) -> list[sqlite3.Row]:
         return []
 
 
-def build_brief(conn: sqlite3.Connection, eng: int, *, section: str | None = None) -> str:
+def _more(total: int, limit: int, sect: str, extra: str = "") -> str | None:
+    """Footer line when a list was capped, naming the slice call to see the rest."""
+    if total <= limit:
+        return None
+    return (f"- … +{total - limit} more not shown{extra} — "
+            f"ask for the slice: brief(section='{sect}')")
+
+
+def build_brief(conn: sqlite3.Connection, eng: int, *, section: str | None = None,
+                limit: int = 60, stage: str | None = None) -> str:
     want = lambda s: section is None or section == s  # noqa: E731
     out: list[str] = [f"# yhwach brief — engagement {eng}", ""]
 
     if want("reach"):
-        hosts = _rows(conn, "SELECT ip, COALESCE(hostname,'') h, COALESCE(os,'') os, stage, "
-                      "COALESCE(tags,'') tags FROM host WHERE engagement_id=? "
-                      "ORDER BY (stage IN ('foothold','looted','pivoted','done')) DESC, ip", (eng,))
+        # Started hosts (anything past 'undiscovered') first and in full up to
+        # the cap; bare scope placeholders are counted, not dumped — a /24
+        # materialises 254 'undiscovered' rows that would otherwise bury the
+        # map and blow the model's context on the first call.
+        q = ("SELECT ip, COALESCE(hostname,'') h, COALESCE(os,'') os, stage, "
+             "COALESCE(tags,'') tags FROM host WHERE engagement_id=? ")
+        params: list = [eng]
+        if stage:
+            q += "AND stage=? "
+            params.append(stage)
+        q += "ORDER BY (stage IN ('foothold','looted','pivoted','done')) DESC, (stage='undiscovered'), ip"
+        hosts = _rows(conn, q, tuple(params))
+        placeholders = sum(1 for r in hosts if r["stage"] == "undiscovered")
+        # Undiscovered scope placeholders are counted, not dumped — unless the
+        # caller explicitly asked for that stage.
+        shown = hosts if stage else [r for r in hosts if r["stage"] != "undiscovered"]
         tuns = _rows(conn, "SELECT t.subnet, t.kind, COALESCE(h.ip,'?') via FROM tunnel t "
                      "LEFT JOIN host h ON h.id=t.via_host_id WHERE t.engagement_id=?", (eng,))
         out += ["## REACH — hosts and how", "| IP | Host | OS | Stage | Tags |",
               "|----|------|----|-------|------|"]
-        for r in hosts:
+        for r in shown[:limit]:
             out.append(f"| {r['ip']} | {r['h']} | {r['os']} | {r['stage']} | {r['tags']} |")
+        more = _more(len(shown), limit, "reach")
+        if more:
+            out.append(more)
+        if placeholders and not stage:
+            out.append(f"- ({placeholders} undiscovered scope placeholders not shown — "
+                       f"brief(section='reach', stage='undiscovered'))")
         if tuns:
             out.append("")
             out.append("Tunnels (subnets reachable): " +
@@ -48,9 +76,12 @@ def build_brief(conn: sqlite3.Connection, eng: int, *, section: str | None = Non
                       "WHERE c.engagement_id=? ORDER BY c.id", (eng,))
         out += [f"## HOLD — {len(creds)} credentials/tokens (values via `yhwach creds`)",
               "| Identifier | Kind | Source | Validated on |", "|---|---|---|---|"]
-        for c in creds:
+        for c in creds[:limit]:
             out.append(f"| {c['identifier']} | {c['kind']} | {c['src'][:38]} | "
                      f"{c['validated_on'] or '— untried'} |")
+        more = _more(len(creds), limit, "hold")
+        if more:
+            out.append(more)
         out.append("")
 
     if want("surfaces"):
@@ -60,15 +91,18 @@ def build_brief(conn: sqlite3.Connection, eng: int, *, section: str | None = Non
                      "ORDER BY h.ip, s.kind", (eng,))
         out += ["## SURFACES — per host (★ = AI target)", "| IP | Surface | Auth | Port |",
               "|----|---------|------|------|"]
-        for s in surf:
+        for s in surf[:limit]:
             star = " ★" if s["kind"] in AI_KINDS else ""
             out.append(f"| {s['ip']} | {s['kind']}{star} | {s['auth']} | {s['port']} |")
+        more = _more(len(surf), limit, "surfaces")
+        if more:
+            out.append(more)
         out.append("")
 
     if want("unlocks"):
         leads = _rows(conn, "SELECT COALESCE(h.ip,'-') ip, f.tag, f.severity, f.title FROM finding f "
                       "LEFT JOIN host h ON h.id=f.host_id WHERE f.engagement_id=? "
-                      "AND f.status='open' AND COALESCE(f.tag,'')<>'' ORDER BY f.id", (eng,))
+                      "AND f.status IN ('open','confirmed','exploited') AND COALESCE(f.tag,'')<>'' ORDER BY f.id", (eng,))
         gated = _rows(conn, "SELECT DISTINCT h.ip, s.kind, s.auth FROM surface s "
                       "JOIN host h ON h.id=s.host_id WHERE h.engagement_id=? "
                       "AND COALESCE(s.auth,'') NOT IN ('','none') "
@@ -136,7 +170,8 @@ def build_brief(conn: sqlite3.Connection, eng: int, *, section: str | None = Non
 
         tags: set[str] = set()
         for r in _rows(conn, "SELECT DISTINCT tag FROM finding WHERE engagement_id=? "
-                       "AND COALESCE(tag,'')<>''", (eng,)):
+                       "AND COALESCE(tag,'')<>'' AND status IN ('open','confirmed','exploited')",
+                       (eng,)):
             tags.add(r["tag"])
         for r in _rows(conn, "SELECT DISTINCT s.kind FROM surface s JOIN host h ON h.id=s.host_id "
                        "WHERE h.engagement_id=?", (eng,)):

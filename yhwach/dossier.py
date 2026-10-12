@@ -272,7 +272,7 @@ def build(conn: sqlite3.Connection, engagement_id: int, host_ip: str) -> str:
     if "leads" in want:
         finds = conn.execute(
             "SELECT severity, title, COALESCE(tag,'') tag FROM finding "
-            "WHERE host_id=? AND status='open' "
+            "WHERE host_id=? AND status IN ('open','confirmed','exploited') "
             "ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
             "WHEN 'medium' THEN 2 ELSE 3 END, id",
             (h["id"],),
@@ -292,7 +292,8 @@ def build(conn: sqlite3.Connection, engagement_id: int, host_ip: str) -> str:
     if "lessons" in want:
         tagset = {r["kind"] for r in surfaces} | {
             r["tag"] for r in conn.execute(
-                "SELECT COALESCE(tag,'') tag FROM finding WHERE host_id=?", (h["id"],))
+                "SELECT COALESCE(tag,'') tag FROM finding WHERE host_id=? "
+                "AND status IN ('open','confirmed','exploited')", (h["id"],))
             if r["tag"]}
         hits = lessons_for(tagset)
         if hits:
@@ -377,7 +378,8 @@ def build(conn: sqlite3.Connection, engagement_id: int, host_ip: str) -> str:
         else:
             out.append("- enumeration of record is complete for this host")
         untriaged = [r["kind"] for r in surfaces if not conn.execute(
-            "SELECT 1 FROM finding WHERE host_id=? AND COALESCE(tag,'')<>'' LIMIT 1",
+            "SELECT 1 FROM finding WHERE host_id=? AND COALESCE(tag,'')<>'' "
+            "AND status IN ('open','confirmed','exploited') LIMIT 1",
             (h["id"],)).fetchone()]
         if untriaged:
             out.append("- no tagged finding on this host yet, so nothing has chained off it")

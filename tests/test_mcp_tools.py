@@ -51,7 +51,7 @@ def test_engage_rejects_bad_scope(tmp_path: Path) -> None:
 
     from yhwach.mcp_tools import tool_engage
     with pytest.raises(ValueError):
-        tool_engage(str(tmp_path / "x.db"), "z", "not-a-cidr")
+        tool_engage(str(tmp_path / "x.db"), "z", "10.0.0.0/99")
 
 
 def test_advance(tmp_db: Path) -> None:

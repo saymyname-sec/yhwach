@@ -55,7 +55,12 @@ def _valid_ipv4(s: str) -> bool:
     if addr.version != 4:
         return False
     # Skip broadcast/loopback/multicast/link-local — never useful as host rows.
-    return not (addr.is_multicast or addr.is_reserved or addr.is_unspecified)
+    # is_link_local catches 169.254.0.0/16 (cloud metadata 169.254.169.254),
+    # which otherwise materialised as a host queued for a full-port scan.
+    return not (
+        addr.is_multicast or addr.is_reserved or addr.is_unspecified
+        or addr.is_loopback or addr.is_link_local
+    )
 
 
 def _ip_in_scope(ip: str, scope: str | None) -> bool:

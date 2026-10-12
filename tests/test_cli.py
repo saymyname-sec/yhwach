@@ -40,6 +40,15 @@ def test_version() -> None:
     assert r.exit_code == 0 and "yhwach" in r.output
 
 
+def test_ui_refuses_bind_all_interfaces() -> None:
+    import pytest
+
+    pytest.importorskip("uvicorn")
+    r = _run(["ui", "--lab", "L", "--host", "0.0.0.0", "--port", "8799"])
+    assert r.exit_code == 2
+    assert "all interfaces" in r.output or "refusing" in r.output.lower()
+
+
 def test_engage_creates_db(tmp_path: Path) -> None:
     db = tmp_path / "e.db"
     r = _run(["engage", "--lab", "L", "--scope", "10.0.0.0/24", "--db", str(db)])
@@ -119,8 +128,18 @@ def test_report_timeline(tmp_db: Path) -> None:
 
 def test_engage_rejects_invalid_scope(tmp_path: Path) -> None:
     db = tmp_path / "bad.db"
-    r = _run(["engage", "--lab", "X", "--scope", "not-a-cidr", "--db", str(db)])
+    # A token that is neither an IP/CIDR, a hostname, nor a wildcard.
+    r = _run(["engage", "--lab", "X", "--scope", "10.0.0.0/99", "--db", str(db)])
     assert r.exit_code == 2 and "Invalid scope" in r.output
+
+
+def test_engage_accepts_hostname_and_wildcard_scope(tmp_path: Path) -> None:
+    db = tmp_path / "bounty.db"
+    r = _run(["engage", "--lab", "B", "--kind", "bounty",
+              "--scope", "*.example.com,app.example.com", "--db", str(db)])
+    assert r.exit_code == 0
+    # Bounty engagements start disarmed.
+    assert "record_only" in r.output
 
 
 def test_enum_rejects_out_of_scope_target(tmp_db: Path) -> None:

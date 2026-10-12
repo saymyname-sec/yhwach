@@ -63,7 +63,13 @@ def main() -> None:
 
 @main.command()
 @click.option("--lab", required=True, help="Lab name (unique per engagement).")
-@click.option("--scope", required=True, help="Comma-separated CIDRs / IPs.")
+@click.option("--scope", required=True, help="Comma-separated IPs / CIDRs / hostnames / *.wildcards.")
+@click.option("--kind", default=None,
+              type=click.Choice(["lab", "ctf", "internal", "external", "web",
+                                 "cloud", "redteam", "bounty", "retest"]),
+              help="Engagement profile (default lab). Non-lab/ctf start record_only "
+                   "(active tools disarmed until `yhwach arm`).")
+@click.option("--client", default=None, help="Client / program name (optional).")
 @click.option("--domain", default=None, help="AD domain (optional).")
 @click.option("--dc", "dc_ip", default=None, help="DC IP (optional).")
 @click.option("--points-target", "points_target", type=int, default=None,
@@ -74,7 +80,8 @@ def main() -> None:
               help="Optional: time budget in hours (drives the elapsed/remaining view).")
 @click.option("--db", "db_path", default=None, type=click.Path(),
               help="Override DB path (else $YHWACH_DB or the default).")
-def engage(lab: str, scope: str, domain: str | None, dc_ip: str | None,
+def engage(lab: str, scope: str, kind: str | None, client: str | None,
+           domain: str | None, dc_ip: str | None,
            points_target: int | None, points_max: int | None,
            time_budget_h: float | None, db_path: str | None) -> None:
     """Initialize an engagement: create the DB if needed, upsert the engagement row.
@@ -82,12 +89,13 @@ def engage(lab: str, scope: str, domain: str | None, dc_ip: str | None,
     Scoring is optional and engagement-specific: pass --points-target/--points-max/
     --time-budget-h to enable the pace view; omit them for a plain running count.
     """
-    from yhwach.scope import validate_scope
+    from yhwach import scope as yhscope
 
-    bad = validate_scope(scope)
+    bad = yhscope.validate_tokens(scope)
     if bad:
-        click.echo(f"[!] Invalid scope token(s): {', '.join(bad)} — use IPs/CIDRs "
-                   "(e.g. 10.10.10.0/24,192.168.1.5).", err=True)
+        click.echo(f"[!] Invalid scope token(s): {', '.join(bad)} — use IPs/CIDRs/"
+                   "hostnames/*.wildcards (e.g. 10.10.10.0/24,app.example.com,*.example.com).",
+                   err=True)
         sys.exit(2)
 
     path = _db_path(db_path)
@@ -99,8 +107,223 @@ def engage(lab: str, scope: str, domain: str | None, dc_ip: str | None,
                                         domain=domain, dc_ip=dc_ip,
                                         points_target=points_target,
                                         points_max=points_max,
-                                        time_budget_h=time_budget_h)
-    click.echo(f"[+] Engagement '{lab}' ready (id={eng_id})")
+                                        time_budget_h=time_budget_h,
+                                        kind=kind, client=client)
+        yhscope.sync_from_string(conn, eng_id, scope, source="engage")
+        mode = "armed" if yhdb.engagement_armed(conn, eng_id) else "record_only"
+    click.echo(f"[+] Engagement '{lab}' ready (id={eng_id}; kind={kind or 'lab'}; {mode})")
+    if mode == "record_only":
+        click.echo("[i] record_only: active tools (scan/enum/probe/spray + autospray) "
+                   "are disarmed. Run `yhwach arm --lab " + lab + "` to enable them.")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def arm(lab: str, db_path: str | None) -> None:
+    """Enable active traffic (scan/enum/probe/spray + autospray) for an engagement.
+
+    Arming is deliberately a terminal-only act — the MCP model can never turn
+    traffic on, only ask you to.
+    """
+    path = _db_path(db_path)
+    with yhdb.transaction(path) as conn:
+        eid = yhdb.engagement_id_for(conn, lab)
+        if eid is None:
+            click.echo(f"[!] unknown lab '{lab}'", err=True)
+            sys.exit(2)
+        yhdb.set_active_mode(conn, eid, "armed")
+    click.echo(f"[+] '{lab}' is ARMED — active tools will send traffic. Stay in scope.")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def disarm(lab: str, db_path: str | None) -> None:
+    """Return an engagement to record_only (no active traffic)."""
+    path = _db_path(db_path)
+    with yhdb.transaction(path) as conn:
+        eid = yhdb.engagement_id_for(conn, lab)
+        if eid is None:
+            click.echo(f"[!] unknown lab '{lab}'", err=True)
+            sys.exit(2)
+        yhdb.set_active_mode(conn, eid, "record_only")
+    click.echo(f"[+] '{lab}' is record_only — active tools are disarmed.")
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.argument("view")
+@click.option("--where", "wheres", multiple=True,
+              help="Filter col=val (repeatable). Operators: col>=val, col<=val, "
+                   "col!=val, 'col like=%x%', 'col in=a,b'.")
+@click.option("-q", "search", default=None, help="Substring search across the view's text columns.")
+@click.option("--field", "fields", multiple=True, help="Only these columns (repeatable).")
+@click.option("--order", default=None, help="Order by a column (prefix '-' for desc).")
+@click.option("--limit", default=25, show_default=True, type=int)
+@click.option("--offset", default=0, show_default=True, type=int)
+@click.option("--reveal", is_flag=True, default=False, help="Show masked secrets in full.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def query(lab: str, view: str, wheres: tuple, search: str | None, fields: tuple,
+          order: str | None, limit: int, offset: int, reveal: bool,
+          db_path: str | None) -> None:
+    """Query a named read view of the world model (read-only)."""
+    from yhwach import views as yhviews
+
+    where: dict = {}
+    for tok in wheres:
+        low = tok.lower()
+        if " in=" in low or low.rstrip().endswith(" in"):
+            col, _, val = tok.partition("=")
+            where[col.strip()] = [v.strip() for v in val.split(",") if v.strip()]
+            continue
+        if " like=" in low:
+            col, _, val = tok.partition("=")
+            where[col.strip()] = val
+            continue
+        for o in (">=", "<=", "!=", ">", "<"):
+            if o in tok:
+                col, _, val = tok.partition(o)
+                where[f"{col.strip()}{o}"] = val.strip()
+                break
+        else:  # plain equality
+            col, _, val = tok.partition("=")
+            where[col.strip()] = val.strip()
+    path = _db_path(db_path)
+    try:
+        with yhdb.transaction(path) as conn:
+            eid = yhdb.engagement_id_for(conn, lab)
+            if eid is None:
+                click.echo(f"[!] unknown lab '{lab}'", err=True)
+                sys.exit(2)
+            cols, rows, total = yhviews.query(
+                conn, eid, view, where=where or None, q=search,
+                fields=list(fields) or None, order=order, limit=limit,
+                offset=offset, reveal=reveal)
+            click.echo(yhviews.render(cols, rows, total, view, limit, offset))
+    except ValueError as e:
+        click.echo(f"[!] {e}", err=True)
+        sys.exit(2)
+
+
+@main.command()
+@click.argument("file", type=click.Path(exists=True, dir_okay=False))
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--kind", default="auto",
+              help="auto (sniff) | a parser kind | x:<action_id> for an extractor.")
+@click.option("--host", "host_ip", default=None, help="Host IP the output is about.")
+@click.option("--url", default=None, help="Base URL (for web output).")
+@click.option("--title", default=None, help="Title for an unparsed/raw record.")
+@click.option("--dry-run", is_flag=True, default=False, help="Classify without writing.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def interpret(file: str, lab: str, kind: str, host_ip: str | None, url: str | None,
+              title: str | None, dry_run: bool, db_path: str | None) -> None:
+    """Interpret a saved tool-output file into typed rows (auto-sniffed)."""
+    from yhwach.mcp_tools import tool_interpret
+
+    text = Path(file).read_text(encoding="utf-8", errors="replace")
+    try:
+        click.echo(tool_interpret(_db_path(db_path), lab, text, kind=kind,
+                                  host=host_ip, url=url, title=title, dry_run=dry_run))
+    except ValueError as e:
+        click.echo(f"[!] {e}", err=True)
+        sys.exit(2)
+
+
+@main.command(name="finding-set")
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--id", "finding_id", required=True, type=int, help="Finding id.")
+@click.option("--status", default=None,
+              type=click.Choice(["open", "confirmed", "exploited", "false_positive",
+                                 "duplicate", "remediated", "dead"]))
+@click.option("--severity", default=None,
+              type=click.Choice(["critical", "high", "medium", "low", "info"]))
+@click.option("--evidence", default=None, help="Replace the one-line evidence.")
+@click.option("--why", "reason", default="", help="One-line reason for the change.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def finding_set(lab: str, finding_id: int, status: str | None, severity: str | None,
+                evidence: str | None, reason: str, db_path: str | None) -> None:
+    """Correct a finding (status/severity/evidence); closes rather than deletes."""
+    from yhwach.mcp_tools import tool_finding_set
+
+    try:
+        click.echo(tool_finding_set(_db_path(db_path), lab, finding_id, status=status,
+                                    severity=severity, evidence=evidence, reason=reason))
+    except ValueError as e:
+        click.echo(f"[!] {e}", err=True)
+        sys.exit(2)
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--kind", required=True,
+              type=click.Choice(["screenshot", "request", "response", "output", "file", "log"]))
+@click.option("--path", "ev_path", default=None, type=click.Path(exists=True, dir_okay=False),
+              help="Saved artefact file (hashed; refused if missing/empty).")
+@click.option("--finding", "finding_id", default=None, type=int, help="Bind to this finding id.")
+@click.option("--objective", default=None, help="Bind to this PoC objective slug.")
+@click.option("--caption", default=None, help="Short caption.")
+@click.option("--secret", "contains_secret", is_flag=True, default=False,
+              help="Mark that the artefact contains a secret.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def evidence(lab: str, kind: str, ev_path: str | None, finding_id: int | None,
+             objective: str | None, caption: str | None, contains_secret: bool,
+             db_path: str | None) -> None:
+    """Bind a proof artefact (screenshot/request/response/output) to a finding."""
+    from yhwach.mcp_tools import tool_add_evidence
+
+    try:
+        click.echo(tool_add_evidence(_db_path(db_path), lab, kind, path=ev_path,
+                                     finding=finding_id, objective=objective,
+                                     caption=caption, contains_secret=contains_secret))
+    except ValueError as e:
+        click.echo(f"[!] {e}", err=True)
+        sys.exit(2)
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--rule", default=None, help="Playbook technique id that was tried.")
+@click.option("--technique", default=None, help="Free-text label for an off-catalog move.")
+@click.option("--result", required=True,
+              type=click.Choice(["success", "fail", "blocked", "partial"]))
+@click.option("--host", "host_ip", default=None, help="Target host IP.")
+@click.option("--why", "reason", default="", help="One-line reason / outcome.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def attempt(lab: str, rule: str | None, technique: str | None, result: str,
+            host_ip: str | None, reason: str, db_path: str | None) -> None:
+    """Record a tried move so recall stops re-proposing it (dead-ends ledger)."""
+    from yhwach.mcp_tools import tool_attempt
+
+    if not rule and not technique:
+        click.echo("[!] pass --rule <id> or --technique <text>.", err=True)
+        sys.exit(2)
+    try:
+        click.echo(tool_attempt(_db_path(db_path), lab, rule=rule or "", result=result,
+                                reason=reason, host=host_ip, technique=technique))
+    except ValueError as e:
+        click.echo(f"[!] {e}", err=True)
+        sys.exit(2)
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.argument("action", type=click.Choice(["list", "add", "exclude", "remove", "check"]),
+                default="list")
+@click.argument("target", required=False, default=None)
+@click.option("--note", default=None, help="Note on an add/exclude entry.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def scope(lab: str, action: str, target: str | None, note: str | None,
+          db_path: str | None) -> None:
+    """Manage the typed engagement scope (ip/cidr/hostname/*.wildcard; exclude wins)."""
+    from yhwach.mcp_tools import tool_scope
+
+    path = _db_path(db_path)
+    try:
+        click.echo(tool_scope(path, lab, action=action, target=target, note=note))
+    except ValueError as e:
+        click.echo(f"[!] {e}", err=True)
+        sys.exit(2)
 
 
 @main.command()
@@ -860,10 +1083,15 @@ def creds(lab: str, db_path: str | None) -> None:
 @main.command()
 @click.option("--lab", required=True, help="Lab name.")
 @click.option("--section", default=None,
-              type=click.Choice(["reach", "hold", "surfaces", "unlocks", "unexplored", "objectives"]),
+              type=click.Choice(["reach", "hold", "surfaces", "unlocks", "unexplored",
+                                 "objectives", "lessons"]),
               help="Only this section of the brief.")
+@click.option("--limit", default=60, show_default=True, type=int,
+              help="Cap per host/cred/surface list (keeps a big scope legible).")
+@click.option("--stage", default=None, help="Filter REACH to one FSM stage (e.g. scanned).")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def brief(lab: str, section: str | None, db_path: str | None) -> None:
+def brief(lab: str, section: str | None, limit: int, stage: str | None,
+          db_path: str | None) -> None:
     """The AI-legible engagement map: REACH / HOLD / SURFACES / UNLOCKS / UNEXPLORED /
     OBJECTIVES. Read this to reason over the memory; yhwach decides nothing."""
     from yhwach.brief import build_brief
@@ -876,7 +1104,7 @@ def brief(lab: str, section: str | None, db_path: str | None) -> None:
         if eng_id is None:
             click.echo(f"[!] Unknown lab '{lab}'.", err=True)
             sys.exit(2)
-        click.echo(build_brief(conn, eng_id, section=section))
+        click.echo(build_brief(conn, eng_id, section=section, limit=limit, stage=stage))
 
 
 @main.command()
@@ -898,7 +1126,7 @@ def findings(lab: str, db_path: str | None) -> None:
         rows = conn.execute(
             "SELECT f.class, f.title, f.severity, f.evidence, h.ip AS ip "
             "FROM finding f LEFT JOIN host h ON h.id = f.host_id "
-            "WHERE f.engagement_id = ? AND f.status = 'open' "
+            "WHERE f.engagement_id = ? AND f.status IN ('open','confirmed','exploited') "
             f"ORDER BY {order}, f.id",
             (eng_id,),
         ).fetchall()
@@ -1631,6 +1859,20 @@ def ui(lab: str, bind: str, port: int, redact: bool, db_path: str | None) -> Non
     except ImportError:
         click.echo("[!] UI needs extras: pip install 'yhwach[ui]'", err=True)
         sys.exit(2)
+    # The board shows credentials in the clear and has no authentication.
+    # Binding to all interfaces exposes the whole engagement to the network;
+    # refuse it outright. A specific non-loopback address gets a loud warning.
+    if bind in ("0.0.0.0", "::", ""):
+        click.echo(
+            "[!] refusing to bind the board to all interfaces "
+            f"({bind!r}) — it serves secrets with no auth. Use --host 127.0.0.1 "
+            "(default) and reach it over an SSH tunnel if remote.", err=True)
+        sys.exit(2)
+    if bind not in ("127.0.0.1", "::1", "localhost"):
+        click.echo(
+            f"[!] WARNING: binding to {bind} (not loopback). The board serves "
+            "secrets with no authentication — only do this on a trusted, "
+            "isolated interface.", err=True)
     path = _db_path(db_path)
     click.echo(f"[+] yhwach board for '{lab}' at http://{bind}:{port}  (DB: {path})")
     uvicorn.run(create_app(path, lab, reveal_secrets=not redact),

@@ -13,9 +13,23 @@ where a human decides whether to proceed into gated exploitation.
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass, field
 
 from yhwach import knowledge as kn
-from yhwach.judge import Verdict
+
+
+@dataclass
+class PhaseVerdict:
+    """Minimal "is the phase done?" verdict for the report.
+
+    The legacy self-driving judge used to supply this; the advisor path renders
+    the report without one (every surviving caller passes ``verdict=None``). Kept
+    as a tiny local type so synthesis owns its own contract and imports no judge.
+    """
+
+    done: bool = False
+    reasoning: str = ""
+    whats_left: list[str] = field(default_factory=list)
 
 
 def _scalar(conn: sqlite3.Connection, sql: str, params=()) -> int:
@@ -38,7 +52,7 @@ def phase_report(
     engagement_id: int,
     *,
     phase: str = "enumeration",
-    verdict: Verdict | None = None,
+    verdict: PhaseVerdict | None = None,
     candidates: list | None = None,
     include_candidates: bool = True,
 ) -> str:

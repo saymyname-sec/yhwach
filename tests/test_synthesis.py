@@ -6,7 +6,7 @@ from pathlib import Path
 
 from yhwach import db as yhdb
 from yhwach import synthesis as syn
-from yhwach.judge import Verdict
+from yhwach.synthesis import PhaseVerdict as Verdict
 
 
 def _engagement(conn):

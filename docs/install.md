@@ -79,8 +79,8 @@ $YHWACH_DATA_DIR/                       # engagement root (managed by /engage)
     yhwach.db                         # the world model — SQLite; one per lab
     scope.txt                         # source of truth for scope
   recon/                              # raw scan output (e.g. HexStrike nmap XML)
-  loot/                               # captured action output (yhwach run --go)
-  screenshots/                        # bound to `proof` rows (yhwach proof)
+  loot/                               # captured action output
+  screenshots/                        # proof images (bound to findings via yhwach evidence)
   tools/                              # pre-staged custom tooling (provided per challenge):
                                       #   svcmon.exe  — obfuscated Windows Ligolo agent
                                       #   svc.exe / svc.bin — custom AMSI-bypass reverse shell

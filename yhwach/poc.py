@@ -53,15 +53,19 @@ def add_step(
     cve: str | None = None,
     source: str | None = None,
     host: str | None = None,
+    finding_id: int | None = None,
 ) -> int:
-    """Append one reproducible step to an objective's PoC chain. Returns its seq."""
+    """Append one reproducible step to an objective's PoC chain. Returns its seq.
+
+    `finding_id` keys the step to the finding it proves (I12), so a write-up can
+    be assembled per finding, not only per objective."""
     seq = len(steps_for(conn, engagement_id, objective)) + 1
     excerpt = output if len(output) <= _OUTPUT_CAP else output[:_OUTPUT_CAP] + "\n...[truncated]"
     payload = {
         "objective": slug(objective), "objective_label": objective, "seq": seq,
         "title": title, "command": command, "output": excerpt,
         "script": str(script_path) if script_path else None,
-        "cve": cve, "source": source, "host": host,
+        "cve": cve, "source": source, "host": host, "finding_id": finding_id,
     }
     yhdb.log_event(conn, engagement_id, "poc_step", payload)
     return seq
@@ -126,11 +130,39 @@ def scaffold_from_attempts(conn: sqlite3.Connection, engagement_id: int) -> list
     return seeded
 
 
+def _vault_secrets(conn: sqlite3.Connection, engagement_id: int) -> list[str]:
+    """Non-trivial secret values held for the engagement, longest first (so a
+    longer secret is masked before a shorter substring of it)."""
+    out = []
+    for r in conn.execute(
+        "SELECT secret FROM credential WHERE engagement_id = ? AND secret IS NOT NULL",
+        (engagement_id,),
+    ):
+        s = (r["secret"] or "").strip()
+        if len(s) >= 4:            # don't mask tiny/empty values — too noisy
+            out.append(s)
+    return sorted(set(out), key=len, reverse=True)
+
+
+def _redact(text: str, secrets: list[str]) -> str:
+    for s in secrets:
+        if s in text:
+            text = text.replace(s, "[REDACTED]")
+    return text
+
+
 def render_poc(conn: sqlite3.Connection, engagement_id: int, objective: str,
-               *, lab: str = "", write: bool = True, db_path: Path | str | None = None) -> str:
+               *, lab: str = "", write: bool = True, db_path: Path | str | None = None,
+               redact: bool = False) -> str:
     """Render an objective's reproducible PoC chain as Markdown (and write it to
-    chains/<slug>.md when write=True)."""
+    chains/<slug>.md when write=True).
+
+    `redact=True` produces the submission template: every vault secret is masked
+    to [REDACTED] so the same chain is safe to paste into a bounty report or a
+    client write-up. A redacted render is NOT written to disk (it is a transient
+    export, and the on-disk chain keeps the real values for reproduction)."""
     steps = steps_for(conn, engagement_id, objective)
+    secrets = _vault_secrets(conn, engagement_id) if redact else []
     label = steps[0].get("objective_label", objective) if steps else objective
     cves = sorted({s["cve"] for s in steps if s.get("cve")})
     hosts = sorted({s["host"] for s in steps if s.get("host")})
@@ -154,20 +186,21 @@ def render_poc(conn: sqlite3.Connection, engagement_id: int, objective: str,
             f"CVE: {s['cve']}" if s.get("cve") else "",
             f"source: {s['source']}" if s.get("source") else "",
             f"host: {s['host']}" if s.get("host") else "",
+            f"finding: #{s['finding_id']}" if s.get("finding_id") else "",
         ) if x]
         if meta:
             lines.append("- " + " · ".join(meta))
         if s.get("command"):
-            lines += ["", "```bash", s["command"].rstrip(), "```"]
+            lines += ["", "```bash", _redact(s["command"].rstrip(), secrets), "```"]
         if s.get("output"):
-            lines += ["", "Output:", "```", s["output"].rstrip(), "```"]
+            lines += ["", "Output:", "```", _redact(s["output"].rstrip(), secrets), "```"]
         if s.get("script"):
             lines.append(f"\nScript / payload: `{s['script']}`")
             content = _read_script(s["script"])
             if content is not None and content.count("\n") <= _INLINE_SCRIPT_MAX:
-                lines += ["", "```", content.rstrip(), "```"]
+                lines += ["", "```", _redact(content.rstrip(), secrets), "```"]
     md = "\n".join(lines) + "\n"
-    if write:
+    if write and not redact:
         base = db_path if db_path is not None else _db_path_from_conn(conn)
         if base is not None:
             d = artifact_dir(base, "chains")

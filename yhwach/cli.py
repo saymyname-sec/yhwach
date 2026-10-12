@@ -1112,10 +1112,11 @@ def finding(lab: str, title: str, severity: str, evidence: str, cls: str,
 @click.option("--cve", default=None, help="CVE / technique id.")
 @click.option("--source", default=None, help="Exploit source URL / searchsploit id / arsenal path.")
 @click.option("--host", default=None, help="Target host IP for this step.")
+@click.option("--finding", default=None, type=int, help="Finding id this step proves.")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
 def poc_step(lab: str, objective: str, title: str, command: str, output: str,
              script_file: str | None, cve: str | None, source: str | None,
-             host: str | None, db_path: str | None) -> None:
+             host: str | None, finding: int | None, db_path: str | None) -> None:
     """Append one reproducible step (command+output+script+CVE) to a PoC chain."""
     from yhwach import poc as pocmod
     path = _db_path(db_path)
@@ -1133,7 +1134,7 @@ def poc_step(lab: str, objective: str, title: str, command: str, output: str,
             script_path = str(pocmod.save_script(path, objective, Path(script_file).name, content))
         seq = pocmod.add_step(conn, eng_id, objective, title=title, command=command,
                               output=output, script_path=script_path, cve=cve,
-                              source=source, host=host)
+                              source=source, host=host, finding_id=finding)
     click.echo(f"[+] PoC '{pocmod.slug(objective)}' step #{seq} recorded: {title}"
                + (f"  [script: {script_path}]" if script_path else ""))
 
@@ -1145,9 +1146,11 @@ def poc_step(lab: str, objective: str, title: str, command: str, output: str,
 @click.option("--scaffold", is_flag=True, default=False,
               help="Auto-seed a chain stub for every successful attempt with no PoC yet, "
                    "then list objectives.")
+@click.option("--redact", is_flag=True, default=False,
+              help="Submission template: mask vault secrets to [REDACTED] (not written to disk).")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
 def poc(lab: str, objective: str | None, out_file: str | None, scaffold: bool,
-        db_path: str | None) -> None:
+        redact: bool, db_path: str | None) -> None:
     """Render a reproducible PoC chain (chains/<objective>.md), or list objectives."""
     from yhwach import poc as pocmod
     path = _db_path(db_path)
@@ -1172,7 +1175,8 @@ def poc(lab: str, objective: str | None, out_file: str | None, scaffold: bool,
             for label, n in objs:
                 click.echo(f"  {label}  ({n} step(s))  -> yhwach poc --lab {lab} --objective {label}")
             return
-        md = pocmod.render_poc(conn, eng_id, objective, lab=lab, write=True, db_path=path)
+        md = pocmod.render_poc(conn, eng_id, objective, lab=lab, write=not redact,
+                               db_path=path, redact=redact)
     if out_file:
         Path(out_file).write_text(md)
     click.echo(md)

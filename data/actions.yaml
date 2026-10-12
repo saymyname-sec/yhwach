@@ -189,3 +189,25 @@ printer_default_login:
 esxi_version:
   cmd: "nmap --script vmware-version -p {port} {host}"
   risk: read_only
+
+# --- I23 finer web surfaces -----------------------------------------------------
+graphql_introspection:
+  cmd: "curl -s --max-time 10 -X POST {url} -H 'Content-Type: application/json' -d '{\"query\":\"{__schema{types{name}}}\"}'"
+  risk: read_only
+  note: "if introspection is disabled, try field-suggestion / known-query brute"
+fetch_api_spec:
+  cmd: "curl -s --max-time 10 {url}"
+  risk: read_only
+  note: "swagger/openapi -> endpoint list, auth requirement, parameter names"
+fetch_debug_page:
+  cmd: "curl -s --max-time 10 {url}"
+  risk: read_only
+  note: "actuator/env, heapdump, phpinfo, stacktrace — mine for secrets/internals"
+idor_probe:
+  cmd: "curl -s --max-time 10 {url}"
+  risk: propose
+  note: "GATED: replay with another session's cookie + a neighbouring id; needs 2 accounts"
+open_redirect_probe:
+  cmd: "curl -s -i --max-time 10 '{url}'"
+  risk: propose
+  note: "GATED: set the redirect param to an external canary; confirm 30x Location"

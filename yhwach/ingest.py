@@ -18,6 +18,7 @@ from yhwach.parsers.bloodhound import parse_bloodhound_graph
 from yhwach.parsers.netexec import parse_netexec
 from yhwach.parsers.nmap import _os_class
 from yhwach.parsers.peas import parse_peas_software
+from yhwach.parsers.web import chaining_tags as web_chaining_tags
 from yhwach.parsers.web import parse_web
 
 
@@ -92,6 +93,17 @@ _WEB_KIND_FINDING = {
     "source": ("CWE-527", "high", "web_git"),
     "backup": ("CWE-530", "high", "web_backup"),
     "config": ("CWE-538", "high", "web_config"),
+    # I23 — finer web surfaces split out of 'api' + a debug surface.
+    "graphql": ("CWE-200", "medium", "graphql"),
+    "api_spec": ("CWE-200", "medium", "api_spec"),
+    "debug_page": ("CWE-215", "high", "debug_page"),
+}
+
+# I23 — param-driven chaining tags (web_path.kind is per-keyword; these are
+# per-parameter and orthogonal) -> (finding class, severity, is a LEAD not a vuln).
+_WEB_PARAM_FINDING = {
+    "idor_candidate": ("CWE-639", "info"),     # a LEAD: a reference worth testing for IDOR
+    "redirect_param": ("CWE-601", "info"),     # a LEAD: an open-redirect/SSRF-shaped param
 }
 
 
@@ -107,6 +119,7 @@ def ingest_web(conn: sqlite3.Connection, host_id: int, base_url: str, text: str,
     paths = parse_web(text, base_url=base_url)
     interesting = 0
     kinds_seen: dict[str, str] = {}   # tag-kind -> first example path
+    params_seen: dict[str, str] = {}  # param-driven tag -> first example path
     for p in paths:
         yhdb.add_web_path(conn, wid, p.path, status=p.status, length=p.length, kind=p.kind,
                           interesting=p.interesting, method=p.method,
@@ -117,12 +130,20 @@ def ingest_web(conn: sqlite3.Connection, host_id: int, base_url: str, text: str,
             interesting += 1
             if p.kind in _WEB_KIND_FINDING:
                 kinds_seen.setdefault(p.kind, p.path)
+        for ptag in web_chaining_tags(p.path):
+            params_seen.setdefault(ptag, p.path)
     for kind, example in kinds_seen.items():
         cls, sev, tag = _WEB_KIND_FINDING[kind]
         yhdb.add_finding(conn, host_id, None, cls, f"Web {kind} surface", sev,
                          f"{base_url}{example}", tag=tag)
+    # Param-driven LEADs (demoted to info per the reviewer correction): the tag
+    # lights up a consumer rule without claiming the vuln exists.
+    for tag, example in params_seen.items():
+        cls, sev = _WEB_PARAM_FINDING[tag]
+        yhdb.add_finding(conn, host_id, None, cls, f"Web {tag.replace('_', ' ')} lead",
+                         sev, f"{base_url}{example}", tag=tag)
     return {"web_app_id": wid, "paths": len(paths), "interesting": interesting,
-            "findings": len(kinds_seen),
+            "findings": len(kinds_seen) + len(params_seen),
             "with_params": sum(1 for p in paths if p.params),
             "auth_gated": sum(1 for p in paths if p.auth_required)}
 

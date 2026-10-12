@@ -43,6 +43,31 @@ def test_load_rejects_unauthorized_rule(tmp_path: Path) -> None:
         kn.load_techniques(tmp_path)
 
 
+def test_load_rejects_emit_without_action(tmp_path: Path) -> None:
+    # An emits item that is not a dict with a string `action` would be silently
+    # dropped from Candidate.emits — reject it at load so the authoring mistake
+    # fails loudly instead of quietly losing a recall move.
+    (tmp_path / "a.yaml").write_text(
+        "- id: x\n  when: { surface: ollama }\n  emits: [{note: nope}]\n"
+        "  authorized_only: true\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(kn.KnowledgeError, match="without a string 'action'"):
+        kn.load_techniques(tmp_path)
+
+
+def test_bare_string_emit_normalizes_to_action(tmp_path: Path) -> None:
+    # `emits: [probe]` shorthand must become {'action': 'probe'} so it reaches
+    # Candidate.emits instead of being silently dropped.
+    (tmp_path / "a.yaml").write_text(
+        "- id: x\n  when: { surface: ollama }\n  emits: [probe]\n"
+        "  authorized_only: true\n",
+        encoding="utf-8",
+    )
+    tech = next(t for t in kn.load_techniques(tmp_path) if t.id == "x")
+    assert tech.emits == [{"action": "probe"}]
+
+
 def test_load_rejects_duplicate_id(tmp_path: Path) -> None:
     (tmp_path / "a.yaml").write_text(
         "- id: dup\n  when: { surface: ollama }\n  emits: [{action: p}]\n"

@@ -561,9 +561,12 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
                 new += created
             yhdb.log_event(conn, eid, "ingest",
                            {"kind": "secretsdump", "hashes": len(creds), "new": new})
+            from yhwach.reuse import derive_reuse_edges
+            reuse = sum(derive_reuse_edges(conn, eid).values())
+            reuse_note = f" {reuse} reuse edge(s) derived (yhwach_paths)." if reuse else ""
             return (f"secretsdump: {len(creds)} NT hash(es) ({machines} machine, "
                     f"{empties} empty-password), {new} new. spray_policy=manual — never "
-                    f"auto-sprayed; crack offline, then ingest the potfile.")
+                    f"auto-sprayed; crack offline, then ingest the potfile.{reuse_note}")
 
         if kind == "potfile":
             from yhwach.parsers.secrets import parse_potfile
@@ -584,8 +587,12 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
                     promoted += 1
             yhdb.log_event(conn, eid, "ingest",
                            {"kind": "potfile", "cracked": len(cracked), "promoted": promoted})
+            from yhwach.reuse import derive_reuse_edges
+            reuse = sum(derive_reuse_edges(conn, eid).values())
+            reuse_note = f" {reuse} reuse edge(s) derived." if reuse else ""
             return (f"potfile: {len(cracked)} cracked hash(es), {promoted} promoted to "
-                    f"plaintext ({unmatched} not matching a dumped hash). spray_policy=manual.")
+                    f"plaintext ({unmatched} not matching a dumped hash). "
+                    f"spray_policy=manual.{reuse_note}")
 
         valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
         if kind not in valid:
@@ -1751,6 +1758,28 @@ def tool_submission(db_path: Path | str, lab: str, program: str | None = None,
         return "\n".join(out)
 
 
+def tool_reuse(db_path: Path | str, lab: str) -> str:
+    """Derive credential-reuse attack-graph edges from dumped hashes and validated
+    access (G2e): CredValidOn (a proven cred links its principal to the host),
+    LocalAdminReuse (hosts one admin secret opens are mutually reachable — a star,
+    not a clique), and SameHash (principals sharing a secret). Idempotent; run it
+    after spraying provided creds or ingesting a secretsdump, then yhwach_paths.
+    """
+    from yhwach.reuse import derive_reuse_edges
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        counts = derive_reuse_edges(conn, eid)
+        yhdb.log_event(conn, eid, "reuse", counts)
+    total = sum(counts.values())
+    if not total:
+        return ("no new reuse edges — need validated access (spray provided creds) or "
+                "dumped hashes/accounts that share a secret.")
+    return ("reuse edges added: "
+            + ", ".join(f"{k}={v}" for k, v in counts.items() if v)
+            + " — check yhwach_paths / yhwach_path.")
+
+
 def tool_query(db_path: Path | str, lab: str, view: str,
                where: dict | None = None, q: str | None = None,
                fields: list | None = None, order: str | None = None,
@@ -2000,4 +2029,8 @@ TOOL_SPECS = [
      "Bounty submission memory. endpoint/finding/program records a submission and returns a "
      "duplicate-risk advisory (same endpoint+param, or same class program-wide); otherwise "
      "lists. Advisory only — never changes a finding's status or recall order."),
+    ("yhwach_reuse", tool_reuse,
+     "Derive credential-reuse attack-graph edges from dumped hashes + validated access "
+     "(CredValidOn, LocalAdminReuse as a star, SameHash). Idempotent; run after spraying "
+     "provided creds or ingesting a secretsdump, then yhwach_paths. The fleet-lateral path."),
 ]

@@ -323,6 +323,16 @@ def artifact(lab: str, location: str | None, kind: str, host: str | None,
 
 @main.command()
 @click.option("--lab", required=True, help="Lab name.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def reuse(lab: str, db_path: str | None) -> None:
+    """Derive credential-reuse attack-graph edges (G2e)."""
+    from yhwach.mcp_tools import tool_reuse
+
+    click.echo(tool_reuse(_db_path(db_path), lab))
+
+
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
 @click.option("--program", default=None, help="Bounty program name.")
 @click.option("--finding", default=None, type=int, help="Finding id.")
 @click.option("--endpoint", default=None, help="Affected endpoint/path.")

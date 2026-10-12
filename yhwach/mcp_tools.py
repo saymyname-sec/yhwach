@@ -707,6 +707,56 @@ def tool_ingest(db_path: Path | str, lab: str, file: str, kind: str = "nmap",
             return (f"nuclei: {rows} potential vuln(s), {promoted} promoted to a chaining tag, "
                     f"{looted} credential extract(s) to loot.")
 
+        # External recon: subdomain + web_app rows, scope-gated. Domain-keyed, so
+        # NO spray hook fires; a CDN-fronted asset never gets a host row.
+        if kind in ("httpx", "subfinder", "bbot"):
+            from yhwach import scope as yhscope
+            from yhwach.parsers.pd import parse_bbot, parse_httpx, parse_subfinder
+
+            parser = {"httpx": parse_httpx, "subfinder": parse_subfinder,
+                      "bbot": parse_bbot}[kind]
+            assets = parser(Path(file).read_text(encoding="utf-8", errors="replace"))
+            matcher = yhscope.build_matcher(conn, eid)
+            domains = webapps = skipped = cdn_n = 0
+            for a in assets:
+                # Scope gate: the name (or its resolved IP) must be in scope.
+                in_scope = matcher.allows(a.name)[0] or (bool(a.ip) and matcher.allows(a.ip)[0])
+                if not in_scope:
+                    skipped += 1
+                    continue
+                dtype = "subdomain" if a.name.count(".") >= 2 else "dns"
+                yhdb.add_domain(conn, eid, a.name, type=dtype, ip=a.ip,
+                                source=f"{a.source}{'/cdn:' + a.cdn_name if a.cdn and a.cdn_name else ''}")
+                domains += 1
+                if a.cdn:
+                    cdn_n += 1
+                    continue   # correction: never a host row for a CDN IP
+                # The in-scope NAME authorises recording its resolved host — this
+                # only records data; outbound traffic stays separately scope-gated.
+                if a.url and a.ip:
+                    hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                                        (eid, a.ip)).fetchone()
+                    if hrow is None:
+                        cur = conn.execute(
+                            "INSERT INTO host (engagement_id, ip, hostname, stage, "
+                            "discovery_source, alive, first_seen) "
+                            "VALUES (?, ?, ?, 'scanned', ?, 'alive', ?)",
+                            (eid, a.ip, a.name, a.source, yhdb._now_utc()))
+                        hid = int(cur.lastrowid)
+                    else:
+                        hid = int(hrow["id"])
+                    base = a.url.split("?", 1)[0].rstrip("/")
+                    yhdb.add_web_app(conn, hid, base, vhost=a.name,
+                                     scheme=base.split("://", 1)[0] if "://" in base else None,
+                                     title=a.title, server=a.server,
+                                     tech=",".join(a.tech) or None)
+                    webapps += 1
+            yhdb.log_event(conn, eid, "ingest",
+                           {"kind": kind, "domains": domains, "web_apps": webapps,
+                            "cdn": cdn_n, "out_of_scope": skipped})
+            return (f"{kind}: {domains} in-scope domain(s), {webapps} web_app(s), "
+                    f"{cdn_n} CDN-fronted (no host row), {skipped} out-of-scope skipped.")
+
         valid = ("linpeas", "winpeas", "bloodhound", "certipy", "netexec", "web")
         if kind not in valid:
             raise ValueError(f"unknown kind '{kind}' (use nmap|{'|'.join(valid)})")
@@ -1602,7 +1652,8 @@ def _candidate_ids(db_path: Path | str, lab: str, host: str | None) -> set[str]:
 
 
 _INTERPRET_PARSERS = ("nmap", "netexec", "bloodhound", "certipy", "linpeas", "winpeas",
-                      "web", "secretsdump", "potfile", "nessus", "openvas", "nuclei")
+                      "web", "secretsdump", "potfile", "nessus", "openvas", "nuclei",
+                      "httpx", "subfinder", "bbot")
 
 
 def tool_interpret(db_path: Path | str, lab: str, text: str, kind: str = "auto",
@@ -2171,7 +2222,7 @@ TOOL_SPECS = [
      "add_cred autospray). ~5 candidates per known pattern, not a wordlist. "
      "targets? = comma-separated usernames to generate FOR (default: common svc accounts)."),
     ("yhwach_ingest", tool_ingest,
-     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|linpeas|winpeas|"
+     "Ingest a tool-output file into the world model (kind=nmap|secretsdump|potfile|nessus|openvas|nuclei|httpx|subfinder|bbot|linpeas|winpeas|"
      "bloodhound|certipy|netexec|web). nmap adds software+CPE; bloodhound builds the "
      "principal/privilege/edge graph; netexec adds SMB shares/users/admin/policy; web "
      "adds web_app+paths (needs url). Host-scoped kinds need a host and set chaining tags."),

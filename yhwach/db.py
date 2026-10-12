@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import ipaddress
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager, suppress
@@ -516,6 +517,49 @@ def init(db_path: Path | str, *, if_exists: str = "keep") -> None:
         conn.commit()
     finally:
         conn.close()
+    harden_perms(path)
+
+
+# The DB holds credentials in the clear (by design — the operator needs them),
+# so the one cheap protection kept from Theme G is owner-only file perms: 0600 on
+# the DB and its WAL/SHM sidecars, 0700 on the directory. POSIX-only; a no-op on
+# Windows (the target platform is Linux), where chmod cannot express this.
+_SIDECAR_SUFFIXES = ("-wal", "-shm")
+_INSECURE_MASK = 0o077  # any group/other bit set
+
+
+def _db_targets(db_path: Path | str) -> list[Path]:
+    path = Path(db_path)
+    return [path, *(path.with_name(path.name + s) for s in _SIDECAR_SUFFIXES)]
+
+
+def harden_perms(db_path: Path | str) -> None:
+    """Best-effort chmod the DB (and sidecars) to 0600 and its dir to 0700."""
+    if os.name != "posix":
+        return
+    path = Path(db_path)
+    with suppress(OSError):
+        os.chmod(path.parent, 0o700)
+    for p in _db_targets(path):
+        if p.exists():
+            with suppress(OSError):
+                os.chmod(p, 0o600)
+
+
+def perms_insecure(db_path: Path | str) -> list[str]:
+    """Existing DB-related paths readable or writable by group/other.
+
+    Empty on success, and always empty on non-POSIX platforms (where the bits
+    do not apply). Used by `yhwach doctor` to warn without changing anything."""
+    if os.name != "posix":
+        return []
+    path = Path(db_path)
+    bad: list[str] = []
+    for p in (path.parent, *_db_targets(path)):
+        with suppress(OSError):
+            if p.exists() and (os.stat(p).st_mode & _INSECURE_MASK):
+                bad.append(str(p))
+    return bad
 
 
 @contextmanager

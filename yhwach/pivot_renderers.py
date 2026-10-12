@@ -1,7 +1,7 @@
 """Render the exact shell commands for the pivot/revshell playbook actions.
 
-Called by :class:`~yhwach.runners.ArsenalDeployRunner` (auto-execute path) and
-by ``yhwach revshell`` / ``yhwach pivot`` (operator-driven CLI). Every
+Called by ``yhwach revshell`` / ``yhwach pivot`` (operator-driven CLI) and the
+``yhwach_pivot`` MCP tool. Every
 renderer pulls binary paths from :mod:`yhwach.arsenal` so the output is copy-
 paste ready with the canonical absolute paths.
 

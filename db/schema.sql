@@ -750,3 +750,18 @@ CREATE TABLE IF NOT EXISTS submission (
     submitted_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_submission_eng ON submission(engagement_id);
+
+-- schema v7 (I45) — domain-wide AD facts from NetExec modules (MAQ, LDAP
+-- signing/channel binding, LAPS, trusts, functional level). Key/value, one row
+-- per (engagement, domain, key); the pass-pol-style facts that gate real moves.
+CREATE TABLE IF NOT EXISTS domain_fact (
+    id            INTEGER PRIMARY KEY,
+    engagement_id INTEGER NOT NULL REFERENCES engagement(id),
+    domain        TEXT,
+    key           TEXT NOT NULL,
+    value         TEXT,
+    source        TEXT,
+    discovered_at TEXT NOT NULL,
+    UNIQUE(engagement_id, domain, key)
+);
+CREATE INDEX IF NOT EXISTS idx_domain_fact_eng ON domain_fact(engagement_id);

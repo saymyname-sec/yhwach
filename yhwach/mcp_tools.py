@@ -292,6 +292,25 @@ def tool_findings(db_path: Path | str, lab: str) -> str:
                      for r in rows)
 
 
+def tool_report_check(db_path: Path | str, lab: str) -> str:
+    """Readiness gate (I13): is the memory reproducible enough to write up? Flags
+    proven findings with no evidence, PoC steps with $VAR/TODO placeholders,
+    secrets inline in evidence, uncommunicated criticals, and outstanding
+    cleanup artefacts. FAIL items block; warn items are advisory.
+    """
+    from yhwach.report import report_check
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        problems = report_check(conn, eid)
+    if not problems:
+        return "report-ready: no readiness problems found."
+    fails = sum(1 for lvl, _ in problems if lvl == "fail")
+    lines = [f"readiness: {fails} blocking, {len(problems) - fails} advisory"]
+    lines += [f"  [{'FAIL' if lvl == 'fail' else 'warn'}] {m}" for lvl, m in problems]
+    return "\n".join(lines)
+
+
 def tool_report(db_path: Path | str, lab: str) -> str:
     with yhdb.transaction(db_path) as conn:
         eid = _eng(conn, lab)
@@ -2019,6 +2038,10 @@ TOOL_SPECS = [
      "Render a reproducible PoC chain to chains/<objective>.md (every command/output/script/CVE), "
      "or list recorded objectives when objective is omitted."),
     ("yhwach_report", tool_report, "Full Markdown engagement report."),
+    ("yhwach_report_check", tool_report_check,
+     "Readiness gate: is the memory reproducible enough to write up? Flags proven "
+     "findings with no evidence, PoC placeholders ($VAR/TODO), inline secrets in "
+     "evidence, uncommunicated criticals, and outstanding cleanup artefacts."),
     ("yhwach_add_cred", tool_add_cred,
      "Add a credential to the vault (username/label + secret + kind + source; "
      "source is appended on update, never clobbered)."),

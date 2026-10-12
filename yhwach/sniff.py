@@ -26,6 +26,10 @@ _SIGNS: list[tuple[str, re.Pattern]] = [
     ("netexec", re.compile(r"Pwn3d!|STATUS_LOGON_FAILURE")),
     # Content-discovery output (gobuster/ffuf/feroxbuster/dirb). Needs a url.
     ("web", re.compile(r"\(Status:\s*\d{3}\)|^\s*\d{3}\s+GET|\"results\"\s*:\s*\[", re.M)),
+    # impacket-secretsdump NTDS/SAM: user:rid:lm:nt::: (specific — before potfile).
+    ("secretsdump", re.compile(r"^[^:\s]+:\d+:[0-9a-fA-F]{32}:[0-9a-fA-F]{32}:::", re.M)),
+    # hashcat/john NT potfile: [$NT$]<32hex>:<plaintext> at line start.
+    ("potfile", re.compile(r"^(?:\$NT\$)?[0-9a-fA-F]{32}:", re.M)),
 ]
 
 

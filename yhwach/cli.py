@@ -1278,10 +1278,12 @@ def findings(lab: str, db_path: str | None) -> None:
 @click.option("--lab", required=True, help="Lab name.")
 @click.option("--out", "out_path", default=None, type=click.Path(),
               help="Write the Markdown report here (default: stdout).")
+@click.option("--check", "check", is_flag=True, default=False,
+              help="Readiness gate: print problems and exit 1 if the memory is not report-ready.")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
-def report(lab: str, out_path: str | None, db_path: str | None) -> None:
-    """Render a Markdown engagement report from the world model."""
-    from yhwach.report import build_report
+def report(lab: str, out_path: str | None, check: bool, db_path: str | None) -> None:
+    """Render a Markdown engagement report from the world model (or --check it)."""
+    from yhwach.report import build_report, report_check
 
     path = _db_path(db_path)
     if not path.exists():
@@ -1292,6 +1294,14 @@ def report(lab: str, out_path: str | None, db_path: str | None) -> None:
         if eng_id is None:
             click.echo(f"[!] Unknown lab '{lab}'.", err=True)
             sys.exit(2)
+        if check:
+            problems = report_check(conn, eng_id)
+            fails = [m for lvl, m in problems if lvl == "fail"]
+            for lvl, m in problems:
+                click.echo(f"  [{'FAIL' if lvl == 'fail' else 'warn'}] {m}")
+            if not problems:
+                click.echo("[+] report-ready: no readiness problems found.")
+            sys.exit(1 if fails else 0)
         md = build_report(conn, eng_id)
 
     if out_path:

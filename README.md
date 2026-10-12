@@ -35,12 +35,74 @@ Inside yhwach:
 ---
 ## How to work with yhwach
 
-After setting up your Kali linux with Claude/Codex, adding yhwach as MCP we calling yhwach just by prompting. Yhwach is not just memory, it containt playbook's from CTF's, challenge's, machine's that it was working with. Simply start engagement prompt like this when you startin CTF, Labolatory, Pentest etc.:
+After setting up Kali with Claude Code / Codex and registering yhwach as an MCP server, you drive it **just by prompting** — there are no yhwach commands to memorise. yhwach is not only memory: it carries **playbooks** (a recall menu of techniques) learned from the CTFs, challenges and machines it has worked. Kick an engagement off with one of these prompts, then steer from there.
 
+### Kick off an engagement
+The standard opening: it names the engagement and kind, opens the board so you can watch, loads your first recon, and hands control straight back to you — nothing active runs until you say so.
 ```
-Analyze how to work wit yhwach mcp and start engagement of <Lab Name>. Start also UI to let me see how's work going. We will work on Web app pentesting(Or AD pentesting etc.). We are going to start from feeding you with data from nmaps. After ingesting info wait for next instrucitons.
+Read how to work with the yhwach MCP, then start an engagement called <lab-name>.
+Start the board (yhwach ui) so I can watch progress. This is a web-app pentest
+(or AD / external / cloud). We'll begin by feeding you nmap output — ingest it,
+then stop and wait for my next instruction. Don't scan or exploit anything yet.
 ```
 
+### Internal / Active Directory (assumed breach)
+For internal AD work from a foothold or a client-issued account. yhwach records the provided cred, folds in your SMB/LDAP/secretsdump output, derives the credential-reuse graph (SameHash / AdminTo), and keeps a live shortest path to the DC — while active tools stay disarmed until you arm them.
+```
+Start a yhwach engagement <lab-name>, kind internal, domain CORP.LOCAL, DC 10.10.0.1,
+scope 10.10.0.0/16. I'll give you an assumed-breach account — record it as a
+provided credential. Ingest the nmap and any NetExec / secretsdump output I paste,
+build the credential-reuse graph, and show me the shortest known path to Domain
+Admin. Tell me what you'd try next, but run nothing active until I arm the engagement.
+```
+
+### Web application
+For web assessments. yhwach turns captured traffic into a role-by-endpoint authorization matrix (an unobserved cell ≠ a denial) and tracks per-endpoint findings — without ever storing request/response bodies or secret values.
+```
+Start a yhwach engagement <lab-name>, kind web, scope app.example.com,*.example.com.
+Ingest the nmap, then the Burp / HAR export I give you (metadata only — no bodies).
+Build the authorization matrix from the captured sessions and flag IDOR, injection
+and auth-bypass candidates as findings, each with its endpoint and parameter.
+```
+
+### CTF / lab box
+For CTF boxes and labs. `ctf`/`lab` engagements are armed by default, so the agent can act right away; yhwach surfaces its full playbook-derived recall menu for the services you found (AI/LLM surfaces included) and tracks flags as objectives.
+```
+Start a yhwach engagement <lab-name>, kind ctf. Start the board. Ingest my nmap,
+then show me the recall menu — every technique that applies to what we found,
+ranked by what you'd try first. This is a lab, so you can go active: screenshot
+every win and record each flag as an objective.
+```
+
+### Decide the next move
+When you're choosing the next step. yhwach hands back the applicable techniques (with ready commands and their prerequisites) and the shortest route to the objective; you pick, the agent executes, and gated moves wait for your go-ahead.
+```
+For engagement <lab-name>, host <ip>: what applies right now? Show me the recall
+menu and the shortest known path to our objective. For each option give me what it
+needs, the risk, and the exact command — but ask me before running anything gated.
+```
+
+### Before you run out of context
+Chat context is finite; the database isn't. When you're near the limit — or before any `/clear` or compaction — have the agent commit **everything** it knows into yhwach. Anything that lives only in the chat is lost; a resumed session rebuilds from the DB alone, so this flush is what makes the next resume work.
+```
+We're close to the context limit. Before we lose it, flush everything into yhwach:
+every host, service, credential and finding we've found but not recorded yet
+(yhwach_add_cred / yhwach_add_finding / yhwach_ingest), plus what we tried and what
+failed (yhwach_attempt) so we don't repeat it. Then run yhwach_status and confirm
+the database matches reality. Once it does, I'll /clear and we resume from the DB.
+```
+
+### Resume after a break or context reset
+Use this after a `/clear`, a new session, or a day off — it pairs with the flush above. yhwach replays the whole engagement from the database, so the agent picks up exactly where you left off.
+```
+We're resuming engagement <lab-name>. Run yhwach_status, then yhwach_brief, and
+tell me where we stand: what we own, the open leads, what's still unexplored, and
+the next move you'd make. Don't redo anything we've already tried.
+```
+
+> **Going active.** On a client engagement yhwach starts **record-only** — the agent can ingest and record all day without sending a packet. When you want it to actually scan or spray, you arm it yourself in a terminal: `yhwach arm --lab <lab-name>`. Even armed, the agent asks before any exploit.
+
+**Obsidian — the write-up.** yhwach keeps the structured facts; the prose that becomes your report — the chain notes, the story of each objective, the screenshots — lives in a local **Obsidian** vault beside it. Atoms in yhwach, narrative in Obsidian; the report is written from both. See [Notes with Obsidian](#notes-with-obsidian) below.
 
 ---
 

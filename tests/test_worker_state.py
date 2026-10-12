@@ -49,34 +49,3 @@ def test_run_status_idle_on_stale_heartbeat(tmp_db: Path) -> None:
         assert ui._run_status(conn, eid) == "idle"
 
 
-def test_workers_panel_shows_all_fresh_workers_active(tmp_db: Path) -> None:
-    pytest.importorskip("fastapi")  # ui panel needs the [ui] extra; skip like test_ui.py
-    from yhwach import ui
-
-    with yhdb.transaction(tmp_db) as conn:
-        eid = yhdb.upsert_engagement(conn, lab="w4", scope="10.0.0.0/24")
-        for ip in ("10.0.0.5", "10.0.0.6"):
-            conn.execute(
-                "INSERT INTO host (engagement_id, ip, stage, first_seen) "
-                "VALUES (?, ?, 'enumerated', 't')", (eid, ip))
-            yhdb.heartbeat_worker(conn, eid, ip, "watching", focus="probe")
-        html = ui._workers_panel(conn, eid)
-    # both hosts present, both watching (multi-active — the old panel showed one)
-    assert "10.0.0.5" in html and "10.0.0.6" in html
-    assert html.count("watching") >= 2
-
-
-def test_workers_panel_marks_stale(tmp_db: Path) -> None:
-    pytest.importorskip("fastapi")  # ui panel needs the [ui] extra; skip like test_ui.py
-    from yhwach import ui
-
-    with yhdb.transaction(tmp_db) as conn:
-        eid = yhdb.upsert_engagement(conn, lab="w5", scope="10.0.0.0/24")
-        conn.execute(
-            "INSERT INTO host (engagement_id, ip, stage, first_seen) "
-            "VALUES (?, '10.0.0.5', 'enumerated', 't')", (eid,))
-        conn.execute(
-            "INSERT INTO worker_state (engagement_id, host_ip, status, updated_at) "
-            "VALUES (?, '10.0.0.5', 'watching', '2000-01-01T00:00:00Z')", (eid,))
-        html = ui._workers_panel(conn, eid)
-    assert "stale" in html

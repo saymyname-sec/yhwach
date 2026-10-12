@@ -145,141 +145,35 @@ Run `yhwach --help` for the full list.
 
 ---
 
-## The methodology — working a long engagement with yhwach
+## The methodology — how to prompt your agent
 
-This is the core of using yhwach. Think of it as a loop you repeat for the whole engagement — **you** steer it, the agent does the typing, yhwach holds the state.
+yhwach is just memory; the discipline is the agent's. The one rule that makes it work: **the agent must fold every result into yhwach the moment it gets it** — hosts, creds, findings as they appear — because a stale memory is worse than none. The loop:
 
-### 0. Tell your agent the routine
+- **Open** — `yhwach_engage` with the lab name and authorised scope; every in-scope address becomes an undiscovered host.
+- **Ingest** — after every scan/tool run, save the output to a file and `yhwach_ingest` it (nmap: `-oX`).
+- **Record** — `yhwach_add_cred` and `yhwach_add_finding` for what no parser sees — with where a credential was found and where it works.
+- **Ask** — `yhwach_status`, then `yhwach_brief` / `yhwach_next` / `yhwach_gaps` for what applies now; yhwach recalls the options, you pick the path.
+- **Resume** — after any context reset, `yhwach_status` plus the `brief` sections you need; the chat forgets, the memory doesn't.
 
-Agent instructions alone won't keep the memory current (see above) — but without them, the agent won't even try. Put something like this in your project's `CLAUDE.md` (Claude Code) or `AGENTS.md` (Codex), and adjust it:
+Put the routine where the agent will read it — `CLAUDE.md` (Claude Code) or `AGENTS.md` (Codex):
 
 ```markdown
 ## yhwach — engagement memory
-- Lab: `acme`. Scope: 10.10.10.0/24. Pass `lab: acme` to every yhwach_* call.
-- Start every session with `yhwach_status`, then the `yhwach_brief` sections you need
-  and `yhwach_next` for the host you're on. Then read `notes/acme/resume.md`.
-- Save every tool's output to a file, then `yhwach_ingest` that file (nmap: `-oX`).
-- After any credential, finding, stage change, pivot or flag: record it in yhwach AND
-  update the matching note in the same step. Never "later".
-- Never re-run an approach listed in `exhausted-approaches.md` without asking me.
-- Write each step into `notes/acme/chains/<ID>-<host>-<technique>.md` right after
-  running it (template: docs/templates/chain-note.md).
-- At every capture point run `docs/hooks/yhwach-shot.sh -l acme -n <ID>-<step> --cmd -- <command>`
-  and paste the EMBED line it prints. If it prints SCREENSHOT-MISSING, write that token.
-- yhwach recalls options; I choose the attack path. Ask before any exploit.
-- Before `yhwach_add_cred`, check the lockout policy — recording a credential sprays it.
+- Lab: `acme`. Pass `lab: acme` to every yhwach_* call.
+- Start each session with `yhwach_status`, then the `yhwach_brief`/`yhwach_next` slice you need.
+- Save every tool's output to a file, then `yhwach_ingest` it (nmap: `-oX`).
+- Record every credential/finding the moment it appears (`yhwach_add_cred`, `yhwach_add_finding`),
+  with where it was found and where it works. Never "later".
+- `yhwach_add_cred` sprays the credential — check the lockout policy first.
+- yhwach recalls options; I choose the path. Ask before any exploit.
 ```
 
-The habit still has to come from you: check that it happened — and keep [the board](#the-board--how-you-drive) open so you can see at a glance whether it did.
-
-### 1. Open the engagement
-
-Give it a lab name and the scope you're authorised for:
-
-> *"Engage lab `acme` on 10.10.10.0/24, domain corp.local, DC 10.10.10.10."*
-
-`yhwach_engage` creates the engagement and adds every in-scope address as an *undiscovered* host, so nothing in scope can be forgotten. Ranges larger than a **/20** are not expanded (engage reports them as skipped) — split them into /20s or smaller, or their hosts only appear once a scan finds them.
-
-### 2. Feed every result — the same moment you get it
-
-After **every** scan or tool run, have the agent ingest the output. What isn't ingested doesn't exist for yhwach.
-
-> *"Ingest that nmap XML into yhwach and tell me what changed."*
->
-> *"Ingest the linPEAS output for 10.10.10.5."*
-
-`yhwach_ingest` reads a **saved file**, not pasted text. It creates hosts and services, records how thoroughly each host was scanned, and tags findings so the recall menu can chain them. Every kind except nmap needs the host already in memory (scan it first) and a `host`:
-
-| Tool | What to save and feed |
-|---|---|
-| **nmap** | `-oX` (best) or `-oN` output file — no host needed, it creates hosts |
-| **linPEAS / winPEAS** | the saved stdout + the host it ran on |
-| **NetExec** | the saved stdout + the target host |
-| **BloodHound** | **unzip** the SharpHound zip and ingest `users_*.json` and `computers_*.json` one at a time, host = the DC |
-| **certipy** | output of `certipy find -vulnerable -json`, host = the CA or DC |
-| **Web discovery** | gobuster / ffuf / feroxbuster / dirb output, host + the base URL it ran against |
-| **Anything else** | no parser over MCP — record it with `yhwach_add_finding` / `yhwach_add_loot`. In a terminal, `yhwach ingest --lab acme --kind raw --title "<title>" --host <ip> <file>` stores it as a finding and keeps the full output as loot |
-
-### 3. Record what no parser can see
-
-Parsers don't read your mind. These you (or the agent, on your word) record explicitly:
-
-| What happened | Record it with |
-|---|---|
-| Found / cracked a credential | `yhwach_add_cred` — include **where it was found** and **where it works** (`validated_on`). ⚠️ This immediately tries it against matching services. |
-| Confirmed a vulnerability or lead | `yhwach_add_finding` — give it a **chaining tag** (see `yhwach_ref tags`) so it shows in the brief and unlocks follow-on techniques |
-| Grabbed a file, key or dump | `yhwach_add_loot` (a secret inside it still needs `add_cred`) |
-| Learned a hostname / OS / role, or a second NIC | `yhwach_set_host` · `yhwach_add_interface` |
-| Got a foothold, looted, finished a host | `yhwach_advance` with a one-line *why* |
-| Pivoted into a new subnet | `yhwach_pivot`, **then re-run `yhwach_engage` with the FULL scope** — every earlier range plus the new one, e.g. *"Re-engage lab acme with scope 10.10.10.0/24,172.16.5.0/24"*. Engage **replaces** the scope: anything you leave out is treated as out of scope from then on. |
-| Captured a flag / objective | `yhwach_objective` (the proof itself lives in your notes and PoC chain) |
-| Did something reproducible | `yhwach_poc_step` — the exact command, its output, any script used |
-| Tried something that **didn't** work | `yhwach_annotate` on the host, **one section per approach** (re-annotating a section replaces it) + your *exhausted approaches* note — the note is the durable record |
-
-### 4. Ask before you decide
-
-Before picking the next move, ask yhwach — then **you** choose:
-
-> *"Brief me. What's still unexplored, and what does `next` suggest for 10.10.10.5?"*
-
-| Ask | You get |
-|---|---|
-| `yhwach_status` | Compact counts — the cheap way to re-orient |
-| `yhwach_brief` | The engagement map: what you can **reach**, what you **hold**, live **surfaces**, what's **gated** behind a credential, the **unexplored** frontier, **objectives** — whole, or one section at a time |
-| `yhwach_next` | The recall menu: every technique that applies right now, per host, split read-only vs. gated, plus enumeration gaps and untried credentials |
-| `yhwach_gaps` / `yhwach_coverage` | Hosts and probed services that were never fully enumerated — and the exact scan that closes each gap |
-| `yhwach_paths` | Shortest path from everything you own to each objective and to Domain Admins |
-| `yhwach_dossier` / `yhwach_recon` | Everything known about one host |
-
-Yhwach recalls and ranks options; it never decides. The attack path is yours.
-
-### 5. Drive from the board — when the agent runs dry, you bring the ideas
-
-This is the part people miss, and it's where yhwach earns its keep. Your agent will run out of ideas on a host long before the host is actually exhausted. **You** don't have to hold the whole estate in your head to see what it skipped — [the board](#the-board--how-you-drive) does. Keep it open in a browser the whole engagement:
-
-- **At the start of a host, and whenever the agent stalls, read the board yourself.** The *Recon* page shows, per host, which scans were run and which weren't; *Surfaces* lists every port, service, version and web path; *Map* shows what's reachable and what's still dark. You're looking for the thing nobody thought to check: a UDP sweep never run, an 8080 nobody touched, a share never listed, a vhost never fuzzed.
-- **Then feed that back as a concrete instruction.** The flow is usually *you* spotting something on the board and telling the agent to go look: *"The board shows 10.10.10.40 has 1433 open but no SQL enumeration — go at it,"* or *"ai01 has an ollama surface that was never triaged — probe it."* Yhwach remembers; you supply the curiosity.
-- **Completeness is something you confirm on the board, not something you assume.** Before you call a host done, the *Recon* matrix and the coverage panel should show every path checked. A green row is a checked box; a gap is an open door. (`yhwach_gaps` says the same thing in text — the board just lets you see it all at once.)
-- **The board never touches a target.** It's a read-only window; every action still runs through you and your agent.
-
-### 6. Resume after a break or a context reset
-
-Your chat context will be reset or compacted many times. The memory isn't:
-
-> *"Check yhwach status for lab `acme`, show me the unexplored and objectives sections of the brief, then read my resume note and tell me where we are."*
-
-Start every session with `yhwach_status`, then the `brief` sections you need (`objectives`, `unexplored`, `hold`) and `yhwach_next` for the host you're working, plus `resume.md` in your Obsidian vault (below). A full `brief` or a host-less `next` on a big scope is long — ask for slices.
-
-### Working at scale — many hosts, credentials and subnets
-
-- **Let yhwach hold the lists.** Don't paste hundreds of IPs into chat — ask for slices: one host's `next` / `dossier` / `gaps`, or one `brief` section (`reach`, `hold`, `surfaces`, `unlocks`, `unexplored`, `objectives`).
-- **Every new subnet is a new scope.** Record the pivot, re-engage with the **full** scope (old ranges + the new one), then scan and ingest the new segment like a fresh engagement.
-- **Credentials are never "used up."** Each one stays in yhwach's credential store and stays relevant for every new host. Record where it works (`validated_on`); failed attempts are logged by the sprays (`yhwach_spray` and the automatic ones).
-- **Keep names stable.** One lab name per engagement; set hostnames and roles once so maps and briefs stay readable.
-
-### Keeping the memory honest
-
-At the end of each working session, run through this checklist with your agent:
-
-- [ ] Every scan and tool output from this session is ingested.
-- [ ] Every new credential is recorded, with where it works.
-- [ ] Every confirmed finding is recorded with a chaining tag.
-- [ ] Host stages are advanced (foothold / looted / pivoted / done).
-- [ ] Pivots are recorded and the scope re-engaged in full.
-- [ ] Failed approaches are noted, so they aren't retried blindly.
-- [ ] `yhwach_brief` matches what you believe is true — if it doesn't, fix the memory now (below).
-- [ ] Your Obsidian notes are updated (next section).
-
-**Correcting the memory.** Wrong facts will happen in a long engagement. Re-recording the same credential (same identifier and kind) or the same finding (same host, class and title) **updates** it rather than duplicating it. A wrong stage: `yhwach advance --lab acme --host 10.10.10.5 --to <stage> --force --why "<reason>"` in a terminal (the MCP tool won't move a stage backwards). A wrong tag: `yhwach_untag`. Credentials and findings can't be deleted, so for anything else that's wrong or stale, record the correction with `yhwach_annotate` on the host — and fix the note.
-
-*Optional helper:* [`docs/hooks/yhwach-sync-reminder.sh`](docs/hooks/yhwach-sync-reminder.sh) is a Claude Code `PostToolUse` hook that interrupts your agent after offensive commands (NetExec, impacket, certipy, evil-winrm, `ssh user@…`, …) to remind it to record the result. It needs `jq`, the install steps are in the script header, and it's Claude Code only. It's a nudge — it records nothing, and it does not fire after plain nmap or web scans.
+Every tool has a terminal mirror (`yhwach status`, `yhwach ingest …`) for driving without an agent.
 
 ### Before you rely on it
 
 > [!WARNING]
-> - **Recording can send traffic.** `yhwach_add_cred` immediately tries the new credential against every matching service already in the memory, and an nmap ingest or `yhwach_scan` re-tests stored credentials against new services — real authentication attempts. Know the lockout policy before recording passwords, and stay within your authorised scope.
-> - **You enforce the scope.** The active tools (`scan`, `enum`, `probe`, `spray`) act on whatever you point them at.
-> - **Secrets are stored and shown in clear** — to the model (`yhwach_creds`) and on the board. The board's `--redact` masks only part of it (see [The board](#the-board--how-you-drive)).
+> **Recording can send traffic.** `yhwach_add_cred` immediately tries the new credential against every matching service already in memory, and an nmap ingest or `yhwach_scan` re-tests stored credentials against newly found services — real authentication attempts. Know the lockout policy before you record passwords, and stay within your authorised scope.
 
 ---
 

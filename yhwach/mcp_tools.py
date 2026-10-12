@@ -1813,6 +1813,29 @@ def tool_submission(db_path: Path | str, lab: str, program: str | None = None,
         return "\n".join(out)
 
 
+def tool_own(db_path: Path | str, lab: str, host: str | None = None,
+             principal: str | None = None) -> str:
+    """Assert ownership of a host or principal won OUT-OF-BAND (a shell, a console,
+    an RDP session yhwach did not originate), so pathfind starts from it. Ownership
+    otherwise comes only from validated access — never an unproven guess. A host is
+    advanced to 'foothold'; a principal is flagged owned (created if unknown).
+    """
+    if not host and not principal:
+        return "pass host= and/or principal= to assert ownership."
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        out: list[str] = []
+        if host:
+            adv, m = yhdb.set_host_stage(conn, eid, host, "foothold",
+                                         note="operator-asserted ownership (yhwach_own)")
+            out.append(f"{host} -> foothold (owned)" if adv else f"{host}: {m}")
+        if principal:
+            yhdb.set_principal_owned(conn, eid, principal)
+            out.append(f"principal '{principal}' marked owned")
+        yhdb.log_event(conn, eid, "own", {"host": host, "principal": principal})
+        return "; ".join(out)
+
+
 def tool_reuse(db_path: Path | str, lab: str) -> str:
     """Derive credential-reuse attack-graph edges from dumped hashes and validated
     access (G2e): CredValidOn (a proven cred links its principal to the host),
@@ -2088,4 +2111,8 @@ TOOL_SPECS = [
      "Derive credential-reuse attack-graph edges from dumped hashes + validated access "
      "(CredValidOn, LocalAdminReuse as a star, SameHash). Idempotent; run after spraying "
      "provided creds or ingesting a secretsdump, then yhwach_paths. The fleet-lateral path."),
+    ("yhwach_own", tool_own,
+     "Assert ownership of a host or principal won OUT-OF-BAND (a shell/console yhwach "
+     "didn't originate), so pathfind starts from it. host= advances to foothold; "
+     "principal= flags it owned. Ownership otherwise comes only from validated access."),
 ]

@@ -47,16 +47,30 @@ class ObjectivePath:
 
 
 def owned_nodes(conn: sqlite3.Connection, engagement_id: int) -> list[str]:
-    """Nodes we control: principals whose name matches a held credential, plus
-    hosts at an owned FSM stage. These are the BFS sources."""
-    nodes: list[str] = []
+    """Nodes we actually control — the BFS sources. Honest ownership (I46):
+
+    A principal is owned only when its credential is PROVEN — validated against a
+    host, OR client-provided (assumed breach) — never merely held as an unproven
+    guess. Operator-asserted ownership (yhwach_own, principal.owned=1) also counts,
+    for access won out-of-band that yhwach cannot observe. Hosts count at an owned
+    FSM stage.
+    """
+    pids: set[int] = set()
     for r in conn.execute(
         "SELECT DISTINCT p.id FROM principal p JOIN credential c "
         "ON LOWER(c.identifier)=LOWER(p.name) "
-        "WHERE p.engagement_id=? AND c.engagement_id=? ORDER BY p.id",
+        "WHERE p.engagement_id=? AND c.engagement_id=? "
+        "AND (c.validated_on_host_id IS NOT NULL OR c.provenance='provided') "
+        "AND COALESCE(c.provenance,'discovered') != 'guess' ORDER BY p.id",
         (engagement_id, engagement_id),
     ).fetchall():
-        nodes.append(f"principal:{r['id']}")
+        pids.add(int(r["id"]))
+    for r in conn.execute(
+        "SELECT id FROM principal WHERE engagement_id=? AND COALESCE(owned,0)=1",
+        (engagement_id,),
+    ).fetchall():
+        pids.add(int(r["id"]))
+    nodes = [f"principal:{pid}" for pid in sorted(pids)]
     placeholders = ",".join("?" * len(OWNED_STAGES))
     for r in conn.execute(
         f"SELECT id FROM host WHERE engagement_id=? AND stage IN ({placeholders}) ORDER BY id",

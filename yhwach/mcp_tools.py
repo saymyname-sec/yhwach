@@ -1380,7 +1380,8 @@ def tool_add_loot(db_path: Path | str, lab: str, summary: str, host: str | None 
 def tool_poc_step(db_path: Path | str, lab: str, objective: str, title: str,
                   command: str = "", output: str = "", script_content: str = "",
                   script_name: str = "", cve: str | None = None,
-                  source: str | None = None, host: str | None = None) -> str:
+                  source: str | None = None, host: str | None = None,
+                  finding: int | None = None) -> str:
     """Append one reproducible step to a PoC kill-chain (how to recreate it).
 
     `objective` groups steps into one chain (e.g. 'n8n-intake-rce'). Record the
@@ -1399,17 +1400,20 @@ def tool_poc_step(db_path: Path | str, lab: str, objective: str, title: str,
                 db_path, objective, script_name or "payload.txt", script_content))
         seq = pocmod.add_step(conn, eid, objective, title=title, command=command,
                               output=output, script_path=script_path, cve=cve,
-                              source=source, host=host)
+                              source=source, host=host, finding_id=finding)
     tail = f" [script: {script_path}]" if script_path else ""
     return f"PoC '{pocmod.slug(objective)}' step #{seq} recorded: {title}{tail}"
 
 
-def tool_poc(db_path: Path | str, lab: str, objective: str | None = None) -> str:
+def tool_poc(db_path: Path | str, lab: str, objective: str | None = None,
+             redact: bool = False) -> str:
     """Render a reproducible PoC chain (chains/<objective>.md), or list objectives.
 
     With `objective`, returns the full copy-paste kill-chain (every command,
     output, script, CVE/source) and writes it to chains/<objective>.md. Without
-    it, lists the recorded objectives and their step counts.
+    it, lists the recorded objectives and their step counts. `redact=True` returns
+    the submission template — vault secrets masked to [REDACTED], safe to paste
+    into a bounty/client report — and is not written to disk.
     """
     from yhwach import poc as pocmod
     with yhdb.transaction(db_path) as conn:
@@ -1419,7 +1423,8 @@ def tool_poc(db_path: Path | str, lab: str, objective: str | None = None) -> str
             if not objs:
                 return "No PoC steps recorded yet. Use yhwach_poc_step."
             return "PoC objectives:\n" + "\n".join(f"  {lbl} ({n} step(s))" for lbl, n in objs)
-        return pocmod.render_poc(conn, eid, objective, lab=lab, write=True, db_path=db_path)
+        return pocmod.render_poc(conn, eid, objective, lab=lab, write=not redact,
+                                 db_path=db_path, redact=redact)
 
 
 def tool_set_host(db_path: Path | str, lab: str, host: str,

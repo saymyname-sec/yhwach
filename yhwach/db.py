@@ -30,7 +30,7 @@ from yhwach import data_path, persona_path, schema_sql_path
 # Bumped when the additive self-heal below gains a column/table. Stamped into
 # PRAGMA user_version so a future rebuild-style migration (e.g. relaxing a NOT
 # NULL) has a version anchor to branch on. The additive path stays idempotent.
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 _ADDED_COLUMNS = [
     ("finding", "tag", "TEXT"),
@@ -577,6 +577,17 @@ _ADDED_TABLES = {
         "  at TEXT NOT NULL,"
         "  UNIQUE(host_id, key))"
     ),
+    "authz": (
+        "CREATE TABLE IF NOT EXISTS authz ("
+        "  id INTEGER PRIMARY KEY,"
+        "  engagement_id INTEGER NOT NULL REFERENCES engagement(id),"
+        "  session TEXT NOT NULL,"
+        "  endpoint TEXT NOT NULL,"
+        "  method TEXT NOT NULL,"
+        "  status INTEGER,"
+        "  at TEXT NOT NULL,"
+        "  UNIQUE(engagement_id, session, endpoint, method))"
+    ),
 }
 
 
@@ -610,6 +621,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_plant_eng ON plant(engagement_id)",
         "CREATE INDEX IF NOT EXISTS idx_plant_sighting_plant ON plant_sighting(plant_id)",
         "CREATE INDEX IF NOT EXISTS idx_host_fact_host ON host_fact(host_id)",
+        "CREATE INDEX IF NOT EXISTS idx_authz_eng ON authz(engagement_id)",
     ):
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(ddl)
@@ -2738,6 +2750,39 @@ def add_domain_fact(
         (engagement_id, domain, key, value, source, _now_utc()),
     )
     return int(cur.lastrowid)
+
+
+def record_authz(conn: sqlite3.Connection, engagement_id: int, *, session: str,
+                 endpoint: str, method: str, status: int | None) -> None:
+    """Record a (role, endpoint, method) -> status observation. A 2xx ever seen
+    wins (the role reached it); otherwise the latest status is kept."""
+    conn.execute(
+        "INSERT INTO authz (engagement_id, session, endpoint, method, status, at) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(engagement_id, session, endpoint, method) DO UPDATE SET "
+        "status = CASE WHEN excluded.status BETWEEN 200 AND 299 THEN excluded.status "
+        "WHEN authz.status BETWEEN 200 AND 299 THEN authz.status ELSE excluded.status END, "
+        "at = excluded.at",
+        (engagement_id, session, endpoint, method, status, _now_utc()))
+
+
+def authz_matrix(conn: sqlite3.Connection, engagement_id: int) -> dict:
+    """The role-by-endpoint matrix. Returns {sessions, rows[(endpoint,method)],
+    cells{(ep_method, session): status}}. A missing cell is UNOBSERVED."""
+    rows = conn.execute(
+        "SELECT session, endpoint, method, status FROM authz WHERE engagement_id = ? "
+        "ORDER BY endpoint, method, session", (engagement_id,)).fetchall()
+    sessions, eps, cells = [], [], {}
+    for r in rows:
+        ep = f"{r['method']} {r['endpoint']}"
+        if r["session"] not in sessions:
+            sessions.append(r["session"])
+        if ep not in eps:
+            eps.append(ep)
+        cells[(ep, r["session"])] = r["status"]
+    # 'unassigned' sorts last; otherwise alphabetical for stable output.
+    sessions.sort(key=lambda s: (s == "unassigned", s))
+    return {"sessions": sessions, "rows": eps, "cells": cells}
 
 
 def add_host_fact(

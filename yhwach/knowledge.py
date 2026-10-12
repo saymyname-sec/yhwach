@@ -53,7 +53,8 @@ _RISK_NORMALIZE = {
 # `stage:` is the FSM gate for post-foothold rules (e.g. pivots) — it matches
 # hosts by their `host.stage` value (foothold|looted|pivoted|…) without
 # requiring the operator to invent a `findings_include` tag for it.
-SUPPORTED_WHEN_KEYS = {"surface", "auth", "product", "os", "stage", "findings_include", "vault"}
+SUPPORTED_WHEN_KEYS = {"surface", "auth", "product", "os", "stage", "findings_include", "vault",
+                       "cloud_tenant_in_scope"}
 
 
 class KnowledgeError(ValueError):
@@ -304,10 +305,18 @@ def candidates_for(
     consumed = set() if include_consumed else _consumed_technique_ids(conn, engagement_id)
     denylisted = _denylisted_host_ids(conn, engagement_id)
 
+    tenant_ok: bool | None = None  # computed once, lazily
     out: list[Candidate] = []
     for tech in techniques:
         if set(tech.when) - SUPPORTED_WHEN_KEYS:
             continue  # forward-compat: unknown when-key, skip
+        # Gate exploit-class cloud rules behind a confirmed in-scope tenant (I33):
+        # an additive precondition on top of the rule's primary matcher.
+        if tech.when.get("cloud_tenant_in_scope"):
+            if tenant_ok is None:
+                tenant_ok = _cloud_tenant_in_scope(conn, engagement_id)
+            if not tenant_ok:
+                continue
         if tech.technique in consumed or tech.id in consumed:
             continue
         for row in _match_targets(conn, engagement_id, tech, host_ip=host_ip):
@@ -315,6 +324,20 @@ def candidates_for(
                 continue
             out.append(_to_candidate(tech, row))
     return out
+
+
+def _cloud_tenant_in_scope(conn: sqlite3.Connection, engagement_id: int) -> bool:
+    """True when the engagement's cloud tenant is confirmed in scope: a 'cloud'
+    engagement kind, or a domain_fact flag set (e.g. by an aws sts ingest). Gates
+    the exploit-class Entra/hybrid rules so they never fire on a pure on-prem AD
+    assessment that merely observed the Azure AD Connect account."""
+    row = conn.execute("SELECT kind FROM engagement WHERE id = ?", (engagement_id,)).fetchone()
+    if row and (row["kind"] or "").lower() == "cloud":
+        return True
+    f = conn.execute(
+        "SELECT value FROM domain_fact WHERE engagement_id = ? AND key = 'cloud_tenant_in_scope'",
+        (engagement_id,)).fetchone()
+    return bool(f and str(f["value"]).strip().lower() in ("1", "true", "yes"))
 
 
 def _match_targets(

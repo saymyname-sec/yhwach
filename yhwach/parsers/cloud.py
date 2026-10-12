@@ -34,6 +34,9 @@ def parse_aws_sts(text: str) -> CloudResult:
     account = d.get("Account") or d.get("account")
     if arn:
         res.facts["aws_identity"] = arn
+        # Authenticating to the account confirms the cloud tenant is in scope,
+        # which ungated the exploit-class cloud/Entra rules (I33).
+        res.facts["cloud_tenant_in_scope"] = "true"
         if account:
             res.facts["aws_account"] = str(account)
         res.findings.append(ExtractedFinding(

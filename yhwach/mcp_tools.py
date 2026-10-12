@@ -2189,6 +2189,29 @@ def tool_own(db_path: Path | str, lab: str, host: str | None = None,
         return "; ".join(out)
 
 
+def tool_methodology(db_path: Path | str, lab: str, host: str) -> str:
+    """Per-asset methodology matrix (I35) for one host: each AD checklist item is
+    PRESENT (weakness found), CHECKED (enumerated, not vulnerable) or UNKNOWN (no
+    evidence — enumerate it). State is DERIVED from host_fact/domain_fact, never
+    operator-typed, so UNKNOWN honestly means 'not yet checked'.
+    """
+    from yhwach import methodology as meth
+
+    with yhdb.transaction(db_path) as conn:
+        eid = _eng(conn, lab)
+        hrow = conn.execute("SELECT id FROM host WHERE engagement_id=? AND ip=?",
+                            (eid, host)).fetchone()
+        if hrow is None:
+            raise ValueError(f"host {host} not found")
+        matrix = meth.methodology_for_host(conn, eid, int(hrow["id"]))
+        counts = meth.coverage_counts(matrix)
+    lines = [f"methodology — {host}: {counts['PRESENT']} present, {counts['CHECKED']} checked, "
+             f"{counts['UNKNOWN']} unknown"]
+    lines += [f"  [{r['state']:<7}] {r['label']}"
+              + (f" ({r['value']})" if r["value"] is not None else "") for r in matrix]
+    return "\n".join(lines)
+
+
 def tool_plant(db_path: Path | str, lab: str, location: str | None = None,
                payload: str | None = None, kind: str | None = None,
                sight: int | None = None, context: str | None = None,
@@ -2597,6 +2620,10 @@ TOOL_SPECS = [
      "Bounty submission memory. endpoint/finding/program records a submission and returns a "
      "duplicate-risk advisory (same endpoint+param, or same class program-wide); otherwise "
      "lists. Advisory only — never changes a finding's status or recall order."),
+    ("yhwach_methodology", tool_methodology,
+     "Per-host methodology matrix (I35): each AD checklist item is PRESENT / "
+     "CHECKED / UNKNOWN, derived from host_fact + domain_fact (never typed). "
+     "UNKNOWN means not yet enumerated — the gaps to close."),
     ("yhwach_plant", tool_plant,
      "Indirect-injection plant tracker. location+payload records a plant and "
      "returns a NEUTRAL canary to embed; sight=<id> records the canary firing; "

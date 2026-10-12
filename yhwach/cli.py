@@ -350,6 +350,21 @@ def plant(lab: str, location: str | None, payload: str | None, kind: str | None,
                           kind=kind, sight=sight, context=context, remove=remove))
 
 
+@main.command()
+@click.option("--lab", required=True, help="Lab name.")
+@click.option("--host", required=True, help="Host IP to evaluate.")
+@click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
+def methodology(lab: str, host: str, db_path: str | None) -> None:
+    """Per-host methodology matrix: PRESENT / CHECKED / UNKNOWN (I35)."""
+    from yhwach.mcp_tools import tool_methodology
+
+    try:
+        click.echo(tool_methodology(_db_path(db_path), lab, host))
+    except ValueError as e:
+        click.echo(f"[!] {e}", err=True)
+        sys.exit(2)
+
+
 @main.command(name="ai-tool")
 @click.option("--lab", required=True, help="Lab name.")
 @click.option("--name", default=None, help="Agent tool name; omit to list.")

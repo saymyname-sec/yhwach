@@ -185,6 +185,10 @@ def query(
     out_cols = list(v.cols) if not fields else [f for f in fields if f in v.cols]
     if fields and not out_cols:
         raise ValueError(f"no known fields for view '{view}' (cols: {', '.join(v.cols)})")
+    # Every row carries its id so a follow-up call can act on it, even when the
+    # caller narrows fields (I62).
+    if "id" in v.cols and "id" not in out_cols:
+        out_cols.insert(0, "id")
 
     sel = ", ".join(f"{v.cols[c]} AS \"{c}\"" for c in out_cols)
     clauses = [v.scope]
@@ -248,6 +252,32 @@ def _mask_row(row: sqlite3.Row, cols: list[str], masked: list[str]) -> dict:
     return d
 
 
+def _row_dict(r, cols: list[str]) -> dict:
+    # Always project to exactly `cols` (a masked row is already a dict; a Row is
+    # keyed) so the envelope never leaks a column the caller did not ask for.
+    return {c: r[c] for c in cols}
+
+
+def _next_call(view: str, next_offset: int, *, fmt: str) -> str:
+    """The exact follow-up call to fetch the next page (a real tool parameter,
+    never an opaque cursor)."""
+    extra = ", fmt='json'" if fmt == "json" else ""
+    return f"yhwach_query(view='{view}', offset={next_offset}{extra})"
+
+
+def envelope(cols: list[str], rows, total: int, view: str,
+             limit: int, offset: int, *, fmt: str = "text") -> dict:
+    """The structured result: stable shape, paging, and the exact next call."""
+    dict_rows = [_row_dict(r, cols) for r in rows]
+    shown = offset + len(dict_rows)
+    nxt = _next_call(view, shown, fmt=fmt) if total > shown else None
+    return {
+        "view": view, "total": int(total), "offset": int(offset),
+        "limit": int(limit), "count": len(dict_rows), "truncated": False,
+        "rows": dict_rows, "next": nxt,
+    }
+
+
 def render(cols: list[str], rows, total: int, view: str, limit: int, offset: int) -> str:
     """Compact text rendering for the MCP/CLI text surface."""
     if not rows:
@@ -255,10 +285,68 @@ def render(cols: list[str], rows, total: int, view: str, limit: int, offset: int
     head = " | ".join(cols)
     lines = [head, "-" * len(head)]
     for r in rows:
-        d = {c: r[c] for c in cols} if isinstance(r, sqlite3.Row) else r
+        d = _row_dict(r, cols)
         lines.append(" | ".join("" if d.get(c) is None else str(d.get(c)) for c in cols))
     shown = offset + len(rows)
     if total > shown:
         lines.append(f"… showing {offset + 1}-{shown} of {total} — "
-                     f"query(view='{view}', offset={shown})")
+                     f"{_next_call(view, shown, fmt='text')}")
     return "\n".join(lines)
+
+
+def _render_json(env: dict, max_chars: int | None) -> str:
+    import json
+
+    def dump(e: dict) -> str:
+        return json.dumps(e, indent=2, default=str)
+
+    out = dump(env)
+    # Measure the SAME string that is returned (indented), so the cap is honored.
+    if max_chars is None or len(out) <= max_chars:
+        return out
+    # Drop trailing rows until the envelope fits; the follow-up resumes after
+    # what survived, so nothing is skipped silently.
+    rows = list(env["rows"])
+    while rows:
+        rows.pop()
+        trial = {**env, "rows": rows, "count": len(rows), "truncated": True,
+                 "next": _next_call(env["view"], env["offset"] + len(rows), fmt="json")}
+        out = dump(trial)
+        if len(out) <= max_chars:
+            return out
+    # Not even one row fits: report the cap honestly rather than lying with rows.
+    empty = {**env, "rows": [], "count": 0, "truncated": True,
+             "next": _next_call(env["view"], env["offset"], fmt="json")}
+    return dump(empty)
+
+
+def _render_text_capped(cols, rows, total, view, limit, offset, max_chars: int) -> str:
+    out = render(cols, rows, total, view, limit, offset)
+    if len(out) <= max_chars:
+        return out
+    kept = list(rows)
+    while kept:
+        kept.pop()
+        shown = offset + len(kept)
+        body = render(cols, kept, total, view, limit, offset) if kept else f"{view}: (capped)"
+        footer = (f"… output capped at {max_chars} chars; showing "
+                  f"{len(kept)} of {total} — {_next_call(view, shown, fmt='text')}")
+        trial = f"{body}\n{footer}"
+        if len(trial) <= max_chars or not kept:
+            return trial
+    return out
+
+
+def format_result(cols: list[str], rows, total: int, view: str, limit: int,
+                  offset: int, *, fmt: str = "text", max_chars: int | None = None) -> str:
+    """Render a view result as text (default) or a JSON envelope, bounded by
+    max_chars. Truncation drops trailing rows and the `next` call resumes exactly
+    after what survived — never an opaque cursor, never a silent gap."""
+    if fmt == "json":
+        return _render_json(envelope(cols, rows, total, view, limit, offset, fmt="json"),
+                            max_chars)
+    if fmt != "text":
+        raise ValueError(f"unknown fmt '{fmt}' — use 'text' or 'json'")
+    if max_chars is not None:
+        return _render_text_capped(cols, rows, total, view, limit, offset, max_chars)
+    return render(cols, rows, total, view, limit, offset)

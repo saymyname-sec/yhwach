@@ -1572,7 +1572,8 @@ def tool_schema(db_path: Path | str, tool: str | None = None) -> str:
 def tool_query(db_path: Path | str, lab: str, view: str,
                where: dict | None = None, q: str | None = None,
                fields: list | None = None, order: str | None = None,
-               limit: int = 25, offset: int = 0, reveal: bool = False) -> str:
+               limit: int = 25, offset: int = 0, reveal: bool = False,
+               fmt: str = "text", max_chars: int | None = None) -> str:
     """Query a named read view of the world model (read-only, no traffic).
 
     views: hosts, services, surfaces, findings, creds, principals, shares, loot,
@@ -1580,7 +1581,12 @@ def tool_query(db_path: Path | str, lab: str, view: str,
     probe_runs. `where` filters by column with an operator in the key, e.g.
     {"port": 445}, {"severity in": ["high","critical"]}, {"at>=": "2026-10-11T14:00Z"},
     {"validated_on is_null": true}. `q` is a substring search across the view's
-    text columns. Secrets are masked unless reveal=true.
+    text columns. Secrets are masked unless reveal=true. Every row carries an id.
+
+    Paging is explicit: raise `offset` by the shown count to get the next page —
+    the footer (or the JSON `next`) prints the exact follow-up call. `fmt='json'`
+    returns a structured envelope {view,total,offset,limit,count,rows,next};
+    `max_chars` caps the output, dropping trailing rows and resuming after them.
     """
     from yhwach import views as yhviews
 
@@ -1589,7 +1595,8 @@ def tool_query(db_path: Path | str, lab: str, view: str,
         cols, rows, total = yhviews.query(
             conn, eid, view, where=where, q=q, fields=fields, order=order,
             limit=limit, offset=offset, reveal=reveal)
-        return yhviews.render(cols, rows, total, view, limit, offset)
+        return yhviews.format_result(cols, rows, total, view, limit, offset,
+                                     fmt=fmt, max_chars=max_chars)
 
 
 def tool_attempt(db_path: Path | str, lab: str, rule: str, result: str,

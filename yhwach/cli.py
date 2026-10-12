@@ -163,12 +163,20 @@ def disarm(lab: str, db_path: str | None) -> None:
 @click.option("--limit", default=25, show_default=True, type=int)
 @click.option("--offset", default=0, show_default=True, type=int)
 @click.option("--reveal", is_flag=True, default=False, help="Show masked secrets in full.")
+@click.option("--fmt", type=click.Choice(["text", "json"]), default="text", show_default=True,
+              help="Output format.")
+@click.option("--json", "as_json", is_flag=True, default=False, help="Shortcut for --fmt json.")
+@click.option("--max-chars", "max_chars", default=None, type=int,
+              help="Cap output size; drops trailing rows and prints the next call.")
 @click.option("--db", "db_path", default=None, type=click.Path(), help="Override DB path.")
 def query(lab: str, view: str, wheres: tuple, search: str | None, fields: tuple,
           order: str | None, limit: int, offset: int, reveal: bool,
-          db_path: str | None) -> None:
+          fmt: str, as_json: bool, max_chars: int | None, db_path: str | None) -> None:
     """Query a named read view of the world model (read-only)."""
     from yhwach import views as yhviews
+
+    if as_json:
+        fmt = "json"
 
     where: dict = {}
     for tok in wheres:
@@ -200,7 +208,8 @@ def query(lab: str, view: str, wheres: tuple, search: str | None, fields: tuple,
                 conn, eid, view, where=where or None, q=search,
                 fields=list(fields) or None, order=order, limit=limit,
                 offset=offset, reveal=reveal)
-            click.echo(yhviews.render(cols, rows, total, view, limit, offset))
+            click.echo(yhviews.format_result(cols, rows, total, view, limit,
+                                             offset, fmt=fmt, max_chars=max_chars))
     except ValueError as e:
         click.echo(f"[!] {e}", err=True)
         sys.exit(2)

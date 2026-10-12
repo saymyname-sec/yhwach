@@ -248,6 +248,19 @@ def action(lab: str, action_id: str, host_ip: str | None, port: int | None,
         sys.exit(2)
 
 
+@main.command()
+@click.argument("tool", required=False)
+def schema(tool: str | None) -> None:
+    """Discover the tool surface: args, examples, query views and operators.
+
+    No argument lists every tool; TOOL='yhwach_<name>' shows one tool's args and
+    an example. Pure discovery — reads nothing, needs no lab.
+    """
+    from yhwach.mcp_tools import tool_schema
+
+    click.echo(tool_schema(None, tool=tool))
+
+
 @main.command(name="finding-set")
 @click.option("--lab", required=True, help="Lab name.")
 @click.option("--id", "finding_id", required=True, type=int, help="Finding id.")
@@ -1817,6 +1830,15 @@ def doctor(lab: str | None, hexstrike_url: str | None, db_path: str | None) -> N
             check(False, "DB opens", str(exc))
     else:
         note("DB absent", f"{path} — run `yhwach engage` to create it")
+
+    # -- DB file permissions (POSIX; the DB holds creds in the clear) --------
+    if os.name == "posix":
+        insecure = yhdb.perms_insecure(path)
+        check(not insecure, "DB permissions owner-only (0600/0700)",
+              ("group/world-accessible: " + ", ".join(insecure)
+               + " — run `chmod 600`/`700`") if insecure else "")
+    else:
+        note("DB permissions", "not enforced on this platform (Linux only)")
 
     # -- technique catalog ---------------------------------------------------
     try:

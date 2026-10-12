@@ -52,13 +52,18 @@ def build_server():
                 return f"[yhwach error] {e}"
         return wrapper
 
+    from yhwach import vocab
+
     for name, fn, desc in TOOL_SPECS:
+        # FastMCP only forwards this description string to the model, so enrich it
+        # with generated args:/example: lines from the tool's own signature (I61).
+        full = vocab.describe(name, fn, desc)
         wrapper = _make(fn)
         wrapper.__name__ = name
-        wrapper.__doc__ = desc
+        wrapper.__doc__ = full
         # FastMCP infers the schema from the wrapped signature; we keep args as
         # explicit kwargs via functools.partial-style binding below.
-        server.tool(name=name, description=desc)(_bind_signature(fn, wrapper))
+        server.tool(name=name, description=full)(_bind_signature(fn, wrapper))
 
     return server
 

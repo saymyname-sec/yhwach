@@ -1556,6 +1556,19 @@ def tool_action(db_path: Path | str, lab: str, action_id: str,
     return "\n".join(out)
 
 
+def tool_schema(db_path: Path | str, tool: str | None = None) -> str:
+    """Discover the tool surface: argument meanings and a runnable example.
+
+    No `tool` lists every yhwach tool, the yhwach_query views and operators, and
+    the shared argument vocabulary. With `tool='yhwach_<name>'` it returns that
+    one tool's args and an example call. Pure discovery — reads nothing, needs no
+    lab. Call it when unsure what an argument means or what a view is named.
+    """
+    from yhwach import vocab
+
+    return vocab.catalog(TOOL_SPECS, tool=tool)
+
+
 def tool_query(db_path: Path | str, lab: str, view: str,
                where: dict | None = None, q: str | None = None,
                fields: list | None = None, order: str | None = None,
@@ -1688,7 +1701,9 @@ TOOL_SPECS = [
      "(DMZ host with a NIC into an internal subnet); the basis of the pivot tree."),
     ("yhwach_tag", tool_tag,
      "Tag a host with a free-form label (dc | ai-target | domain-admin | dual-homed | "
-     "tier0 | dead-end | loot-here | ...), orthogonal to its FSM stage."),
+     "tier0 | dead-end | loot-here | ...), orthogonal to its FSM stage. NOTE: a tag is "
+     "an operator label for filtering/notes — it does NOT unlock recall rules. Only typed "
+     "facts (findings, surfaces, creds) light up yhwach_next; tagging 'dc' changes nothing."),
     ("yhwach_untag", tool_untag, "Remove a free-form tag from a host."),
     ("yhwach_scope", tool_scope,
      "Manage the typed engagement scope: list|add|exclude|remove|check (no traffic). "
@@ -1776,4 +1791,8 @@ TOOL_SPECS = [
     ("yhwach_export_notes", tool_export_notes,
      "Auto-scaffold the Obsidian notebook (standing notes + per-host) from the world "
      "model; operator syncs the tree into the vault via the Obsidian MCP."),
+    ("yhwach_schema", tool_schema,
+     "Discover the tool surface: no arg lists every tool, the yhwach_query views and "
+     "operators, and what each argument means; tool='yhwach_<name>' returns that tool's "
+     "args + a runnable example. Pure discovery — call it when unsure of an arg or a view."),
 ]

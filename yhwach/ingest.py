@@ -30,6 +30,13 @@ def ingest_netexec(conn: sqlite3.Connection, eng_id: int, host_id: int, text: st
             "UPDATE host SET hostname = COALESCE(?, hostname), os = COALESCE(?, os) WHERE id = ?",
             (res.hostname, _os_class(res.os), host_id),
         )
+    # I35 — negative-evidence host_facts so the methodology matrix leaves UNKNOWN.
+    if res.signing is not None:
+        yhdb.add_host_fact(conn, host_id, "smb_signing",
+                           "true" if res.signing else "false", source="netexec")
+    if res.smbv1 is not None:
+        yhdb.add_host_fact(conn, host_id, "smbv1",
+                           "true" if res.smbv1 else "false", source="netexec")
     for sh in res.shares:
         yhdb.add_share(conn, host_id, sh.name, access=sh.access, remark=sh.remark,
                        source="netexec")

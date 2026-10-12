@@ -6,9 +6,6 @@
 
 Yhwach is the **memory** for that work. It keeps the whole engagement as **structured data in SQLite** — every host, service, surface, credential, finding, pivot and objective is a typed row — and hands it back to you and your AI agent on demand: what you can reach, what you hold, what is still unexplored, which techniques apply right now, and where the shortest path to your objective runs.
 
-> Named after Yhwach, who sees every possible future. This shows you every option — you pick one.
-
-
 
 ## How it works
 
@@ -24,6 +21,7 @@ Inside yhwach:
 - **Knowledge** — a **recall menu** of ~170 playbook technique rules (`playbooks/*.yaml`) that lists *every* technique matching the current state of a host, so the model picks from a complete menu instead of remembering one. Chaining (a finding unlocking the next technique) and safety tiers (read-only vs. gated) are deterministic, never left to the model.
 - **Offline references** — `yhwach_ref` packs: **curated offline subsets** of default creds, AD CS ESC1–16, GTFOBins, LOLBAS and WADComs, plus lessons, the service matrix, the chaining-tag registry, AI-attack chains (OWASP-LLM / ATLAS-mapped) and a tooling index (`yhwach_ref arsenal`). Plus an offline version→CVE map (`yhwach_vulns`). These are subsets — **a miss is not proof that no abuse or CVE exists.**
 - **Completeness checks** — `yhwach_gaps` / `yhwach_coverage` name every host that was never fully port-scanned, version-scanned or UDP-swept, and every probed surface of a known service kind that has no finding or attempt yet. Run `yhwach_probe` on a host first so its surfaces are known.
+- **UI** - As an our board of what is stored inside yhwach.
 
 ---
 
@@ -33,6 +31,16 @@ Inside yhwach:
 - **An MCP client**: [Claude Code](https://docs.claude.com/en/docs/claude-code) or [Codex CLI](https://github.com/openai/codex). **Yhwach itself needs no API key.**
 - **Your usual toolset on `PATH`** (Kali works well): nmap, NetExec, impacket, BloodHound / SharpHound, certipy, … Yhwach records and recalls; it does not replace these tools, and it **ships no offensive binaries** — [`arsenal.manifest.yaml`](arsenal.manifest.yaml) only names and links the tools its playbooks mention, so you can fetch and vet them yourself.
 - *Optional:* [HexStrike](https://github.com/0x4m4/hexstrike-ai) bound to loopback, as a delegated enumeration backend.
+
+---
+## How to work with yhwach
+
+After setting up your Kali linux with Claude/Codex, adding yhwach as MCP we calling yhwach just by prompting. Yhwach is not just memory, it containt playbook's from CTF's, challenge's, machine's that it was working with. Simply start engagement prompt like this when you startin CTF, Labolatory, Pentest etc.:
+
+```
+Analyze how to work wit yhwach mcp and start engagement of <Lab Name>. Start also UI to let me see how's work going. We will work on Web app pentesting(Or AD pentesting etc.). We are going to start from feeding you with data from nmaps. After ingesting info wait for next instrucitons.
+```
+
 
 ---
 

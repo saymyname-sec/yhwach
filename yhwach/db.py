@@ -1771,7 +1771,7 @@ def all_services_for_scanned_hosts(
     (which, unlike the AI probes, is not restricted to a fixed port list)."""
     rows = conn.execute(
         "SELECT h.id AS host_id, h.ip AS ip, s.id AS service_id, s.port AS port, "
-        "s.product AS product "
+        "s.proto AS proto, s.product AS product "
         "FROM host h JOIN service s ON s.host_id = h.id "
         "WHERE h.engagement_id = ? AND h.stage IN ('scanned', 'enumerated') "
         "ORDER BY h.ip, s.port",

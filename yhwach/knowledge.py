@@ -116,6 +116,8 @@ class Candidate:
     chained_from: str | None  # the findings_include tag that lit this up, if any
     rationale: str
     action_class: str | None = None  # high-consequence class (push/listener/…) or None
+    emits: tuple[str, ...] = ()  # the action ids this technique runs (frozen -> tuple)
+    port: int | None = None  # the surface's service port, for rendering commands
 
 
 def default_playbook_dir() -> Path:
@@ -213,6 +215,20 @@ def _build_technique(entry: dict, *, source_file: str) -> Technique:
     emits = entry.get("emits", [])
     if not isinstance(emits, list) or not emits:
         raise KnowledgeError(f"technique '{tid}' must have a non-empty emits list")
+    # Normalize each emit to a dict carrying a string `action`. A bare string is
+    # shorthand for {'action': <str>}. An item with no string action would be
+    # silently dropped from Candidate.emits (the recall menu would lose the move
+    # with no error), so reject it loudly instead (I65 regression).
+    norm_emits: list[dict] = []
+    for e in emits:
+        if isinstance(e, str) and e:
+            norm_emits.append({"action": e})
+        elif isinstance(e, dict) and isinstance(e.get("action"), str) and e["action"]:
+            norm_emits.append(e)
+        else:
+            raise KnowledgeError(
+                f"technique '{tid}' has an emits item without a string 'action': {e!r}")
+    emits = norm_emits
 
     when = entry.get("when") or {}
     if not isinstance(when, dict):
@@ -371,7 +387,7 @@ def _match_surfaces(
 
     sql = (
         "SELECT s.id AS surface_id, s.host_id AS host_id, h.ip AS host_ip, "
-        "s.kind AS kind FROM surface s "
+        "s.kind AS kind, svc.port AS port FROM surface s "
         "JOIN host h ON h.id = s.host_id "
         "LEFT JOIN service svc ON svc.id = s.service_id "
         f"WHERE {' AND '.join(clauses)}"
@@ -498,4 +514,6 @@ def _to_candidate(tech: Technique, row: dict) -> Candidate:
         chained_from=chained_from,
         rationale=rationale,
         action_class=tech.action_class,
+        emits=tuple(e.get("action") for e in tech.emits if isinstance(e, dict) and e.get("action")),
+        port=row.get("port"),
     )

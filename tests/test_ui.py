@@ -215,7 +215,7 @@ def test_network_map_shows_ports_and_services(tmp_db: Path) -> None:
     assert "Network map" in r.text
     assert "11434/tcp" in r.text  # the open port
     assert "ollama" in r.text  # the service kind
-    assert "tree of eyes" in r.text and "OPERATOR" in r.text  # pivot-tree render
+    assert "how each subnet was reached" in r.text and "OPERATOR" in r.text  # pivot-tree render
     board = client.get("/panel").text
     assert "Network map" not in board, "the board renders /map's whole body a second time"
     assert "Topology" in board and "the full map" in board

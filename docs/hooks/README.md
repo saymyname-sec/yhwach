@@ -15,6 +15,8 @@ Related, in [`../../scripts/`](../../scripts/): `yhwach-vault-check.py` (the don
 
 Captures a screenshot into `<vault>/<lab>/screenshots/`, saves a `.txt` of the command's output next to it, and prints an Obsidian embed line (`![[file.png]]`) to paste into the chain note. It prints an embed **only for a file that really exists**; if the capture produced nothing it prints `⚠️ SCREENSHOT-MISSING` and exits 1, so a note can never claim a screenshot that isn't there.
 
+> **In a hurry / prepping an exam?** [`screenshots.md`](screenshots.md) is the step-by-step quickstart — setup, the proof format a grader needs, the capture points, and the done-gate.
+
 ### Configure it
 
 **1. Dependencies** — a graphical session plus a capture backend:

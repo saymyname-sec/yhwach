@@ -17,7 +17,7 @@ Kompletny przewodnik przygotowania świeżej maszyny **Kali Linux 2026** do prac
 7. [Arsenał ofensywny](#7-arsena-ofensywny)
 8. [Pre-staged tooling (dostarczane osobno)](#8-pre-staged-tooling-dostarczane-osobno)
 9. [Drzewo `~/osai`](#9-drzewo-osai)
-10. [Hooki Claude Code](#10-hooki-claude-code)
+10. [Skrypt do screenshotów](#10-skrypt-do-screenshotów)
 11. [Konfiguracja MCP](#11-konfiguracja-mcp)
 12. [Obsidian vault (lokalny)](#12-obsidian-vault-lokalny)
 13. [Weryfikacja setupu przez Claude](#13-weryfikacja-setupu-przez-claude)
@@ -280,7 +280,7 @@ Dyscyplina lokalizacji — każdy plik ma swoje miejsce. Nigdy `$HOME` ani `/tmp
 
 ```
 ~/osai/
-├── bin/                      # hooki i helpery (heartbeat, pwn3d-detector, screenshot)
+├── bin/                      # pomocnicze skrypty operatora
 ├── arsenal/                  # pre-staged (CLAUDE.md, enum_playbook, svcmon, revshell gen)
 ├── hexstrike-ai/             # HexStrike server + MCP
 ├── tools/                    # ligolo, chisel, własne skrypty
@@ -324,48 +324,29 @@ mkdir -p ~/ObisidanOSAI
 
 ---
 
-## 10. Hooki Claude Code
+## 10. Skrypt do screenshotów
 
-Automatyka, która przeżywa kompaktowanie kontekstu. Krytyczne dla dyscypliny.
+Jedyny lokalny helper, którego potrzebujesz na egzaminie — reszta dyscypliny jest po stronie Yhwach + operatora, nie hooków Claude Code.
 
-Umieść w `~/.claude/hooks/` i `~/osai/bin/`, a następnie zarejestruj w `~/.claude/settings.json`.
-
-- **`yhwach-sync-reminder.sh`** (PostToolUse) — po każdej komendzie ofensywnej przypomina: `yhwach_cred`, `yhwach_proof`, `yhwach_advance`, update attack-chain. Exit 2 wymusza, żeby model to zobaczył.
-- **`pwn3d-detector.sh`** (PostToolUse na Bash) — grepuje output za `(Pwn3d!)`, `secretsdump success`, `DCSync` itp. — i rzuca interrupt "capture now".
-- **`heartbeat-init.sh` / `heartbeat-tick.sh`** (SessionStart + PostToolUse) — co ~10 min regeneruje `~/ObisidanOSAI/<lab>/_RESUME.md` z Yhwach, żebyś po `/clear` miał natychmiastową rehydrację.
-
-**Konfiguracja hooków w `~/.claude/settings.json`:**
-
-```json
-{
-  "hooks": {
-    "SessionStart": [{
-      "hooks": [{ "type": "command", "command": "/home/kali/osai/bin/heartbeat-init.sh" }]
-    }],
-    "PostToolUse": [
-      {
-        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
-        "hooks": [{ "type": "command", "command": "/home/kali/osai/bin/heartbeat-tick.sh" }]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          { "type": "command", "command": "/home/kali/osai/bin/pwn3d-detector.sh" },
-          { "type": "command", "command": "/home/kali/.claude/hooks/yhwach-sync-reminder.sh" }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Nadaj uprawnienia:
+**`shot.sh`** (dostarczany razem z yhwach repo w `~/yhwach/notekit/shot.sh`) — robi screenshot aktywnego okna i wypala w rogu UTC + local timestamp. Używany przed każdym `yhwach_proof` oraz w milestone'ach (shell na nowym hoście, pierwszy DA, pierwszy pivot).
 
 ```bash
-chmod +x ~/osai/bin/*.sh ~/.claude/hooks/*.sh
+# jednorazowo
+chmod +x ~/yhwach/notekit/shot.sh
+
+# użycie
+~/yhwach/notekit/shot.sh <nazwa>
+# -> ~/osai/current/screenshots/<nazwa>-<utc-ts>.png
 ```
 
-Skrypty hooków są w `~/yhwach/docs/hooks/` — skopiuj je stamtąd.
+Potrzebne pakiety (jeśli brak):
+
+```bash
+sudo apt install -y imagemagick scrot
+pip install Pillow --break-system-packages
+```
+
+Claude wywołuje `shot.sh` automatycznie w punktach wymaganych przez metodologię — nie klikaj screenshotów ręcznie.
 
 ---
 
@@ -480,8 +461,8 @@ Jestem po świeżej instalacji wg docs/setup-pl.md z yhwach repo. Twoje zadanie:
 4. Sprawdź że struktura ~/osai/ zgadza się z docs/setup-pl.md sekcja 9.
 5. Sprawdź że ~/osai/arsenal/ zawiera: CLAUDE.md, enum_playbook.md, svcmon.exe,
    revshell generator (dostarczane osobno).
-6. Zweryfikuj że hooki (~/.claude/hooks/*.sh, ~/osai/bin/*.sh) są wykonywalne
-   i zarejestrowane w ~/.claude/settings.json.
+6. Zweryfikuj że `~/yhwach/notekit/shot.sh` istnieje i jest wykonywalny
+   (`imagemagick`, `scrot`, `Pillow` zainstalowane).
 7. Sprawdź ~/.claude/CLAUDE.md i ~/.claude/Enum_playbook.md.
 8. Czego brakuje — stwórz. Co jest źle skonfigurowane — popraw.
 9. Zrób screenshoty każdego kroku weryfikacji do ~/osai/results/setup-check/.
@@ -494,7 +475,7 @@ Claude Code **sam**:
 - Zrobi `curl` na HexStrike health endpoint.
 - Przeleci strukturę katalogów (`ls`, `test -d`, `test -x`).
 - Sparsuje `~/.claude/settings.json` i `~/.claude.json`.
-- Dla brakujących katalogów — `mkdir -p`. Dla brakujących hooków — pobierze z `~/yhwach/docs/hooks/`.
+- Dla brakujących katalogów — `mkdir -p`.
 - Dla błędnej konfiguracji MCP — poprawi `~/.claude.json`.
 - Dla brakującego arsenału — **zgłosi do Ciebie** (nie dostarczy sam, bo CLAUDE.md/revshell/svcmon są dostarczane osobno).
 - Wywoła `~/yhwach/notekit/shot.sh` do każdego checkpointa.
@@ -580,7 +561,7 @@ Trzymaj `http://127.0.0.1:8799` otwarte przez cały engagement. Co widzisz:
 **Nie klikaj screenshotów ręcznie.** Claude ma dostęp do `~/yhwach/notekit/shot.sh` i wywołuje go w tych punktach, w których musi:
 
 - Przed każdym `yhwach_proof` (bez screenshota operator odmówi gate'owania foothold→looted).
-- Po każdym *(Pwn3d!)* / secretsdump sukcesie (pwn3d-detector hook przypomina).
+- Po każdym *(Pwn3d!)* / secretsdump sukcesie.
 - W checkpointach milestone'ów (shell na nowym hoście, pierwszy DA, pierwszy pivot).
 
 Zadaniem operatora w sekcji **14** jest obserwacja — czy pętla się toczy, czy fold-back się dzieje, czy UI pokazuje nowe atomy. Jeśli coś nie wygląda — przerywasz i promptujesz "zrób `yhwach_recall` i powiedz mi, co jest w attempts".
